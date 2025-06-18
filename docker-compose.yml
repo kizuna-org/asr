@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  build-subscriber:
+    build:
+      context: ./whaled/build
+      dockerfile: Dockerfile
+    environment:
+      - GCP_PROJECT_ID=${GCP_PROJECT_ID}
+      - BUILD_SUBSCRIPTION=${BUILD_SUBSCRIPTION:-build-triggers-sub}
+      - R2_ENDPOINT_URL=${R2_ENDPOINT_URL}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
+      - R2_BUCKET_NAME=${R2_BUCKET_NAME}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials.json
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${GOOGLE_APPLICATION_CREDENTIALS}:/app/credentials.json:ro
+      - /tmp:/tmp
+    restart: unless-stopped
+    depends_on:
+      - app-subscriber
+
+  app-subscriber:
+    build:
+      context: ./whaled/app
+      dockerfile: Dockerfile
+    environment:
+      - GCP_PROJECT_ID=${GCP_PROJECT_ID}
+      - APP_SUBSCRIPTION=${APP_SUBSCRIPTION:-app-triggers-sub}
+      - R2_ENDPOINT_URL=${R2_ENDPOINT_URL}
+      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
+      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
+      - R2_BUCKET_NAME=${R2_BUCKET_NAME}
+      - HF_TOKEN=${HF_TOKEN}
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials.json
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${GOOGLE_APPLICATION_CREDENTIALS}:/app/credentials.json:ro
+    restart: unless-stopped
+
+networks:
+  default:
+    name: whaled-network

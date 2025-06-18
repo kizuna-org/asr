@@ -1,0 +1,50 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  trigger-build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Google Cloud SDK
+      uses: google-github-actions/setup-gcloud@v1
+      with:
+        service_account_key: ${{ secrets.GCP_SA_KEY }}
+        project_id: ${{ secrets.GCP_PROJECT_ID }}
+
+    - name: Generate Job ID
+      id: job-id
+      run: echo "job_id=${{ github.sha }}" >> $GITHUB_OUTPUT
+
+    - name: Publish build trigger to Pub/Sub
+      run: |
+        gcloud pubsub topics publish build-triggers \
+          --message='{
+            "jobId": "${{ steps.job-id.outputs.job_id }}",
+            "repository": "${{ github.repository }}",
+            "ref": "${{ github.ref }}",
+            "sha": "${{ github.sha }}",
+            "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'",
+            "actor": "${{ github.actor }}"
+          }'
+
+    - name: Log trigger sent
+      run: |
+        echo "Build trigger sent for job ID: ${{ steps.job-id.outputs.job_id }}"
+        echo "Repository: ${{ github.repository }}"
+        echo "SHA: ${{ github.sha }}"
