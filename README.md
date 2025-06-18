@@ -20,11 +20,31 @@ GCP Pub/SubとGitHub Actionsを活用したイベント駆動型CI/CDシステ�
 
 ### 1. GCP Pub/Sub の設定
 
+**推奨: Terraformを使用**
+
+```bash
+cd infrastructure/terraform
+cp terraform.tfvars.example terraform.tfvars
+# terraform.tfvarsを編集してproject_idなどを設定
+
+terraform init
+terraform plan
+terraform apply
+```
+
+詳細な手順は [infrastructure/terraform/README.md](infrastructure/terraform/README.md) を参照してください。
+
+<details>
+<summary>⚠️ 非推奨: Bashスクリプトを使用（レガシー）</summary>
+
 ```bash
 cd infrastructure
 chmod +x setup-pubsub.sh
 ./setup-pubsub.sh
 ```
+
+**注意**: このbashスクリプトは非推奨です。新規セットアップではTerraformの使用を強く推奨します。
+</details>
 
 ### 2. GitHub Secrets の設定
 
@@ -126,7 +146,12 @@ sudo systemctl status whaled-build whaled-app
 │   ├── index.html                # ダッシュボードUI
 │   └── dashboard.js
 ├── infrastructure/
-│   ├── setup-pubsub.sh          # Pub/Sub設定スクリプト
+│   ├── terraform/               # Terraform設定（推奨）
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   ├── outputs.tf
+│   │   └── README.md
+│   ├── setup-pubsub.sh          # Pub/Sub設定スクリプト（非推奨）
 │   └── gpu-server-setup.sh      # GPUサーバー設定スクリプト
 ├── docker-compose.yml
 └── README.md

@@ -1,0 +1,13 @@
+# Example Terraform variables file
+# Copy this file to terraform.tfvars and update with your actual values
+
+project_id = "your-project-id"
+region     = "us-central1"
+environment = "prod"
+
+# Optional: Override default names if needed
+# build_topic_name = "build-triggers"
+# app_topic_name = "app-triggers"
+# build_subscription_name = "build-triggers-sub"
+# app_subscription_name = "app-triggers-sub"
+# service_account_name = "github-actions-cicd"

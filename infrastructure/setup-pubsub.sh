@@ -1,5 +1,22 @@
 #!/bin/bash
 # Setup GCP Pub/Sub topics and subscriptions for CI/CD pipeline
+# 
+# ⚠️  DEPRECATED: This script is deprecated in favor of Terraform configuration.
+# Please use the Terraform configuration in infrastructure/terraform/ instead.
+# See infrastructure/terraform/README.md for migration instructions.
+#
+# This script will be removed in a future version.
+
+echo "⚠️  WARNING: This script is DEPRECATED!"
+echo "Please use Terraform configuration in infrastructure/terraform/ instead."
+echo "See infrastructure/terraform/README.md for setup instructions."
+echo ""
+read -p "Do you want to continue with this deprecated script? (y/N): " -n 1 -r
+echo
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "Exiting. Please use Terraform configuration instead."
+    exit 1
+fi
 
 set -e
 
