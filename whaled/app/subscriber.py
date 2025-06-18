@@ -13,6 +13,10 @@ from google.cloud import pubsub_v1
 import boto3
 from botocore.config import Config
 
+# Add the shared directory to the path to import logger
+sys.path.append('/app/shared')
+from logger import StructuredLogger, Component
+
 class AppSubscriber:
     def __init__(self):
         self.project_id = os.environ.get('GCP_PROJECT_ID')
@@ -21,6 +25,9 @@ class AppSubscriber:
         self.subscription_path = self.subscriber.subscription_path(
             self.project_id, self.subscription_name
         )
+        
+        # Initialize structured logger
+        self.logger = StructuredLogger(Component.APP_SUBSCRIBER)
         
         # Cloudflare R2 setup
         self.r2_client = boto3.client(
@@ -40,7 +47,12 @@ class AppSubscriber:
             response = self.r2_client.get_object(Bucket=self.bucket_name, Key=status_key)
             return json.loads(response['Body'].read().decode('utf-8'))
         except Exception as e:
-            print(f"Failed to get current status: {e}")
+            self.logger.error(
+                "Failed to get current status",
+                exception=e,
+                context={"job_id": job_id, "operation": "get_status"},
+                tags=["r2", "status"]
+            )
             return None
 
     def update_status(self, job_id, status_updates):
@@ -49,7 +61,11 @@ class AppSubscriber:
             # Get current status first
             current_status = self.get_current_status(job_id)
             if not current_status:
-                print(f"No existing status found for job {job_id}")
+                self.logger.warn(
+                    "No existing status found for job",
+                    context={"job_id": job_id, "operation": "update_status"},
+                    tags=["r2", "status"]
+                )
                 return
             
             # Update with new data
@@ -63,9 +79,22 @@ class AppSubscriber:
                 Body=json.dumps(current_status, indent=2),
                 ContentType='application/json'
             )
-            print(f"Status updated for job {job_id}")
+            self.logger.info(
+                "Status updated successfully",
+                context={
+                    "job_id": job_id,
+                    "operation": "update_status",
+                    "status_updates": status_updates
+                },
+                tags=["r2", "status"]
+            )
         except Exception as e:
-            print(f"Failed to update status: {e}")
+            self.logger.error(
+                "Failed to update status",
+                exception=e,
+                context={"job_id": job_id, "operation": "update_status"},
+                tags=["r2", "status"]
+            )
 
     def upload_log(self, job_id, log_content, log_type='app'):
         """Upload log content to R2"""
@@ -77,9 +106,27 @@ class AppSubscriber:
                 Body=log_content,
                 ContentType='text/plain'
             )
-            print(f"Log uploaded: {log_key}")
+            self.logger.info(
+                "Log uploaded successfully",
+                context={
+                    "job_id": job_id,
+                    "log_key": log_key,
+                    "log_type": log_type,
+                    "operation": "upload_log"
+                },
+                tags=["r2", "logs"]
+            )
         except Exception as e:
-            print(f"Failed to upload log: {e}")
+            self.logger.error(
+                "Failed to upload log",
+                exception=e,
+                context={
+                    "job_id": job_id,
+                    "log_type": log_type,
+                    "operation": "upload_log"
+                },
+                tags=["r2", "logs"]
+            )
 
     def run_application(self, job_data):
         """Pull image and run application container"""
@@ -120,7 +167,15 @@ class AppSubscriber:
                 --gpus all \
                 {image_uri}"""
             
-            print(f"Running container: {image_uri}")
+            self.logger.info(
+                "Starting container execution",
+                context={
+                    "job_id": job_id,
+                    "image_uri": image_uri,
+                    "operation": "run_container"
+                },
+                tags=["docker", "container"]
+            )
             run_result = subprocess.run(
                 run_cmd,
                 shell=True,
@@ -146,7 +201,15 @@ class AppSubscriber:
             }
             self.update_status(job_id, status_updates)
             
-            print(f"Application execution succeeded for job {job_id}")
+            self.logger.info(
+                "Application execution succeeded",
+                context={
+                    "job_id": job_id,
+                    "image_uri": image_uri,
+                    "operation": "run_application"
+                },
+                tags=["docker", "success"]
+            )
             
         except subprocess.CalledProcessError as e:
             # Update status to failed
@@ -158,24 +221,58 @@ class AppSubscriber:
                 }
             }
             self.update_status(job_id, status_updates)
-            print(f"Application execution failed for job {job_id}: {e}")
+            self.logger.error(
+                "Application execution failed",
+                exception=e,
+                context={
+                    "job_id": job_id,
+                    "image_uri": image_uri,
+                    "operation": "run_application"
+                },
+                tags=["docker", "failure"]
+            )
 
     def callback(self, message):
         """Process incoming Pub/Sub message"""
         try:
             job_data = json.loads(message.data.decode('utf-8'))
-            print(f"Received app execution request: {job_data}")
+            job_id = job_data.get('jobId', 'unknown')
+            
+            # Update logger with job_id for this operation
+            self.logger.job_id = job_id
+            
+            self.logger.info(
+                "Received app execution request",
+                context={
+                    "job_id": job_id,
+                    "job_data": job_data,
+                    "operation": "message_received"
+                },
+                tags=["pubsub", "message"]
+            )
             
             self.run_application(job_data)
             message.ack()
             
         except Exception as e:
-            print(f"Error processing message: {e}")
+            self.logger.error(
+                "Error processing message",
+                exception=e,
+                context={"operation": "message_processing"},
+                tags=["pubsub", "error"]
+            )
             message.nack()
 
     def start_listening(self):
         """Start listening for Pub/Sub messages"""
-        print(f"Listening for messages on {self.subscription_path}")
+        self.logger.info(
+            "Starting Pub/Sub subscriber",
+            context={
+                "subscription_path": self.subscription_path,
+                "operation": "start_listening"
+            },
+            tags=["pubsub", "startup"]
+        )
         
         flow_control = pubsub_v1.types.FlowControl(max_messages=1)
         
@@ -185,13 +282,21 @@ class AppSubscriber:
             flow_control=flow_control,
         )
         
-        print("Listening for messages...")
+        self.logger.info(
+            "Subscriber is now listening for messages",
+            context={"operation": "listening"},
+            tags=["pubsub", "ready"]
+        )
         
         try:
             streaming_pull_future.result()
         except KeyboardInterrupt:
             streaming_pull_future.cancel()
-            print("Subscriber stopped.")
+            self.logger.info(
+                "Subscriber stopped by user",
+                context={"operation": "shutdown"},
+                tags=["pubsub", "shutdown"]
+            )
 
 if __name__ == "__main__":
     subscriber = AppSubscriber()

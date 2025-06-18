@@ -1,0 +1,119 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CI/CD System Log Schema",
+  "description": "Structured logging schema for the CI/CD system components",
+  "type": "object",
+  "required": ["timestamp", "level", "component", "message"],
+  "properties": {
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp in UTC"
+    },
+    "level": {
+      "type": "string",
+      "enum": ["DEBUG", "INFO", "WARN", "ERROR", "FATAL"],
+      "description": "Log level"
+    },
+    "component": {
+      "type": "string",
+      "enum": ["app", "build_subscriber", "app_subscriber", "github_actions"],
+      "description": "Component that generated the log"
+    },
+    "message": {
+      "type": "string",
+      "description": "Human-readable log message"
+    },
+    "job_id": {
+      "type": "string",
+      "description": "Job ID (commit hash) associated with this log entry"
+    },
+    "context": {
+      "type": "object",
+      "description": "Additional contextual information",
+      "properties": {
+        "operation": {
+          "type": "string",
+          "description": "Current operation being performed"
+        },
+        "step": {
+          "type": "string",
+          "description": "Current step within the operation"
+        },
+        "progress": {
+          "type": "object",
+          "properties": {
+            "current": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "total": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "percentage": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 100
+            }
+          }
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Additional metadata specific to the operation"
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "description": "Error information when level is ERROR or FATAL",
+      "properties": {
+        "type": {
+          "type": "string",
+          "description": "Error type or exception class"
+        },
+        "code": {
+          "type": "string",
+          "description": "Error code"
+        },
+        "details": {
+          "type": "string",
+          "description": "Detailed error message"
+        },
+        "stack_trace": {
+          "type": "string",
+          "description": "Stack trace if available"
+        }
+      }
+    },
+    "performance": {
+      "type": "object",
+      "description": "Performance metrics",
+      "properties": {
+        "duration_ms": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Operation duration in milliseconds"
+        },
+        "memory_usage_mb": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Memory usage in megabytes"
+        },
+        "cpu_usage_percent": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "CPU usage percentage"
+        }
+      }
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Tags for categorizing and filtering logs"
+    }
+  }
+}

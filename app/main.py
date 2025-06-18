@@ -13,11 +13,18 @@ import boto3
 from botocore.config import Config
 from huggingface_hub import HfApi, Repository
 
+# Add the shared directory to the path to import logger
+sys.path.append('/app/shared')
+from logger import StructuredLogger, Component
+
 class Application:
     def __init__(self):
         self.job_id = os.environ.get('JOB_ID')
         if not self.job_id:
             raise ValueError("JOB_ID environment variable is required")
+        
+        # Initialize structured logger
+        self.logger = StructuredLogger(Component.APP, self.job_id)
         
         # Cloudflare R2 setup
         self.r2_client = boto3.client(
@@ -34,12 +41,18 @@ class Application:
         self.hf_token = os.environ.get('HF_TOKEN')
         self.hf_api = HfApi(token=self.hf_token) if self.hf_token else None
 
-    def log_message(self, message):
-        """Log message with timestamp"""
-        timestamp = datetime.utcnow().isoformat() + 'Z'
-        log_entry = f"[{timestamp}] {message}\n"
-        print(log_entry.strip())
-        return log_entry
+    def log_message(self, message, level="info", context=None, tags=None):
+        """Log message using structured logger"""
+        if level == "info":
+            return self.logger.info(message, context=context, tags=tags)
+        elif level == "error":
+            return self.logger.error(message, context=context, tags=tags)
+        elif level == "warn":
+            return self.logger.warn(message, context=context, tags=tags)
+        elif level == "debug":
+            return self.logger.debug(message, context=context, tags=tags)
+        else:
+            return self.logger.info(message, context=context, tags=tags)
 
     def stream_log_to_r2(self, log_content):
         """Stream log content to R2"""
@@ -63,7 +76,12 @@ class Application:
                 ContentType='text/plain'
             )
         except Exception as e:
-            print(f"Failed to stream log to R2: {e}")
+            self.logger.error(
+                "Failed to stream log to R2",
+                exception=e,
+                context={"operation": "stream_log_to_r2"},
+                tags=["r2", "logs"]
+            )
 
     def get_current_status(self):
         """Get current status from R2"""
@@ -72,7 +90,12 @@ class Application:
             response = self.r2_client.get_object(Bucket=self.bucket_name, Key=status_key)
             return json.loads(response['Body'].read().decode('utf-8'))
         except Exception as e:
-            print(f"Failed to get current status: {e}")
+            self.logger.error(
+                "Failed to get current status",
+                exception=e,
+                context={"operation": "get_current_status"},
+                tags=["r2", "status"]
+            )
             return None
 
     def update_status(self, status_updates):
@@ -81,7 +104,11 @@ class Application:
             # Get current status first
             current_status = self.get_current_status()
             if not current_status:
-                print(f"No existing status found for job {self.job_id}")
+                self.logger.warn(
+                    "No existing status found for job",
+                    context={"operation": "update_status"},
+                    tags=["r2", "status"]
+                )
                 return
             
             # Update with new data
@@ -95,9 +122,18 @@ class Application:
                 Body=json.dumps(current_status, indent=2),
                 ContentType='application/json'
             )
-            print(f"Status updated for job {self.job_id}")
+            self.logger.info(
+                "Status updated successfully",
+                context={"operation": "update_status"},
+                tags=["r2", "status"]
+            )
         except Exception as e:
-            print(f"Failed to update status: {e}")
+            self.logger.error(
+                "Failed to update status",
+                exception=e,
+                context={"operation": "update_status"},
+                tags=["r2", "status"]
+            )
 
     def run_task(self):
         """
@@ -227,13 +263,28 @@ class Application:
 
 def main():
     """Main entry point"""
+    logger = None
     try:
         app = Application()
+        logger = app.logger
         app.run_task()
-        print("Application completed successfully")
+        logger.info(
+            "Application completed successfully",
+            context={"operation": "main"},
+            tags=["application", "success"]
+        )
         sys.exit(0)
     except Exception as e:
-        print(f"Application failed: {e}")
+        if logger:
+            logger.fatal(
+                "Application failed",
+                exception=e,
+                context={"operation": "main"},
+                tags=["application", "failure"]
+            )
+        else:
+            # Fallback if logger not initialized
+            print(f"Application failed: {e}")
         sys.exit(1)
 
 if __name__ == "__main__":
