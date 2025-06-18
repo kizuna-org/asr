@@ -12,9 +12,14 @@ import {
 } from 'lucide-react'
 import { formatDistanceToNow, format } from 'date-fns'
 import { ja } from 'date-fns/locale'
+import type { Job } from '../types'
 
-const JobCard = ({ job }) => {
-  const getStatusIcon = (status) => {
+interface JobCardProps {
+  job: Job
+}
+
+const JobCard: React.FC<JobCardProps> = ({ job }) => {
+  const getStatusIcon = (status?: string): JSX.Element => {
     switch (status?.toLowerCase()) {
       case 'succeeded':
       case 'success':
@@ -30,7 +35,7 @@ const JobCard = ({ job }) => {
     }
   }
 
-  const getStatusBadge = (status) => {
+  const getStatusBadge = (status?: string): string => {
     const baseClasses = "status-badge"
     switch (status?.toLowerCase()) {
       case 'succeeded':
@@ -47,7 +52,7 @@ const JobCard = ({ job }) => {
     }
   }
 
-  const formatJobId = (jobId) => {
+  const formatJobId = (jobId: string): string => {
     return jobId?.length > 8 ? `${jobId.substring(0, 8)}...` : jobId
   }
 

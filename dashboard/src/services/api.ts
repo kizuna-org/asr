@@ -1,7 +1,9 @@
 // API service for fetching job data from Cloudflare R2
 // This is a mock implementation - replace with actual R2 integration
 
-const MOCK_JOBS = [
+import type { Job } from '../types'
+
+const MOCK_JOBS: Job[] = [
   {
     jobId: "a1b2c3d4e5f6",
     overallStatus: "Succeeded",

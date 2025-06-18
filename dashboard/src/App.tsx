@@ -5,14 +5,15 @@ import LoadingSpinner from './components/LoadingSpinner'
 import ErrorMessage from './components/ErrorMessage'
 import RefreshButton from './components/RefreshButton'
 import { fetchJobs } from './services/api'
+import type { Job } from './types'
 
-function App() {
-  const [jobs, setJobs] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [lastUpdated, setLastUpdated] = useState(null)
+function App(): JSX.Element {
+  const [jobs, setJobs] = useState<Job[]>([])
+  const [loading, setLoading] = useState<boolean>(true)
+  const [error, setError] = useState<string | null>(null)
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null)
 
-  const loadJobs = async () => {
+  const loadJobs = async (): Promise<void> => {
     try {
       setLoading(true)
       setError(null)
@@ -20,7 +21,7 @@ function App() {
       setJobs(jobsData)
       setLastUpdated(new Date())
     } catch (err) {
-      setError(err.message)
+      setError(err instanceof Error ? err.message : 'Unknown error occurred')
     } finally {
       setLoading(false)
     }

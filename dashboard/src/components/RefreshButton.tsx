@@ -1,7 +1,12 @@
 import React from 'react'
 import { RefreshCw } from 'lucide-react'
 
-const RefreshButton = ({ onRefresh, loading }) => {
+interface RefreshButtonProps {
+  onRefresh: () => void
+  loading: boolean
+}
+
+const RefreshButton: React.FC<RefreshButtonProps> = ({ onRefresh, loading }) => {
   return (
     <button
       onClick={onRefresh}

@@ -3,7 +3,11 @@ import { Activity, Clock } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { ja } from 'date-fns/locale'
 
-const Header = ({ lastUpdated }) => {
+interface HeaderProps {
+  lastUpdated?: Date | null
+}
+
+const Header: React.FC<HeaderProps> = ({ lastUpdated }) => {
   return (
     <header className="bg-gradient-to-r from-indigo-600 via-purple-600 to-blue-600 text-white shadow-2xl">
       <div className="container mx-auto px-4 py-8">

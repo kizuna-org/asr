@@ -1,8 +1,14 @@
 import React from 'react'
 import JobCard from './JobCard'
 import { Package } from 'lucide-react'
+import type { Job } from '../types'
 
-const JobGrid = ({ jobs, loading }) => {
+interface JobGridProps {
+  jobs: Job[]
+  loading: boolean
+}
+
+const JobGrid: React.FC<JobGridProps> = ({ jobs, loading }) => {
   if (jobs.length === 0 && !loading) {
     return (
       <div className="text-center py-16">
