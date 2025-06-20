@@ -6,6 +6,10 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 5.0"
     }
+    github = {
+      source  = "integrations/github"
+      version = "~> 5.0"
+    }
   }
 }
 
@@ -13,6 +17,11 @@ terraform {
 provider "google" {
   project = local.project_id
   region  = local.region
+}
+
+provider "github" {
+  token = var.github_token
+  owner = "kizuna-org"
 }
 
 # Pub/Sub Topics

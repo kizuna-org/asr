@@ -7,6 +7,12 @@ variable "environment" {
   default     = "prod"
 }
 
+variable "github_token" {
+  description = "GitHub Personal Access Token for kizuna-org organization"
+  type        = string
+  sensitive   = true
+}
+
 # Note: The following variables have been moved to locals in main.tf:
 # - build_topic_name
 # - app_topic_name

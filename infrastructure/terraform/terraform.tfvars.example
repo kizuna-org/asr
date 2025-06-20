@@ -8,6 +8,10 @@
 # You can still override the environment variable if needed
 environment = "prod"
 
+# GitHub Personal Access Token for kizuna-org organization
+# Create a PAT with appropriate permissions (e.g., repo, admin:org) at https://github.com/settings/tokens
+github_token = "your-github-pat-here"
+
 # Note: The following variables have been moved to locals in main.tf:
 # - build_topic_name
 # - app_topic_name
