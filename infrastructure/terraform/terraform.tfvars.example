@@ -16,6 +16,13 @@
 # - github_owner = "kizuna-org"
 # - github_bootstrap_token = "your-github-token-with-admin-org-scope"
 
+# New R2 and Hugging Face configuration:
+# - r2_endpoint_url = "https://your-account-id.r2.cloudflarestorage.com"
+# - r2_access_key_id = "your-r2-access-key-id"
+# - r2_secret_access_key = "your-r2-secret-key"
+# - r2_bucket_name = "your-bucket-name"
+# - hf_token = "your-huggingface-token"
+
 # Important: You need to update the github_bootstrap_token in locals.tf with a valid
 # GitHub personal access token that has admin:org permissions. This token is used
 # only to create the github_actions_pat resource, which then creates a more limited

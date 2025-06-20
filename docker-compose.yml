@@ -23,20 +23,11 @@ services:
 
   app-subscriber:
     build:
-      context: ./whaled/app
-      dockerfile: Dockerfile
-    environment:
-      - GCP_PROJECT_ID=${GCP_PROJECT_ID}
-      - APP_SUBSCRIPTION=${APP_SUBSCRIPTION:-app-triggers-sub}
-      - R2_ENDPOINT_URL=${R2_ENDPOINT_URL}
-      - R2_ACCESS_KEY_ID=${R2_ACCESS_KEY_ID}
-      - R2_SECRET_ACCESS_KEY=${R2_SECRET_ACCESS_KEY}
-      - R2_BUCKET_NAME=${R2_BUCKET_NAME}
-      - HF_TOKEN=${HF_TOKEN}
-      - GOOGLE_APPLICATION_CREDENTIALS=/app/credentials.json
+      context: .
+      dockerfile: ./whaled/app/Dockerfile
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
-      - ${GOOGLE_APPLICATION_CREDENTIALS}:/app/credentials.json:ro
+      - ./shared:/app/shared
     restart: unless-stopped
 
 networks:

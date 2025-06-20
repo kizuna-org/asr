@@ -24,4 +24,13 @@ locals {
   # This should be a personal access token with admin:org scope
   # that will only be used to create the github_actions_pat resource
   github_bootstrap_token = "ghp_example_replace_with_actual_token"
+
+  # R2 Configuration
+  r2_endpoint_url = "https://example.r2.cloudflarestorage.com"
+  r2_access_key_id = "example_r2_access_key_id"
+  r2_secret_access_key = "example_r2_secret_access_key"
+  r2_bucket_name = "example-bucket"
+
+  # Hugging Face Configuration
+  hf_token = "example_hf_token"
 }

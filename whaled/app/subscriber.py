@@ -9,9 +9,13 @@ import subprocess
 import sys
 import time
 from datetime import datetime
+from dotenv import load_dotenv
 from google.cloud import pubsub_v1
 import boto3
 from botocore.config import Config
+
+# Load environment variables from .env file
+load_dotenv('/app/config/.env')
 
 # Add the shared directory to the path to import logger
 sys.path.append('/app/shared')
@@ -48,255 +52,143 @@ class AppSubscriber:
             return json.loads(response['Body'].read().decode('utf-8'))
         except Exception as e:
             self.logger.error(
-                "Failed to get current status",
-                exception=e,
-                context={"job_id": job_id, "operation": "get_status"},
-                tags=["r2", "status"]
+                f"Failed to get status for job {job_id}",
+                {"error": str(e), "job_id": job_id}
             )
             return None
 
-    def update_status(self, job_id, status_updates):
-        """Update job status in Cloudflare R2"""
+    def update_status(self, job_id, status_data):
+        """Update status in R2"""
         try:
-            # Get current status first
-            current_status = self.get_current_status(job_id)
-            if not current_status:
-                self.logger.warn(
-                    "No existing status found for job",
-                    context={"job_id": job_id, "operation": "update_status"},
-                    tags=["r2", "status"]
-                )
-                return
-            
-            # Update with new data
-            current_status.update(status_updates)
-            current_status['timestamps']['updated'] = datetime.utcnow().isoformat() + 'Z'
-            
             status_key = f"{job_id}/status.json"
             self.r2_client.put_object(
                 Bucket=self.bucket_name,
                 Key=status_key,
-                Body=json.dumps(current_status, indent=2),
+                Body=json.dumps(status_data),
                 ContentType='application/json'
             )
-            self.logger.info(
-                "Status updated successfully",
-                context={
-                    "job_id": job_id,
-                    "operation": "update_status",
-                    "status_updates": status_updates
-                },
-                tags=["r2", "status"]
-            )
+            return True
         except Exception as e:
             self.logger.error(
-                "Failed to update status",
-                exception=e,
-                context={"job_id": job_id, "operation": "update_status"},
-                tags=["r2", "status"]
+                f"Failed to update status for job {job_id}",
+                {"error": str(e), "job_id": job_id}
             )
+            return False
 
-    def upload_log(self, job_id, log_content, log_type='app'):
-        """Upload log content to R2"""
+    def process_message(self, message):
+        """Process a message from Pub/Sub"""
         try:
-            log_key = f"{job_id}/{log_type}.log"
-            self.r2_client.put_object(
-                Bucket=self.bucket_name,
-                Key=log_key,
-                Body=log_content,
-                ContentType='text/plain'
-            )
-            self.logger.info(
-                "Log uploaded successfully",
-                context={
-                    "job_id": job_id,
-                    "log_key": log_key,
-                    "log_type": log_type,
-                    "operation": "upload_log"
-                },
-                tags=["r2", "logs"]
-            )
+            data = json.loads(message.data.decode('utf-8'))
+            job_id = data.get('job_id')
+            
+            if not job_id:
+                self.logger.error("Message missing job_id", {"data": data})
+                message.ack()
+                return
+            
+            self.logger.info(f"Processing job {job_id}", {"job_id": job_id})
+            
+            # Get current status
+            status = self.get_current_status(job_id)
+            if not status:
+                self.logger.error(f"No status found for job {job_id}", {"job_id": job_id})
+                message.ack()
+                return
+            
+            # Update status to processing
+            status['status'] = 'processing'
+            status['processing_started_at'] = datetime.utcnow().isoformat()
+            self.update_status(job_id, status)
+            
+            # Run the job
+            success = self.run_job(job_id, data)
+            
+            # Update final status
+            status = self.get_current_status(job_id)
+            if status:
+                status['status'] = 'completed' if success else 'failed'
+                status['completed_at'] = datetime.utcnow().isoformat()
+                self.update_status(job_id, status)
+            
+            # Acknowledge the message
+            message.ack()
+            
         except Exception as e:
             self.logger.error(
-                "Failed to upload log",
-                exception=e,
-                context={
-                    "job_id": job_id,
-                    "log_type": log_type,
-                    "operation": "upload_log"
-                },
-                tags=["r2", "logs"]
+                "Error processing message",
+                {"error": str(e), "traceback": traceback.format_exc()}
             )
+            # Acknowledge the message to prevent redelivery
+            message.ack()
 
-    def run_application(self, job_data):
-        """Pull image and run application container"""
-        job_id = job_data['jobId']
-        image_uri = job_data['imageUri']
-        
-        # Update status to running
-        status_updates = {
-            'overallStatus': 'Running',
-            'run': {
-                'status': 'Running',
-                'log': f'/{job_id}/app.log'
-            }
-        }
-        self.update_status(job_id, status_updates)
-
+    def run_job(self, job_id, data):
+        """Run the job in a Docker container"""
         try:
-            # Pull image from GHCR
-            pull_cmd = f"sudo docker pull {image_uri}"
-            pull_result = subprocess.run(
-                pull_cmd,
-                shell=True,
-                capture_output=True,
-                text=True
-            )
+            # Pull the latest app image
+            self.logger.info(f"Pulling latest app image for job {job_id}", {"job_id": job_id})
+            subprocess.run(["docker", "pull", "ghcr.io/kizuna-org/chumchat-app:latest"], check=True)
             
-            if pull_result.returncode != 0:
-                raise subprocess.CalledProcessError(pull_result.returncode, pull_cmd)
+            # Run the container
+            self.logger.info(f"Starting container for job {job_id}", {"job_id": job_id})
             
-            # Run container with environment variables for R2 access
-            run_cmd = f"""sudo docker run --rm \
+            # Prepare the docker run command
+            cmd = f"""
+            docker run --rm \
                 -e JOB_ID={job_id} \
                 -e R2_ENDPOINT_URL={os.environ.get('R2_ENDPOINT_URL')} \
                 -e R2_ACCESS_KEY_ID={os.environ.get('R2_ACCESS_KEY_ID')} \
                 -e R2_SECRET_ACCESS_KEY={os.environ.get('R2_SECRET_ACCESS_KEY')} \
                 -e R2_BUCKET_NAME={os.environ.get('R2_BUCKET_NAME')} \
                 -e HF_TOKEN={os.environ.get('HF_TOKEN')} \
-                --gpus all \
-                {image_uri}"""
+                ghcr.io/kizuna-org/chumchat-app:latest
+            """
             
-            self.logger.info(
-                "Starting container execution",
-                context={
-                    "job_id": job_id,
-                    "image_uri": image_uri,
-                    "operation": "run_container"
-                },
-                tags=["docker", "container"]
-            )
-            run_result = subprocess.run(
-                run_cmd,
-                shell=True,
-                capture_output=True,
-                text=True
-            )
+            # Run the command
+            result = subprocess.run(cmd, shell=True, check=False)
             
-            # Upload app log
-            app_log = f"Pull command: {pull_cmd}\n\nPull STDOUT:\n{pull_result.stdout}\n\nPull STDERR:\n{pull_result.stderr}\n\n"
-            app_log += f"Run command: {run_cmd}\n\nRun STDOUT:\n{run_result.stdout}\n\nRun STDERR:\n{run_result.stderr}"
-            self.upload_log(job_id, app_log, 'app')
+            if result.returncode != 0:
+                self.logger.error(
+                    f"Container for job {job_id} exited with non-zero status",
+                    {"job_id": job_id, "return_code": result.returncode}
+                )
+                return False
             
-            if run_result.returncode != 0:
-                raise subprocess.CalledProcessError(run_result.returncode, run_cmd)
-            
-            # Update status to succeeded (the app container should have updated detailed status)
-            status_updates = {
-                'overallStatus': 'Succeeded',
-                'run': {
-                    'status': 'Succeeded',
-                    'log': f'/{job_id}/app.log'
-                }
-            }
-            self.update_status(job_id, status_updates)
-            
-            self.logger.info(
-                "Application execution succeeded",
-                context={
-                    "job_id": job_id,
-                    "image_uri": image_uri,
-                    "operation": "run_application"
-                },
-                tags=["docker", "success"]
-            )
+            self.logger.info(f"Container for job {job_id} completed successfully", {"job_id": job_id})
+            return True
             
         except subprocess.CalledProcessError as e:
-            # Update status to failed
-            status_updates = {
-                'overallStatus': 'Failed',
-                'run': {
-                    'status': 'Failed',
-                    'log': f'/{job_id}/app.log'
-                }
-            }
-            self.update_status(job_id, status_updates)
             self.logger.error(
-                "Application execution failed",
-                exception=e,
-                context={
-                    "job_id": job_id,
-                    "image_uri": image_uri,
-                    "operation": "run_application"
-                },
-                tags=["docker", "failure"]
+                f"Error running container for job {job_id}",
+                {"job_id": job_id, "error": str(e)}
             )
-
-    def callback(self, message):
-        """Process incoming Pub/Sub message"""
-        try:
-            job_data = json.loads(message.data.decode('utf-8'))
-            job_id = job_data.get('jobId', 'unknown')
-            
-            # Update logger with job_id for this operation
-            self.logger.job_id = job_id
-            
-            self.logger.info(
-                "Received app execution request",
-                context={
-                    "job_id": job_id,
-                    "job_data": job_data,
-                    "operation": "message_received"
-                },
-                tags=["pubsub", "message"]
-            )
-            
-            self.run_application(job_data)
-            message.ack()
-            
+            return False
         except Exception as e:
             self.logger.error(
-                "Error processing message",
-                exception=e,
-                context={"operation": "message_processing"},
-                tags=["pubsub", "error"]
+                f"Unexpected error running job {job_id}",
+                {"job_id": job_id, "error": str(e)}
             )
-            message.nack()
+            return False
 
     def start_listening(self):
-        """Start listening for Pub/Sub messages"""
-        self.logger.info(
-            "Starting Pub/Sub subscriber",
-            context={
-                "subscription_path": self.subscription_path,
-                "operation": "start_listening"
-            },
-            tags=["pubsub", "startup"]
+        """Start listening for messages"""
+        self.logger.info("Starting subscriber", {
+            "project_id": self.project_id,
+            "subscription": self.subscription_name
+        })
+        
+        def callback(message):
+            self.process_message(message)
+        
+        streaming_pull_future = self.subscriber.subscribe(
+            self.subscription_path, callback=callback
         )
         
-        flow_control = pubsub_v1.types.FlowControl(max_messages=1)
-        
-        streaming_pull_future = self.subscriber.pull(
-            request={"subscription": self.subscription_path, "max_messages": 1000},
-            callback=self.callback,
-            flow_control=flow_control,
-        )
-        
-        self.logger.info(
-            "Subscriber is now listening for messages",
-            context={"operation": "listening"},
-            tags=["pubsub", "ready"]
-        )
-        
+        # Keep the main thread from exiting
         try:
             streaming_pull_future.result()
-        except KeyboardInterrupt:
+        except Exception as e:
             streaming_pull_future.cancel()
-            self.logger.info(
-                "Subscriber stopped by user",
-                context={"operation": "shutdown"},
-                tags=["pubsub", "shutdown"]
-            )
+            self.logger.error("Subscriber stopped", {"error": str(e)})
 
 if __name__ == "__main__":
     subscriber = AppSubscriber()

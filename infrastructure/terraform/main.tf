@@ -135,10 +135,41 @@ resource "google_service_account_key" "app_service_account_key" {
   public_key_type    = "TYPE_X509_PEM_FILE"
 }
 
-# Save the key to a local file (ignored by Git)
+# Create directory for subscriber files if it doesn't exist
+resource "null_resource" "create_subscriber_dir" {
+  provisioner "local-exec" {
+    command = "mkdir -p ${path.module}/../../whaled/app/config"
+  }
+}
+
+# Save the key to the subscriber directory
 resource "local_file" "app_service_account_key_file" {
-  content  = base64decode(google_service_account_key.app_service_account_key.private_key)
-  filename = "${path.module}/keys/app-service-account-key.json"
+  depends_on = [null_resource.create_subscriber_dir]
+  content    = base64decode(google_service_account_key.app_service_account_key.private_key)
+  filename   = "${path.module}/../../whaled/app/config/app-service-account-key.json"
+}
+
+# Generate .env file for subscriber
+resource "local_file" "subscriber_env_file" {
+  depends_on = [null_resource.create_subscriber_dir]
+  content    = <<-EOT
+# GCP Configuration
+GCP_PROJECT_ID=${local.project_id}
+APP_SUBSCRIPTION=${local.app_subscription_name}
+
+# Path to GCP service account key file
+GOOGLE_APPLICATION_CREDENTIALS=/app/config/app-service-account-key.json
+
+# Cloudflare R2 Configuration
+R2_ENDPOINT_URL=${local.r2_endpoint_url}
+R2_ACCESS_KEY_ID=${local.r2_access_key_id}
+R2_SECRET_ACCESS_KEY=${local.r2_secret_access_key}
+R2_BUCKET_NAME=${local.r2_bucket_name}
+
+# Hugging Face Configuration
+HF_TOKEN=${local.hf_token}
+EOT
+  filename   = "${path.module}/../../whaled/app/config/.env"
 }
 
 # IAM Policy Bindings for Application Service Account
