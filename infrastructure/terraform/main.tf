@@ -23,31 +23,21 @@ provider "google" {
   region  = local.region
 }
 
-# Primary GitHub provider using bootstrap token
+# GitHub provider configuration
 provider "github" {
   token = local.github_bootstrap_token
   owner = local.github_owner
-  alias = "bootstrap"
 }
 
-# Create GitHub Personal Access Token for CI/CD
-resource "github_actions_pat" "cicd_token" {
-  provider         = github.bootstrap
-  name             = "terraform-managed-cicd-token"
-  repository       = "chumchat"
-  selected_repositories = ["chumchat"]
-  permissions {
-    contents = "read"
-    packages = "read"
-  }
-  expiration = "2030-01-01"
-}
+# Note: We're using a single GitHub provider with the bootstrap token
+# The github_actions_pat resource is not supported by the GitHub provider
+# If you need to create a PAT, you'll need to do it manually through the GitHub UI
+# and then store it as a secret using github_actions_secret
 
-# Secondary GitHub provider using the created PAT
+# For now, we'll use the bootstrap token for all operations
 provider "github" {
-  token = github_actions_pat.cicd_token.token
+  token = local.github_bootstrap_token
   owner = local.github_owner
-  alias = "pat"
 }
 
 # Pub/Sub Topics
