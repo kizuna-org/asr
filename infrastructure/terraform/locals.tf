@@ -19,4 +19,9 @@ locals {
   
   # GitHub configuration
   github_owner = "kizuna-org"
+  
+  # GitHub initial token for bootstrapping PAT creation
+  # This should be a personal access token with admin:org scope
+  # that will only be used to create the github_actions_pat resource
+  github_bootstrap_token = "ghp_example_replace_with_actual_token"
 }

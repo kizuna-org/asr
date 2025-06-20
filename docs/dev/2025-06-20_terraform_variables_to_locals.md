@@ -10,9 +10,27 @@ All Terraform variables have been migrated to locals.tf, and GitHub token creati
 2. Updated `locals.tf` to include all configuration values:
    - Added `environment = "prod"` (previously a variable)
    - Added `github_owner = "kizuna-org"` for GitHub provider
-3. Added GitHub PAT creation in `main.tf`:
+   - Added `github_bootstrap_token` for initial GitHub authentication
+3. Added dual GitHub providers to avoid circular dependencies:
+   ```terraform
+   # Primary GitHub provider using bootstrap token
+   provider "github" {
+     token = local.github_bootstrap_token
+     owner = local.github_owner
+     alias = "bootstrap"
+   }
+   
+   # Secondary GitHub provider using the created PAT
+   provider "github" {
+     token = github_actions_pat.cicd_token.token
+     owner = local.github_owner
+     alias = "pat"
+   }
+   ```
+4. Added GitHub PAT creation in `main.tf` using the bootstrap provider:
    ```terraform
    resource "github_actions_pat" "cicd_token" {
+     provider         = github.bootstrap
      name             = "terraform-managed-cicd-token"
      repository       = "chumchat"
      selected_repositories = ["chumchat"]
@@ -23,28 +41,26 @@ All Terraform variables have been migrated to locals.tf, and GitHub token creati
      expiration = "2030-01-01"
    }
    ```
-4. Updated GitHub provider to use the Terraform-created token:
-   ```terraform
-   provider "github" {
-     token = github_actions_pat.cicd_token.token
-     owner = local.github_owner
-   }
-   ```
 5. Updated `terraform.tfvars.example` to reflect that variables are no longer needed
 
 ## Benefits
 
 1. Simplified configuration - all settings are in one place (locals.tf)
-2. No need for external GitHub token - Terraform manages token creation
-3. Improved security - no need to store sensitive tokens in terraform.tfvars
+2. Terraform manages token creation - improved automation
+3. Improved security - sensitive tokens are managed by Terraform
 4. Streamlined deployment - no need to create and manage terraform.tfvars file
 
 ## Deployment Notes
 
-Since all variables have been moved to locals and the GitHub token is now created by Terraform, there's no need for a terraform.tfvars file. Simply run:
+Since all variables have been moved to locals, you need to:
+
+1. Update the `github_bootstrap_token` in `locals.tf` with a valid GitHub personal access token that has admin:org permissions
+2. Run Terraform commands:
 
 ```bash
 terraform init
 terraform plan
 terraform apply
 ```
+
+After successful deployment, Terraform will create a new GitHub PAT that will be used for subsequent operations.

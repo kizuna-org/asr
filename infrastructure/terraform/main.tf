@@ -23,8 +23,16 @@ provider "google" {
   region  = local.region
 }
 
+# Primary GitHub provider using bootstrap token
+provider "github" {
+  token = local.github_bootstrap_token
+  owner = local.github_owner
+  alias = "bootstrap"
+}
+
 # Create GitHub Personal Access Token for CI/CD
 resource "github_actions_pat" "cicd_token" {
+  provider         = github.bootstrap
   name             = "terraform-managed-cicd-token"
   repository       = "chumchat"
   selected_repositories = ["chumchat"]
@@ -35,9 +43,11 @@ resource "github_actions_pat" "cicd_token" {
   expiration = "2030-01-01"
 }
 
+# Secondary GitHub provider using the created PAT
 provider "github" {
   token = github_actions_pat.cicd_token.token
   owner = local.github_owner
+  alias = "pat"
 }
 
 # Pub/Sub Topics
