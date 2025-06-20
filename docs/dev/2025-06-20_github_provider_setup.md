@@ -4,7 +4,7 @@ Date: 2025-06-20
 
 ## Overview
 
-This document describes the implementation of the GitHub provider in our Terraform configuration to manage GitHub resources for the kizuna-org organization.
+This document describes the implementation of the GitHub provider in our Terraform configuration for the kizuna-org organization. The primary purpose of this configuration is to enable pulling from GitHub Container Registry (GHCR) using a Personal Access Token with minimal permissions.
 
 ## Implementation Details
 
@@ -35,12 +35,9 @@ The GitHub provider was added to the Terraform configuration with the following 
 
 1. Go to GitHub Settings: https://github.com/settings/tokens
 2. Click "Generate new token" (classic)
-3. Give your token a descriptive name (e.g., "Terraform kizuna-org")
-4. Select the required scopes:
-   - `repo` (all)
-   - `admin:org` (if organization management is needed)
-   - `delete_repo` (if repository deletion is needed)
-   - Add other scopes as required for your specific use case
+3. Give your token a descriptive name (e.g., "GHCR Pull for kizuna-org")
+4. Select only the required scope:
+   - `read:packages` (to pull from GitHub Container Registry)
 5. Click "Generate token"
 6. Copy the token value (it will only be shown once)
 
@@ -56,5 +53,5 @@ The GitHub provider was added to the Terraform configuration with the following 
 - The GitHub PAT is marked as sensitive in the Terraform configuration
 - Never commit the actual PAT to version control
 - Consider using a CI/CD secret or environment variable for the PAT in production environments
-- Use the minimum required scopes for the PAT
+- Following the principle of least privilege, the PAT only has `read:packages` scope for pulling from GHCR
 - Rotate the PAT periodically according to your security policies
