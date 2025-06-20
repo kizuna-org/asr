@@ -10,6 +10,10 @@ terraform {
       source  = "integrations/github"
       version = "~> 5.0"
     }
+    local = {
+      source  = "hashicorp/local"
+      version = "~> 2.4"
+    }
   }
 }
 
@@ -94,4 +98,36 @@ resource "google_project_iam_member" "github_actions_pubsub_subscriber" {
 resource "google_service_account_key" "github_actions_key" {
   service_account_id = google_service_account.github_actions.name
   public_key_type    = "TYPE_X509_PEM_FILE"
+}
+
+# Application Service Account
+resource "google_service_account" "app_service_account" {
+  account_id   = local.app_service_account_name
+  display_name = "Application Service Account"
+  description  = "Service account for application to access GCP resources"
+}
+
+# Application Service Account Key
+resource "google_service_account_key" "app_service_account_key" {
+  service_account_id = google_service_account.app_service_account.name
+  public_key_type    = "TYPE_X509_PEM_FILE"
+}
+
+# Save the key to a local file (ignored by Git)
+resource "local_file" "app_service_account_key_file" {
+  content  = base64decode(google_service_account_key.app_service_account_key.private_key)
+  filename = "${path.module}/keys/app-service-account-key.json"
+}
+
+# IAM Policy Bindings for Application Service Account
+resource "google_project_iam_member" "app_pubsub_subscriber" {
+  project = local.project_id
+  role    = "roles/pubsub.subscriber"
+  member  = "serviceAccount:${google_service_account.app_service_account.email}"
+}
+
+resource "google_project_iam_member" "app_storage_object_viewer" {
+  project = local.project_id
+  role    = "roles/storage.objectViewer"
+  member  = "serviceAccount:${google_service_account.app_service_account.email}"
 }
