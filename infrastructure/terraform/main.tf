@@ -165,7 +165,7 @@ resource "google_project_iam_member" "app_storage_object_viewer" {
 
 # Cloudflare R2 Bucket
 resource "cloudflare_r2_bucket" "app_bucket" {
-  account_id = local.cloudflare_account_id
+  account_id = var.cloudflare_account_id
   name       = local.r2_bucket_name
   location   = "APAC"
 }

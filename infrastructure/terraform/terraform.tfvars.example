@@ -26,6 +26,7 @@
 # Variables that need to be set in terraform.tfvars:
 github_token = "your-github-token-with-read-packages-scope"
 cloudflare_api_token = "your-cloudflare-api-token-with-r2-permissions"
+cloudflare_account_id = "your-cloudflare-account-id"
 
 # Important: You need to update the github_bootstrap_token in locals.tf with a valid
 # GitHub personal access token that has admin:org permissions. This token is used

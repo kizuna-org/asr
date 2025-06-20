@@ -20,11 +20,10 @@ locals {
   # GitHub Actions service account name is kept for GCP resources
   # But we no longer use the GitHub provider
 
-  # Cloudflare Configuration
-  cloudflare_account_id = "your-cloudflare-account-id"
+  # Cloudflare Configuration is now handled through variables
   
   # R2 Configuration
-  r2_endpoint_url = "https://${local.cloudflare_account_id}.r2.cloudflarestorage.com"
+  r2_endpoint_url = "https://${var.cloudflare_account_id}.r2.cloudflarestorage.com"
   r2_access_key_id = "your-r2-access-key-id"
   r2_secret_access_key = "your-r2-secret-access-key"
   r2_bucket_name = "chumchat-storage"

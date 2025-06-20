@@ -1,18 +1,21 @@
-# Cloudflare API Token Variable
+# Cloudflare Credentials as Variables
 
 Date: 2025-06-20
 
 ## Overview
 
-This document describes the change to move the Cloudflare API token from a local value to a variable in the Terraform configuration. This improves security by treating the API token as a sensitive value and keeping it out of the main configuration files.
+This document describes the change to move the Cloudflare credentials (API token and account ID) from local values to variables in the Terraform configuration. This improves security by treating the API token as a sensitive value and keeping credentials out of the main configuration files.
 
 ## Changes Made
 
-1. Added a new variable `cloudflare_api_token` in `variables.tf`
-2. Updated the Cloudflare provider configuration in `main.tf` to use the variable
-3. Removed the `cloudflare_api_token` from `locals.tf`
-4. Updated the `terraform.tfvars.example` file to include the new variable
-5. Updated documentation to reflect these changes
+1. Added new variables in `variables.tf`:
+   - `cloudflare_api_token` (marked as sensitive)
+   - `cloudflare_account_id`
+2. Updated the Cloudflare provider configuration in `main.tf` to use the variables
+3. Updated the R2 bucket resource to use the account ID variable
+4. Removed the Cloudflare credentials from `locals.tf`
+5. Updated the `terraform.tfvars.example` file to include the new variables
+6. Updated documentation to reflect these changes
 
 ## Rationale
 
@@ -24,10 +27,11 @@ Sensitive values like API tokens should be handled as variables in Terraform for
 
 ## Usage
 
-To use this configuration, create a `terraform.tfvars` file with your Cloudflare API token:
+To use this configuration, create a `terraform.tfvars` file with your Cloudflare credentials:
 
 ```
 cloudflare_api_token = "your-cloudflare-api-token"
+cloudflare_account_id = "your-cloudflare-account-id"
 ```
 
-This token will be used to authenticate with the Cloudflare API when creating and managing R2 resources.
+The API token will be used to authenticate with the Cloudflare API, and the account ID will be used to identify your Cloudflare account when creating and managing R2 resources.

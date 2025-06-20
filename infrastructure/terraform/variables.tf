@@ -9,3 +9,8 @@ variable "cloudflare_api_token" {
   type        = string
   sensitive   = true
 }
+
+variable "cloudflare_account_id" {
+  description = "Cloudflare Account ID for R2 storage"
+  type        = string
+}
