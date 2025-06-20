@@ -3,3 +3,9 @@ variable "github_token" {
   type        = string
   sensitive   = true
 }
+
+variable "cloudflare_api_token" {
+  description = "Cloudflare API Token with R2 permissions"
+  type        = string
+  sensitive   = true
+}

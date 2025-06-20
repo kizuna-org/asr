@@ -20,9 +20,12 @@ To use the Cloudflare R2 integration, you need to:
 
 1. Create a Cloudflare account if you don't have one
 2. Create an API token with R2 permissions
-3. Update the following values in `infrastructure/terraform/locals.tf`:
+3. Create a `terraform.tfvars` file with your Cloudflare API token:
+   ```
+   cloudflare_api_token = "your-cloudflare-api-token"
+   ```
+4. Update the following values in `infrastructure/terraform/locals.tf`:
    - `cloudflare_account_id`: Your Cloudflare account ID
-   - `cloudflare_api_token`: Your Cloudflare API token
    - `r2_access_key_id`: Your R2 access key ID
    - `r2_secret_access_key`: Your R2 secret access key
    - `r2_bucket_name`: Your desired bucket name (default: "chumchat-storage")

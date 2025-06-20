@@ -23,6 +23,10 @@
 # - r2_bucket_name = "your-bucket-name"
 # - hf_token = "your-huggingface-token"
 
+# Variables that need to be set in terraform.tfvars:
+github_token = "your-github-token-with-read-packages-scope"
+cloudflare_api_token = "your-cloudflare-api-token-with-r2-permissions"
+
 # Important: You need to update the github_bootstrap_token in locals.tf with a valid
 # GitHub personal access token that has admin:org permissions. This token is used
 # only to create the github_actions_pat resource, which then creates a more limited

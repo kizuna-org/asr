@@ -22,7 +22,6 @@ locals {
 
   # Cloudflare Configuration
   cloudflare_account_id = "your-cloudflare-account-id"
-  cloudflare_api_token = "your-cloudflare-api-token"
   
   # R2 Configuration
   r2_endpoint_url = "https://${local.cloudflare_account_id}.r2.cloudflarestorage.com"
