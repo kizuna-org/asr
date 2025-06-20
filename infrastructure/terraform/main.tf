@@ -23,9 +23,21 @@ provider "google" {
   region  = local.region
 }
 
+# Create GitHub Personal Access Token for CI/CD
+resource "github_actions_pat" "cicd_token" {
+  name             = "terraform-managed-cicd-token"
+  repository       = "chumchat"
+  selected_repositories = ["chumchat"]
+  permissions {
+    contents = "read"
+    packages = "read"
+  }
+  expiration = "2030-01-01"
+}
+
 provider "github" {
-  token = var.github_token
-  owner = "kizuna-org"
+  token = github_actions_pat.cicd_token.token
+  owner = local.github_owner
 }
 
 # Pub/Sub Topics

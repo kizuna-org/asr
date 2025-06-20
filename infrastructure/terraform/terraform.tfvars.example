@@ -1,20 +1,18 @@
 # Example Terraform variables file
-# Copy this file to terraform.tfvars and update with your actual values
+# This file is no longer needed as all variables have been moved to locals.tf
+# No terraform.tfvars file is required for deployment.
 
-# Note: project_id and region are now defined in locals block in main.tf
-# project_id = "chumchat"
-# region     = "asia-northeast1"
+# All configuration is now defined in locals.tf:
+# - project_id = "chumchat"
+# - region = "asia-northeast1"
+# - zone = "asia-northeast1-a"
+# - environment = "prod"
+# - build_topic_name = "build-triggers"
+# - app_topic_name = "app-triggers"
+# - build_subscription_name = "build-triggers-sub"
+# - app_subscription_name = "app-triggers-sub"
+# - service_account_name = "github-actions-cicd"
+# - app_service_account_name = "app-service-account"
+# - github_owner = "kizuna-org"
 
-# You can still override the environment variable if needed
-environment = "prod"
-
-# GitHub Personal Access Token for kizuna-org organization
-# Create a PAT with read:packages permission for GHCR pull access at https://github.com/settings/tokens
-github_token = "your-github-pat-here"
-
-# Note: The following variables have been moved to locals in main.tf:
-# - build_topic_name
-# - app_topic_name
-# - build_subscription_name
-# - app_subscription_name
-# - service_account_name
+# GitHub token is now created by Terraform using the github_actions_pat resource
