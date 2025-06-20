@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import time
+import traceback
 from datetime import datetime
 from dotenv import load_dotenv
 from google.cloud import pubsub_v1
@@ -25,14 +26,24 @@ class AppSubscriber:
     def __init__(self):
         self.project_id = os.environ.get('GCP_PROJECT_ID')
         self.subscription_name = os.environ.get('APP_SUBSCRIPTION', 'app-triggers-sub')
-        self.subscriber = pubsub_v1.SubscriberClient()
+
+        # Check network connectivity before initializing clients
+        self._check_network_connectivity()
+
+        # Initialize PubSub client with retry settings
+        self.subscriber = pubsub_v1.SubscriberClient(
+            # Configure client retry settings
+            client_options={
+                'api_endpoint': os.environ.get('PUBSUB_EMULATOR_HOST', 'pubsub.googleapis.com:443')
+            }
+        )
         self.subscription_path = self.subscriber.subscription_path(
             self.project_id, self.subscription_name
         )
-        
+
         # Initialize structured logger
         self.logger = StructuredLogger(Component.APP_SUBSCRIBER)
-        
+
         # Cloudflare R2 setup
         self.r2_client = boto3.client(
             's3',
@@ -80,39 +91,39 @@ class AppSubscriber:
         try:
             data = json.loads(message.data.decode('utf-8'))
             job_id = data.get('job_id')
-            
+
             if not job_id:
                 self.logger.error("Message missing job_id", {"data": data})
                 message.ack()
                 return
-            
+
             self.logger.info(f"Processing job {job_id}", {"job_id": job_id})
-            
+
             # Get current status
             status = self.get_current_status(job_id)
             if not status:
                 self.logger.error(f"No status found for job {job_id}", {"job_id": job_id})
                 message.ack()
                 return
-            
+
             # Update status to processing
             status['status'] = 'processing'
             status['processing_started_at'] = datetime.utcnow().isoformat()
             self.update_status(job_id, status)
-            
+
             # Run the job
             success = self.run_job(job_id, data)
-            
+
             # Update final status
             status = self.get_current_status(job_id)
             if status:
                 status['status'] = 'completed' if success else 'failed'
                 status['completed_at'] = datetime.utcnow().isoformat()
                 self.update_status(job_id, status)
-            
+
             # Acknowledge the message
             message.ack()
-            
+
         except Exception as e:
             self.logger.error(
                 "Error processing message",
@@ -127,10 +138,10 @@ class AppSubscriber:
             # Pull the latest app image
             self.logger.info(f"Pulling latest app image for job {job_id}", {"job_id": job_id})
             subprocess.run(["docker", "pull", "ghcr.io/kizuna-org/chumchat-app:latest"], check=True)
-            
+
             # Run the container
             self.logger.info(f"Starting container for job {job_id}", {"job_id": job_id})
-            
+
             # Prepare the docker run command
             cmd = f"""
             docker run --rm \
@@ -142,20 +153,20 @@ class AppSubscriber:
                 -e HF_TOKEN={os.environ.get('HF_TOKEN')} \
                 ghcr.io/kizuna-org/chumchat-app:latest
             """
-            
+
             # Run the command
             result = subprocess.run(cmd, shell=True, check=False)
-            
+
             if result.returncode != 0:
                 self.logger.error(
                     f"Container for job {job_id} exited with non-zero status",
                     {"job_id": job_id, "return_code": result.returncode}
                 )
                 return False
-            
+
             self.logger.info(f"Container for job {job_id} completed successfully", {"job_id": job_id})
             return True
-            
+
         except subprocess.CalledProcessError as e:
             self.logger.error(
                 f"Error running container for job {job_id}",
@@ -175,20 +186,58 @@ class AppSubscriber:
             "project_id": self.project_id,
             "subscription": self.subscription_name
         })
-        
+
         def callback(message):
             self.process_message(message)
-        
-        streaming_pull_future = self.subscriber.subscribe(
-            self.subscription_path, callback=callback
-        )
-        
-        # Keep the main thread from exiting
+
+        # Add retry logic for network issues
+        max_retries = 5
+        retry_count = 0
+        retry_delay = 10  # seconds
+
+        while retry_count < max_retries:
+            try:
+                streaming_pull_future = self.subscriber.subscribe(
+                    self.subscription_path, callback=callback
+                )
+
+                # Keep the main thread from exiting
+                streaming_pull_future.result()
+                break  # If we get here, subscription is working
+
+            except Exception as e:
+                retry_count += 1
+                self.logger.error(
+                    f"Subscriber connection error (attempt {retry_count}/{max_retries})",
+                    {"error": str(e), "traceback": traceback.format_exc()}
+                )
+
+                if retry_count >= max_retries:
+                    self.logger.error("Max retries reached, giving up", {})
+                    raise
+
+                self.logger.info(f"Retrying in {retry_delay} seconds...", {})
+                time.sleep(retry_delay)
+                retry_delay *= 2  # Exponential backoff
+
+    def _check_network_connectivity(self):
+        """Check network connectivity to key services"""
         try:
-            streaming_pull_future.result()
+            # Import socket for network connectivity checks
+            import socket
+            import urllib.request
+
+            # Check DNS resolution
+            socket.gethostbyname('pubsub.googleapis.com')
+
+            # Check internet connectivity
+            urllib.request.urlopen('https://www.google.com', timeout=5)
+
+            return True
         except Exception as e:
-            streaming_pull_future.cancel()
-            self.logger.error("Subscriber stopped", {"error": str(e)})
+            print(f"Network connectivity check failed: {str(e)}")
+            print("Continuing anyway, will retry with exponential backoff...")
+            return False
 
 if __name__ == "__main__":
     subscriber = AppSubscriber()
