@@ -17,13 +17,8 @@ locals {
   service_account_name = "github-actions-cicd"
   app_service_account_name = "app-service-account"
   
-  # GitHub configuration
-  github_owner = "kizuna-org"
-  
-  # GitHub initial token for bootstrapping PAT creation
-  # This should be a personal access token with admin:org scope
-  # that will only be used to create the github_actions_pat resource
-  github_bootstrap_token = "ghp_example_replace_with_actual_token"
+  # GitHub Actions service account name is kept for GCP resources
+  # But we no longer use the GitHub provider
 
   # R2 Configuration
   r2_endpoint_url = "https://example.r2.cloudflarestorage.com"

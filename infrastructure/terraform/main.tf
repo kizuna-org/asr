@@ -6,10 +6,6 @@ terraform {
       source  = "hashicorp/google"
       version = "~> 5.0"
     }
-    github = {
-      source  = "integrations/github"
-      version = "~> 5.0"
-    }
     local = {
       source  = "hashicorp/local"
       version = "~> 2.4"
@@ -23,22 +19,6 @@ provider "google" {
   region  = local.region
 }
 
-# GitHub provider configuration
-provider "github" {
-  token = local.github_bootstrap_token
-  owner = local.github_owner
-}
-
-# Note: We're using a single GitHub provider with the bootstrap token
-# The github_actions_pat resource is not supported by the GitHub provider
-# If you need to create a PAT, you'll need to do it manually through the GitHub UI
-# and then store it as a secret using github_actions_secret
-
-# For now, we'll use the bootstrap token for all operations
-provider "github" {
-  token = local.github_bootstrap_token
-  owner = local.github_owner
-}
 
 # Pub/Sub Topics
 resource "google_pubsub_topic" "build_triggers" {
