@@ -51,3 +51,13 @@ output "github_secrets_instructions" {
   EOT
   sensitive   = true
 }
+
+output "r2_bucket_name" {
+  description = "Name of the Cloudflare R2 bucket"
+  value       = cloudflare_r2_bucket.app_bucket.name
+}
+
+output "r2_endpoint_url" {
+  description = "Endpoint URL for Cloudflare R2"
+  value       = local.r2_endpoint_url
+}

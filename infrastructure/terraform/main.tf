@@ -10,6 +10,10 @@ terraform {
       source  = "hashicorp/local"
       version = "~> 2.4"
     }
+    cloudflare = {
+      source  = "cloudflare/cloudflare"
+      version = "~> 4.0"
+    }
   }
 }
 
@@ -17,6 +21,10 @@ terraform {
 provider "google" {
   project = local.project_id
   region  = local.region
+}
+
+provider "cloudflare" {
+  api_token = local.cloudflare_api_token
 }
 
 
@@ -153,4 +161,11 @@ resource "google_project_iam_member" "app_storage_object_viewer" {
   project = local.project_id
   role    = "roles/storage.objectViewer"
   member  = "serviceAccount:${google_service_account.app_service_account.email}"
+}
+
+# Cloudflare R2 Bucket
+resource "cloudflare_r2_bucket" "app_bucket" {
+  account_id = local.cloudflare_account_id
+  name       = local.r2_bucket_name
+  location   = "APAC"
 }
