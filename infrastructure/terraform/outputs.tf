@@ -2,7 +2,7 @@
 
 output "project_id" {
   description = "GCP Project ID"
-  value       = var.project_id
+  value       = local.project_id
 }
 
 output "build_topic_name" {
@@ -38,15 +38,16 @@ output "service_account_key" {
 
 output "github_secrets_instructions" {
   description = "Instructions for setting up GitHub secrets"
-  value = <<-EOT
+  value       = <<-EOT
     Add the following secrets to your GitHub repository:
     
-    GCP_PROJECT_ID: ${var.project_id}
+    GCP_PROJECT_ID: ${local.project_id}
     GCP_SA_KEY: ${google_service_account_key.github_actions_key.private_key}
     
     Environment variables for GPU server:
-    GCP_PROJECT_ID=${var.project_id}
+    GCP_PROJECT_ID=${local.project_id}
     BUILD_SUBSCRIPTION=${google_pubsub_subscription.build_subscription.name}
     APP_SUBSCRIPTION=${google_pubsub_subscription.app_subscription.name}
   EOT
+  sensitive   = true
 }
