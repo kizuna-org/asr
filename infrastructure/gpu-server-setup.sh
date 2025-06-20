@@ -13,7 +13,7 @@ if ! command -v docker &> /dev/null; then
 fi
 
 # Check if user can run Docker commands
-if ! docker ps &> /dev/null; then
+if ! sudo docker ps &> /dev/null; then
     echo "❌ Cannot run Docker commands. Please ensure your user is in the docker group."
     echo "   Ask your administrator to run: sudo usermod -aG docker $USER"
     echo "   Then log out and log back in."
@@ -53,7 +53,7 @@ R2_BUCKET_NAME=your-bucket-name
 HF_TOKEN=your-huggingface-token
 
 # GitHub Container Registry Authentication
-# Run: echo \$GITHUB_TOKEN | docker login ghcr.io -u USERNAME --password-stdin
+# Run: echo \$GITHUB_TOKEN | sudo docker login ghcr.io -u USERNAME --password-stdin
 EOF
 
 # Create Docker run scripts
@@ -70,16 +70,16 @@ if [ -f "$APP_DIR/.env" ]; then
 fi
 
 # Check if container is already running
-if docker ps --format "table {{.Names}}" | grep -q "^${CONTAINER_NAME}$"; then
+if sudo docker ps --format "table {{.Names}}" | grep -q "^${CONTAINER_NAME}$"; then
     echo "Container $CONTAINER_NAME is already running"
     exit 0
 fi
 
 # Remove existing container if it exists but is stopped
-docker rm -f $CONTAINER_NAME 2>/dev/null || true
+sudo docker rm -f $CONTAINER_NAME 2>/dev/null || true
 
 # Run the container
-docker run -d \
+sudo docker run -d \
     --name $CONTAINER_NAME \
     --restart unless-stopped \
     -v "$APP_DIR/app:/app" \
@@ -117,7 +117,7 @@ log() {
 }
 
 # Check if container is running
-if ! docker ps --format "table {{.Names}}" | grep -q "^${CONTAINER_NAME}$"; then
+if ! sudo docker ps --format "table {{.Names}}" | grep -q "^${CONTAINER_NAME}$"; then
     log "Container $CONTAINER_NAME is not running. Starting..."
     
     # Run the start script
@@ -159,14 +159,14 @@ echo "   - Place your service-account-key.json in $APP_DIR/app/"
 echo "   - Or set GOOGLE_APPLICATION_CREDENTIALS environment variable"
 echo ""
 echo "3. Login to GitHub Container Registry:"
-echo "   echo \$GITHUB_TOKEN | docker login ghcr.io -u USERNAME --password-stdin"
+echo "   echo \$GITHUB_TOKEN | sudo docker login ghcr.io -u USERNAME --password-stdin"
 echo ""
 echo "4. Start the app subscriber manually (first time):"
 echo "   bash $APP_DIR/run-app-subscriber.sh"
 echo ""
 echo "5. Check container status:"
-echo "   docker ps | grep whaled"
-echo "   docker logs whaled-app-subscriber"
+echo "   sudo docker ps | grep whaled"
+echo "   sudo docker logs whaled-app-subscriber"
 echo "   tail -f $APP_DIR/logs/app-subscriber.log"
 echo "   tail -f $APP_DIR/logs/monitor.log"
 echo ""

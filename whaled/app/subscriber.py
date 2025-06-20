@@ -145,7 +145,7 @@ class AppSubscriber:
 
         try:
             # Pull image from GHCR
-            pull_cmd = f"docker pull {image_uri}"
+            pull_cmd = f"sudo docker pull {image_uri}"
             pull_result = subprocess.run(
                 pull_cmd,
                 shell=True,
@@ -157,7 +157,7 @@ class AppSubscriber:
                 raise subprocess.CalledProcessError(pull_result.returncode, pull_cmd)
             
             # Run container with environment variables for R2 access
-            run_cmd = f"""docker run --rm \
+            run_cmd = f"""sudo docker run --rm \
                 -e JOB_ID={job_id} \
                 -e R2_ENDPOINT_URL={os.environ.get('R2_ENDPOINT_URL')} \
                 -e R2_ACCESS_KEY_ID={os.environ.get('R2_ACCESS_KEY_ID')} \
