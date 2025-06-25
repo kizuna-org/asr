@@ -1,0 +1,10 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+pythonは.venv環境です。python系のコマンドを叩く際には`source .venv/bin/activate`を使用するか、`.venv/bin`以下のコマンドを使用してください。
+- `.venv/bin/python3`
+- `.venv/bin/pip3`
+- `.venv/bin/mypy`
+など...
