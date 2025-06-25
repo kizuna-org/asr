@@ -1,4 +1,4 @@
-FROM python:3.9-slim
+FROM python:3.12.8-slim
 
 # Accept proxy arguments
 ARG HTTP_PROXY="http://http-p.srv.cc.suzuka-ct.ac.jp:8080"
