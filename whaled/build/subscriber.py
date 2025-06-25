@@ -3,39 +3,15 @@
 Build Subscriber - Handles container build requests from Pub/Sub
 """
 
-print("[INFO] Importing traceback...")
-import traceback
-
-print("[INFO] Importing modules in subscriber.py...")
-
-print("[INFO] Importing json...")
 import json
-
-print("[INFO] Importing os...")
 import os
-
-print("[INFO] Importing subprocess...")
 import subprocess
-
-print("[INFO] Importing datetime from datetime...")
 from datetime import datetime
-
-print("[INFO] Importing pubsub_v1 from google.cloud...")
-from google.cloud import pubsub_v1
-
-print("[INFO] Importing boto3...")
+from google import pubsub_v1
 import boto3
-
-print("[INFO] Importing Config from botocore.config...")
 from botocore.config import Config
-
-print("[INFO] Importing load_dotenv from dotenv...")
 from dotenv import load_dotenv
-
-# Load environment variables from .env file
-print("[INFO] Loading environment variables from /app/config/.env...")
-load_dotenv("/app/config/.env")
-print("[INFO] Environment variables loaded.")
+import traceback
 
 
 class BuildSubscriber:
