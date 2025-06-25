@@ -150,29 +150,6 @@ EOT
   filename   = "${path.module}/../../whaled/app/config/.env"
 }
 
-# Generate root .env file with actual values
-resource "local_file" "root_env_file" {
-  content    = <<-EOT
-# GCP Configuration
-GCP_PROJECT_ID=${local.project_id}
-BUILD_SUBSCRIPTION=${local.build_subscription_name}
-APP_SUBSCRIPTION=${local.app_subscription_name}
-
-# Path to GCP service account key file
-GOOGLE_APPLICATION_CREDENTIALS=./whaled/app/config/app-service-account-key.json
-
-# Cloudflare R2 Configuration
-R2_ENDPOINT_URL=${local.r2_endpoint_url}
-R2_ACCESS_KEY_ID=${local.r2_access_key_id}
-R2_SECRET_ACCESS_KEY=${local.r2_secret_access_key}
-R2_BUCKET_NAME=${cloudflare_r2_bucket.app_bucket.name}
-
-# Hugging Face Configuration
-HF_TOKEN=${local.hf_token}
-EOT
-  filename   = "${path.module}/../../.env"
-}
-
 # IAM Policy Bindings for Application Service Account
 resource "google_project_iam_member" "app_pubsub_subscriber" {
   project = local.project_id
