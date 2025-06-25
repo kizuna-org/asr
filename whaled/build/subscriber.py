@@ -293,3 +293,9 @@ class BuildSubscriber:
         except KeyboardInterrupt:
             streaming_pull_future.cancel()
             print("[INFO] Subscriber stopped.")
+
+
+if __name__ == "__main__":
+    print("[INFO] Starting BuildSubscriber main...")
+    subscriber = BuildSubscriber()
+    subscriber.start_listening()
