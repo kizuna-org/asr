@@ -124,7 +124,7 @@ resource "null_resource" "create_subscriber_dir" {
 resource "local_file" "app_service_account_key_file" {
   depends_on = [null_resource.create_subscriber_dir]
   content    = base64decode(google_service_account_key.app_service_account_key.private_key)
-  filename   = "${path.module}/../../whaled/app/config/app-service-account-key.json"
+  filename   = "${path.module}/../../whaled/config/app-service-account-key.json"
 }
 
 # Generate .env file for subscriber
@@ -147,7 +147,7 @@ R2_BUCKET_NAME=${cloudflare_r2_bucket.app_bucket.name}
 # Hugging Face Configuration
 HF_TOKEN=${local.hf_token}
 EOT
-  filename   = "${path.module}/../../whaled/app/config/.env"
+  filename   = "${path.module}/../../whaled/config/.env"
 }
 
 # IAM Policy Bindings for Application Service Account

@@ -115,8 +115,8 @@ APP_DIR="$HOME/whaled"
 CONTAINER_NAME="whaled-app-subscriber"
 
 # Load environment variables
-if [ -f "$APP_DIR/.env" ]; then
-    export $(grep -v '^#' "$APP_DIR/.env" | xargs)
+if [ -f "$APP_DIR/config/.env" ]; then
+    export $(grep -v '^#' "$APP_DIR/config/.env" | xargs)
 fi
 
 # Check if container is already running
@@ -136,7 +136,7 @@ sudo docker run -d \
     -v "/var/run/docker.sock:/var/run/docker.sock" \
     -v "$APP_DIR/config:/app/config" \
     -v "$APP_DIR/shared:/app/shared" \
-    --env-file "$APP_DIR/.env" \
+    --env-file "$APP_DIR/config/.env" \
     whaled-app-subscriber
 
 echo "🚀 Started container: $CONTAINER_NAME"
@@ -150,8 +150,8 @@ APP_DIR="$HOME/whaled"
 CONTAINER_NAME="whaled-build-subscriber"
 
 # Load environment variables
-if [ -f "$APP_DIR/.env" ]; then
-    export $(grep -v '^#' "$APP_DIR/.env" | xargs)
+if [ -f "$APP_DIR/config/.env" ]; then
+    export $(grep -v '^#' "$APP_DIR/config/.env" | xargs)
 fi
 
 # Check if container is already running
@@ -170,7 +170,7 @@ sudo docker run -d \
     -v "$APP_DIR/logs:/logs" \
     -v "/var/run/docker.sock:/var/run/docker.sock" \
     -v "/tmp:/tmp" \
-    --env-file "$APP_DIR/.env" \
+    --env-file "$APP_DIR/config/.env" \
     whaled-build-subscriber
 
 echo "🚀 Started container: $CONTAINER_NAME"
@@ -245,7 +245,7 @@ echo "🎉 GPU server setup completed!"
 echo ""
 echo "📋 Next steps:"
 echo "1. ⚙️  Configure environment variables in:"
-echo "   $APP_DIR/.env"
+echo "   $APP_DIR/config/.env"
 echo ""
 echo "2. 🔑 Set up GCP service account credentials:"
 echo "   - Place your service-account-key.json in $APP_DIR/config/"

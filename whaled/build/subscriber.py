@@ -12,6 +12,10 @@ from datetime import datetime
 from google.cloud import pubsub_v1
 import boto3
 from botocore.config import Config
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv("/app/config/.env")
 
 class BuildSubscriber:
     def __init__(self):
