@@ -113,7 +113,8 @@ if [ -f "$APP_DIR/app/Dockerfile" ]; then
     sudo docker build -t whaled-app-subscriber \
         --build-arg HTTP_PROXY="http://http-p.srv.cc.suzuka-ct.ac.jp:8080" \
         --build-arg HTTPS_PROXY="http://http-p.srv.cc.suzuka-ct.ac.jp:8080" \
-        "$APP_DIR/app"
+        -f "$APP_DIR/app/Dockerfile" \
+        "$APP_DIR"
     echo "✅ App subscriber image built successfully"
 else
     echo "⚠️  App Dockerfile not found, skipping app image build"
@@ -125,7 +126,8 @@ if [ -f "$APP_DIR/build/Dockerfile" ]; then
     sudo docker build -t whaled-build-subscriber \
         --build-arg HTTP_PROXY="http://http-p.srv.cc.suzuka-ct.ac.jp:8080" \
         --build-arg HTTPS_PROXY="http://http-p.srv.cc.suzuka-ct.ac.jp:8080" \
-        "$APP_DIR/build"
+        -f "$APP_DIR/build/Dockerfile" \
+        "$APP_DIR"
     echo "✅ Build subscriber image built successfully"
 else
     echo "⚠️  Build Dockerfile not found, skipping build image build"

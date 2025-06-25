@@ -24,7 +24,7 @@ RUN pip install --no-cache-dir \
     requests
 
 # Copy subscriber script
-COPY subscriber.py .
+COPY ./build/subscriber.py .
 
 # Make script executable
 RUN chmod +x subscriber.py

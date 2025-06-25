@@ -47,11 +47,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN mkdir -p /app/config
 
 # Copy subscriber script and shared logger
-COPY subscriber.py .
-COPY ../shared /app/shared
+COPY ./app/subscriber.py .
+COPY ./shared/ /app/shared/
 
 # Copy config directory (will contain .env and service account key)
-COPY config/ /app/config/
+COPY ./config/ /app/config/
 
 # Make script executable
 RUN chmod +x subscriber.py
