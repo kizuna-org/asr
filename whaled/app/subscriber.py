@@ -14,25 +14,19 @@ from dotenv import load_dotenv
 from google.cloud import pubsub_v1
 import boto3
 from botocore.config import Config
-import logging
 
 # Load environment variables from .env file
 load_dotenv("/app/config/.env")
 
 # Add the shared directory to the path to import logger
 sys.path.append("/app/shared")
+from logger import StructuredLogger, Component
 
 
 class AppSubscriber:
     def __init__(self):
         self.project_id = os.environ.get("GCP_PROJECT_ID")
         self.subscription_name = os.environ.get("APP_SUBSCRIPTION", "app-triggers-sub")
-
-        # Set up standard logging
-        logging.basicConfig(
-            level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s"
-        )
-        self.logger = logging.getLogger("AppSubscriber")
 
         # Check network connectivity before initializing clients
         self._check_network_connectivity()
@@ -49,6 +43,9 @@ class AppSubscriber:
         self.subscription_path = self.subscriber.subscription_path(
             self.project_id, self.subscription_name
         )
+
+        # Initialize structured logger
+        self.logger = StructuredLogger(Component.APP_SUBSCRIBER)
 
         # Cloudflare R2 setup
         self.r2_client = boto3.client(
@@ -70,7 +67,10 @@ class AppSubscriber:
             )
             return json.loads(response["Body"].read().decode("utf-8"))
         except Exception as e:
-            self.logger.error(f"Failed to get status for job {job_id}: {e}")
+            self.logger.error(
+                f"Failed to get status for job {job_id}",
+                {"error": str(e), "job_id": job_id},
+            )
             return None
 
     def update_status(self, job_id, status_data):
@@ -85,7 +85,10 @@ class AppSubscriber:
             )
             return True
         except Exception as e:
-            self.logger.error(f"Failed to update status for job {job_id}: {e}")
+            self.logger.error(
+                f"Failed to update status for job {job_id}",
+                {"error": str(e), "job_id": job_id},
+            )
             return False
 
     def process_message(self, message):
@@ -95,16 +98,18 @@ class AppSubscriber:
             job_id = data.get("job_id")
 
             if not job_id:
-                self.logger.error(f"Message missing job_id: {data}")
+                self.logger.error("Message missing job_id", {"data": data})
                 message.ack()
                 return
 
-            self.logger.info(f"Processing job {job_id}")
+            self.logger.info(f"Processing job {job_id}", {"job_id": job_id})
 
             # Get current status
             status = self.get_current_status(job_id)
             if not status:
-                self.logger.error(f"No status found for job {job_id}")
+                self.logger.error(
+                    f"No status found for job {job_id}", {"job_id": job_id}
+                )
                 message.ack()
                 return
 
@@ -128,7 +133,8 @@ class AppSubscriber:
 
         except Exception as e:
             self.logger.error(
-                f"Error processing message: {e}\n" f"{traceback.format_exc()}"
+                "Error processing message",
+                {"error": str(e), "traceback": traceback.format_exc()},
             )
             # Acknowledge the message to prevent redelivery
             message.ack()
@@ -137,13 +143,15 @@ class AppSubscriber:
         """Run the job in a Docker container"""
         try:
             # Pull the latest app image
-            self.logger.info(f"Pulling latest app image for job {job_id}")
+            self.logger.info(
+                f"Pulling latest app image for job {job_id}", {"job_id": job_id}
+            )
             subprocess.run(
                 ["docker", "pull", "ghcr.io/kizuna-org/chumchat-app:latest"], check=True
             )
 
             # Run the container
-            self.logger.info(f"Starting container for job {job_id}")
+            self.logger.info(f"Starting container for job {job_id}", {"job_id": job_id})
 
             # Prepare the docker run command
             cmd = f"""
@@ -162,26 +170,34 @@ class AppSubscriber:
 
             if result.returncode != 0:
                 self.logger.error(
-                    f"Container for job {job_id} exited with non-zero status: "
-                    f"{result.returncode}"
+                    f"Container for job {job_id} exited with non-zero status",
+                    {"job_id": job_id, "return_code": result.returncode},
                 )
                 return False
 
-            self.logger.info(f"Container for job {job_id} completed successfully")
+            self.logger.info(
+                f"Container for job {job_id} completed successfully", {"job_id": job_id}
+            )
             return True
 
         except subprocess.CalledProcessError as e:
-            self.logger.error(f"Error running container for job {job_id}: {e}")
+            self.logger.error(
+                f"Error running container for job {job_id}",
+                {"job_id": job_id, "error": str(e)},
+            )
             return False
         except Exception as e:
-            self.logger.error(f"Unexpected error running job {job_id}: {e}")
+            self.logger.error(
+                f"Unexpected error running job {job_id}",
+                {"job_id": job_id, "error": str(e)},
+            )
             return False
 
     def start_listening(self):
         """Start listening for messages"""
         self.logger.info(
-            f"Starting subscriber: project_id={self.project_id}, "
-            f"subscription={self.subscription_name}"
+            "Starting subscriber",
+            {"project_id": self.project_id, "subscription": self.subscription_name},
         )
 
         def callback(message):
@@ -205,15 +221,15 @@ class AppSubscriber:
             except Exception as e:
                 retry_count += 1
                 self.logger.error(
-                    f"Subscriber connection error (attempt {retry_count}/"
-                    f"{max_retries}): {e}\n{traceback.format_exc()}"
+                    f"Subscriber connection error (attempt {retry_count}/{max_retries})",
+                    {"error": str(e), "traceback": traceback.format_exc()},
                 )
 
                 if retry_count >= max_retries:
-                    self.logger.error("Max retries reached, giving up")
+                    self.logger.error("Max retries reached, giving up", {})
                     raise
 
-                self.logger.info(f"Retrying in {retry_delay} seconds...")
+                self.logger.info(f"Retrying in {retry_delay} seconds...", {})
                 time.sleep(retry_delay)
                 retry_delay *= 2  # Exponential backoff
 
