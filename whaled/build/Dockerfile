@@ -21,7 +21,8 @@ WORKDIR /app
 RUN pip install --no-cache-dir \
     google-cloud-pubsub \
     boto3 \
-    requests
+    requests \
+    python-dotenv
 
 # Copy subscriber script
 COPY ./build/subscriber.py .

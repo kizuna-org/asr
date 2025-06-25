@@ -24,11 +24,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iputils-ping \
     net-tools \
     && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir --timeout 120 --retries 15 \
-    google-cloud-pubsub==2.13.0 \
-    boto3==1.26.0 \
-    requests==2.28.1 \
-    python-dotenv==0.21.0
+    && pip install --no-cache-dir \
+    google-cloud-pubsub \
+    boto3 \
+    requests \
+    python-dotenv
 
 # Create config directory
 RUN mkdir -p /app/config
