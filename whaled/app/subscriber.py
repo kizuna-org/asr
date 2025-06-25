@@ -2,6 +2,8 @@
 App Subscriber - Handles application execution requests from Pub/Sub
 """
 
+print("app")
+
 import json
 import os
 import subprocess

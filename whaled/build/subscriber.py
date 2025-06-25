@@ -2,6 +2,8 @@
 Build Subscriber - Handles container build requests from Pub/Sub
 """
 
+print("build")
+
 try:
     import json
 
