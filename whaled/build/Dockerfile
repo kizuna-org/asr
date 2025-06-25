@@ -10,7 +10,6 @@ ENV HTTPS_PROXY=${HTTPS_PROXY}
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
-    git \
     docker.io \
     && rm -rf /var/lib/apt/lists/*
 
