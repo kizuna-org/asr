@@ -13,6 +13,9 @@ from botocore.config import Config
 from dotenv import load_dotenv
 import traceback
 
+# Load environment variables from .env file
+load_dotenv("/app/config/.env")
+
 
 class BuildSubscriber:
     def __init__(self):

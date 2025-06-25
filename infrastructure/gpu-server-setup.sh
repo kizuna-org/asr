@@ -34,6 +34,14 @@ echo "📁 Created application directory: $APP_DIR"
 if [ -d "whaled" ]; then
     echo "📋 Copying whaled project files..."
 
+    # Copy requirements.txt
+    if [ -f "whaled/requirements.txt" ]; then
+        cp whaled/requirements.txt "$APP_DIR/"
+        echo "✅ Copied requirements.txt"
+    else
+        echo "⚠️  Requirements.txt not found at whaled/requirements.txt"
+    fi
+
     # Copy app subscriber
     if [ -f "whaled/app/subscriber.py" ]; then
         cp whaled/app/subscriber.py "$APP_DIR/app/"

@@ -1,0 +1,5 @@
+google-cloud-pubsub
+boto3
+botocore
+requests
+python-dotenv

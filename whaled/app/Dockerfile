@@ -23,13 +23,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     dnsutils \
     iputils-ping \
     net-tools \
-    && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir \
-    google-cloud-pubsub \
-    boto3 \
-    botocore \
-    requests \
-    python-dotenv
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements.txt and install Python dependencies
+COPY ./requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
 
 # Create config directory
 RUN mkdir -p /app/config
