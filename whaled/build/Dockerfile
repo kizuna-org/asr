@@ -24,8 +24,15 @@ RUN pip install --no-cache-dir \
     requests \
     python-dotenv
 
-# Copy subscriber script
+# Create config directory
+RUN mkdir -p /app/config
+
+# Copy subscriber script and shared logger
 COPY ./build/subscriber.py .
+COPY ./shared/ /app/shared/
+
+# Copy config directory (will contain .env and service account key)
+COPY ./config/ /app/config/
 
 # Make script executable
 RUN chmod +x subscriber.py
