@@ -46,11 +46,11 @@ fi
 IMAGES=$(grep -E '^FROM ' "$DOCKERFILE" | awk '{print $2}' | sort | uniq)
 echo "🔍 Pulling base images used in $DOCKERFILE..."
 for IMAGE in $IMAGES; do
-  echo "docker pull $IMAGE"
-  docker pull "$IMAGE"
+  echo "sudo docker pull $IMAGE"
+  sudo docker pull "$IMAGE"
 done
 echo "✅ All base images pulled."
 
-echo "🚀 Building image with docker build..."
-docker build -f "$DOCKERFILE" "$CONTEXT" "${BUILD_ARGS[@]}"
+echo "🚀 Building image with sudo docker build..."
+sudo docker build -f "$DOCKERFILE" "$CONTEXT" "${BUILD_ARGS[@]}"
 echo "✅ Build completed." 
