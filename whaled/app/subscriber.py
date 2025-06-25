@@ -252,8 +252,3 @@ class AppSubscriber:
             print(f"Network connectivity check failed: {str(e)}")
             print("Continuing anyway, will retry with exponential backoff...")
             return False
-
-
-if __name__ == "__main__":
-    subscriber = AppSubscriber()
-    subscriber.start_listening()
