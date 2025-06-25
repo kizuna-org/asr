@@ -76,34 +76,6 @@ else
     echo "❌ whaled directory not found. Please run this script from the project root."
 fi
 
-# Create environment configuration template
-echo "⚙️  Creating environment configuration template..."
-cat >"$APP_DIR/.env" <<EOF
-# GCP Configuration
-GCP_PROJECT_ID=your-project-id
-BUILD_SUBSCRIPTION=build-triggers-sub
-APP_SUBSCRIPTION=app-triggers-sub
-
-# Cloudflare R2 Configuration
-R2_ENDPOINT_URL=https://your-account-id.r2.cloudflarestorage.com
-R2_ACCESS_KEY_ID=your-r2-access-key
-R2_SECRET_ACCESS_KEY=your-r2-secret-key
-R2_BUCKET_NAME=your-bucket-name
-
-# Hugging Face Configuration
-HF_TOKEN=your-huggingface-token
-
-# GitHub Container Registry Authentication
-# Run: echo \$GITHUB_TOKEN | sudo docker login ghcr.io -u USERNAME --password-stdin
-
-# Proxy Configuration (if needed)
-HTTP_PROXY=http://http-p.srv.cc.suzuka-ct.ac.jp:8080
-HTTPS_PROXY=http://http-p.srv.cc.suzuka-ct.ac.jp:8080
-EOF
-
-# Copy environment file to config directory for containers
-cp "$APP_DIR/.env" "$APP_DIR/config/"
-
 # Build Docker images
 echo "🐳 Building Docker images..."
 
