@@ -24,12 +24,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     iputils-ping \
     net-tools \
     && rm -rf /var/lib/apt/lists/* \
-    && echo "Checking network connectivity..." \
-    && ping -c 1 8.8.8.8 || echo "Warning: Network connectivity to DNS server issues detected" \
-    && curl -s --connect-timeout 5 https://pypi.org || echo "Warning: Network connectivity to PyPI issues detected" \
-    && echo "Using alternative pip install method with multiple mirrors..." \
-    && pip config set global.index-url https://pypi.org/simple/ \
-    && pip config set global.extra-index-url https://pypi.tuna.tsinghua.edu.cn/simple/ https://mirrors.aliyun.com/pypi/simple/ \
     && pip install --no-cache-dir --timeout 120 --retries 15 \
     google-cloud-pubsub==2.13.0 \
     boto3==1.26.0 \
