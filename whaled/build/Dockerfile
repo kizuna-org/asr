@@ -21,6 +21,7 @@ WORKDIR /app
 RUN pip install --no-cache-dir \
     google-cloud-pubsub \
     boto3 \
+    botocore \
     requests \
     python-dotenv
 

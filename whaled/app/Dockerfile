@@ -27,6 +27,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && pip install --no-cache-dir \
     google-cloud-pubsub \
     boto3 \
+    botocore \
     requests \
     python-dotenv
 
