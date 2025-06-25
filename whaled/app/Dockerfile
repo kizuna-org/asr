@@ -14,7 +14,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Configure DNS and networking for better reliability
-RUN mkdir -p /etc/docker/daemon.json && echo '{"dns": ["8.8.8.8", "8.8.4.4", "1.1.1.1"]}' > /etc/docker/daemon.json \
+RUN mkdir -p /etc/docker && echo '{"dns": ["8.8.8.8", "8.8.4.4", "1.1.1.1"]}' > /etc/docker/daemon.json \
     && echo "nameserver 8.8.8.8" > /etc/resolv.conf \
     && echo "nameserver 8.8.4.4" >> /etc/resolv.conf \
     && echo "nameserver 1.1.1.1" >> /etc/resolv.conf \
