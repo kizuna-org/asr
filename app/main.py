@@ -17,6 +17,20 @@ from huggingface_hub import HfApi, Repository
 sys.path.append('/app/shared')
 from logger import StructuredLogger, Component
 
+# --- Proxy setup ---
+# If http_proxy/https_proxy is set in the environment, ensure they are in os.environ
+for proxy_var in ["http_proxy", "https_proxy", "HTTP_PROXY", "HTTPS_PROXY"]:
+    proxy_val = os.environ.get(proxy_var)
+    if proxy_val:
+        os.environ[proxy_var] = proxy_val
+
+# Helper to build proxies dict for boto3
+proxies = {}
+if os.environ.get("http_proxy"):
+    proxies["http"] = os.environ["http_proxy"]
+if os.environ.get("https_proxy"):
+    proxies["https"] = os.environ["https_proxy"]
+
 class Application:
     def __init__(self):
         self.job_id = os.environ.get('JOB_ID')
@@ -32,7 +46,7 @@ class Application:
             endpoint_url=os.environ.get('R2_ENDPOINT_URL'),
             aws_access_key_id=os.environ.get('R2_ACCESS_KEY_ID'),
             aws_secret_access_key=os.environ.get('R2_SECRET_ACCESS_KEY'),
-            config=Config(signature_version='s3v4'),
+            config=Config(signature_version='s3v4', proxies=proxies if proxies else None),
             region_name='auto'
         )
         self.bucket_name = os.environ.get('R2_BUCKET_NAME')
