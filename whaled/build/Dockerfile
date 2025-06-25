@@ -17,8 +17,15 @@ RUN apt-get update && apt-get install -y \
 # Set working directory
 WORKDIR /app
 
-# Install Python dependencies
-RUN pip install --no-cache-dir \
+# Install Python dependencies with improved network resilience
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    curl \
+    dnsutils \
+    iputils-ping \
+    net-tools \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir \
     google-cloud-pubsub \
     boto3 \
     botocore \
