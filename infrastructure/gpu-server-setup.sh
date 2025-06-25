@@ -84,17 +84,26 @@ else
     echo "❌ whaled directory not found. Please run this script from the project root."
 fi
 
+# docker_build.shをホームディレクトリに配置
+if [ -f "$(dirname "$0")/docker_build.sh" ]; then
+    cp "$(dirname "$0")/docker_build.sh" ~/docker_build.sh
+    chmod +x ~/docker_build.sh
+    echo "✅ docker_build.shをホームディレクトリに配置しました"
+else
+    echo "❌ docker_build.shが見つかりません: $(dirname "$0")/docker_build.sh"
+    exit 1
+fi
+
 # Build Docker images
 echo "🐳 Building Docker images..."
 
 # Build app subscriber image
 if [ -f "$APP_DIR/app/Dockerfile" ]; then
     echo "🔨 Building app subscriber image..."
-    sudo docker build -t whaled-app-subscriber \
+    bash ~/docker_build.sh -f "$APP_DIR/app/Dockerfile" "$APP_DIR" \
         --build-arg HTTP_PROXY="http://http-p.srv.cc.suzuka-ct.ac.jp:8080" \
         --build-arg HTTPS_PROXY="http://http-p.srv.cc.suzuka-ct.ac.jp:8080" \
-        -f "$APP_DIR/app/Dockerfile" \
-        "$APP_DIR"
+        -t whaled-app-subscriber
     echo "✅ App subscriber image built successfully"
 else
     echo "⚠️  App Dockerfile not found, skipping app image build"
@@ -103,11 +112,10 @@ fi
 # Build build subscriber image
 if [ -f "$APP_DIR/build/Dockerfile" ]; then
     echo "🔨 Building build subscriber image..."
-    sudo docker build -t whaled-build-subscriber \
+    bash ~/docker_build.sh -f "$APP_DIR/build/Dockerfile" "$APP_DIR" \
         --build-arg HTTP_PROXY="http://http-p.srv.cc.suzuka-ct.ac.jp:8080" \
         --build-arg HTTPS_PROXY="http://http-p.srv.cc.suzuka-ct.ac.jp:8080" \
-        -f "$APP_DIR/build/Dockerfile" \
-        "$APP_DIR"
+        -t whaled-build-subscriber
     echo "✅ Build subscriber image built successfully"
 else
     echo "⚠️  Build Dockerfile not found, skipping build image build"
