@@ -7,7 +7,7 @@ import json
 import os
 import subprocess
 from datetime import datetime
-from google import pubsub_v1
+from google.cloud import pubsub_v1
 import boto3
 from botocore.config import Config
 from dotenv import load_dotenv
