@@ -13,13 +13,6 @@ RUN apt-get update && apt-get install -y \
     docker.io \
     && rm -rf /var/lib/apt/lists/*
 
-# Configure DNS and networking for better reliability
-RUN mkdir -p /etc/docker && echo '{"dns": ["8.8.8.8", "8.8.4.4", "1.1.1.1"]}' > /etc/docker/daemon.json \
-    && echo "nameserver 8.8.8.8" > /etc/resolv.conf \
-    && echo "nameserver 8.8.4.4" >> /etc/resolv.conf \
-    && echo "nameserver 1.1.1.1" >> /etc/resolv.conf \
-    && echo "options timeout:2 attempts:3 rotate single-request-reopen" >> /etc/resolv.conf
-
 # Set working directory
 WORKDIR /app
 
