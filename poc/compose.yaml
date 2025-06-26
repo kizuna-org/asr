@@ -1,7 +1,7 @@
 # compose.yaml
 
 services:
-  # Jenkinsサービス
+  # Jenkinsサービス (変更なし)
   jenkins:
     build:
       context: ./jenkins
@@ -10,7 +10,7 @@ services:
       - "8080:8080"
       - "50000:50000"
     volumes:
-      - jenkins_home:/var/jenkins_home
+      - ./jenkins_home:/var/jenkins_home
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - ci-network
@@ -24,22 +24,15 @@ services:
     ports:
       - "8081:80"
     volumes:
-      # 変更点: named volumeの代わりに、ホストの相対パスをマウント
-      # './git-data' ディレクトリがコンテナ内の '/git' にマウントされる
       - ./git-data:/git
     environment:
+      # --- 修正点: PUID/PGIDの定義を元に戻す ---
       - GIT_USER_1=poc_user
       - GIT_PASS_1=poc_password
-      # 所有権の問題を避けるため、PUIDとPGIDを指定
       - PUID=1000
       - PGID=1000
     networks:
       - ci-network
-
-volumes:
-  # jenkins_homeはnamed volumeのまま
-  jenkins_home:
-  # git_dataの定義は不要になったので削除
 
 networks:
   ci-network:
