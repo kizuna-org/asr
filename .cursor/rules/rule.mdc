@@ -1,0 +1,31 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+## ドキュメント
+
+`/docs/*.md`は絶対に読んでください。
+また、`/docs/dev/`は実装経緯が書いてあるので必要に応じて読んでください。
+**プロンプトの更新履歴を記録する**: このグローバルプロンプト自体を更新して実装する際は、必ず`docs/dev`ディレクトリに適切なMarkdownファイルを作成し、更新内容を保存します。ファイル名は`YYYY-MM-DD_prompt_update_summary.md`のような形式を推奨します。
+なお、今日の日付は`date +%Y-%m-%d`で取得できます。**絶対に今日の日付を使用してください**
+
+## Git コミット
+
+**作業完了後のコミット**: タスクが完了した際は、必ず適切なコミットメッセージと共にGitコミットを実行してください。
+コミットメッセージは英語にしてください。
+
+### コミットの実行手順
+
+1. 変更されたファイルをステージング: `git add .`
+2. 適切なコミットメッセージでコミット: `git commit -m "適切なコミットメッセージ"`
+
+### コミットメッセージの例
+
+```bash
+git commit -m "feat: add new feature"
+git commit -m "fix: fix bug"
+git commit -m "docs: update documentation"
+git commit -m "refactor: refactor code"
+git commit -m "chore: update configuration files"
+```
