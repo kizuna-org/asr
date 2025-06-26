@@ -3,6 +3,26 @@
 
 set -e
 
+# --- Safe mode flag parse ---
+SAFE_MODE=0
+for arg in "$@"
+do
+    if [[ "$arg" == "--safe" ]]; then
+        SAFE_MODE=1
+    fi
+    # 互換性のため今後他のフラグもここでパース可
+    # shiftはしない
+done
+
+if [[ $SAFE_MODE -eq 1 ]]; then
+    echo "🛡️  Safe mode enabled: All operations are limited to the repository directory."
+    APP_DIR="$(pwd)/whaled_local_build"
+    DOCKER_BUILD_SH="$APP_DIR/docker_build.sh"
+else
+    APP_DIR="$HOME/whaled"
+    DOCKER_BUILD_SH="~/docker_build.sh"
+fi
+
 echo "🚀 Setting up GPU server for CI/CD pipeline..."
 
 # Check if Docker is available
@@ -20,8 +40,7 @@ if ! sudo docker ps &>/dev/null; then
     exit 1
 fi
 
-# Create application directory in user's home
-APP_DIR="$HOME/whaled"
+# Create application directory
 mkdir -p "$APP_DIR/build"
 mkdir -p "$APP_DIR/app"
 mkdir -p "$APP_DIR/logs"
@@ -84,11 +103,11 @@ else
     echo "❌ whaled directory not found. Please run this script from the project root."
 fi
 
-# docker_build.shをホームディレクトリに配置
+# docker_build.shを配置
 if [ -f "$(dirname "$0")/docker_build.sh" ]; then
-    cp "$(dirname "$0")/docker_build.sh" ~/docker_build.sh
-    chmod +x ~/docker_build.sh
-    echo "✅ docker_build.shをホームディレクトリに配置しました"
+    cp "$(dirname "$0")/docker_build.sh" "$DOCKER_BUILD_SH"
+    chmod +x "$DOCKER_BUILD_SH"
+    echo "✅ docker_build.shを${DOCKER_BUILD_SH}に配置しました"
 else
     echo "❌ docker_build.shが見つかりません: $(dirname "$0")/docker_build.sh"
     exit 1
@@ -100,11 +119,17 @@ echo "🐳 Building Docker images..."
 # Build app subscriber image
 if [ -f "$APP_DIR/app/Dockerfile" ]; then
     echo "🔨 Building app subscriber image..."
-    bash ~/docker_build.sh -f "$APP_DIR/app/Dockerfile" "$APP_DIR" \
+    bash "$DOCKER_BUILD_SH" -f "$APP_DIR/app/Dockerfile" "$APP_DIR" \
         --build-arg HTTP_PROXY="http://http-p.srv.cc.suzuka-ct.ac.jp:8080" \
         --build-arg HTTPS_PROXY="http://http-p.srv.cc.suzuka-ct.ac.jp:8080" \
         -t whaled-app-subscriber
     echo "✅ App subscriber image built successfully"
+    if [[ $SAFE_MODE -eq 1 ]]; then
+        mkdir -p test/host/
+        echo "📦 Exporting whaled-app-subscriber image to test/host/whaled-app-subscriber.tar..."
+        sudo docker save whaled-app-subscriber -o test/host/whaled-app-subscriber.tar
+        echo "✅ Exported whaled-app-subscriber image."
+    fi
 else
     echo "⚠️  App Dockerfile not found, skipping app image build"
 fi
@@ -112,11 +137,17 @@ fi
 # Build build subscriber image
 if [ -f "$APP_DIR/build/Dockerfile" ]; then
     echo "🔨 Building build subscriber image..."
-    bash ~/docker_build.sh -f "$APP_DIR/build/Dockerfile" "$APP_DIR" \
+    bash "$DOCKER_BUILD_SH" -f "$APP_DIR/build/Dockerfile" "$APP_DIR" \
         --build-arg HTTP_PROXY="http://http-p.srv.cc.suzuka-ct.ac.jp:8080" \
         --build-arg HTTPS_PROXY="http://http-p.srv.cc.suzuka-ct.ac.jp:8080" \
         -t whaled-build-subscriber
     echo "✅ Build subscriber image built successfully"
+    if [[ $SAFE_MODE -eq 1 ]]; then
+        mkdir -p test/host/
+        echo "📦 Exporting whaled-build-subscriber image to test/host/whaled-build-subscriber.tar..."
+        sudo docker save whaled-build-subscriber -o test/host/whaled-build-subscriber.tar
+        echo "✅ Exported whaled-build-subscriber image."
+    fi
 else
     echo "⚠️  Build Dockerfile not found, skipping build image build"
 fi
@@ -241,45 +272,71 @@ chmod +x "$APP_DIR/run-app-subscriber.sh"
 chmod +x "$APP_DIR/run-build-subscriber.sh"
 chmod +x "$APP_DIR/monitor-containers.sh"
 
-# Create cron job to monitor containers every 5 minutes
-echo "⏰ Setting up cron job for container monitoring..."
-CRON_JOB="*/5 * * * * $APP_DIR/monitor-containers.sh"
-
-# Check if cron job already exists
-if ! crontab -l 2>/dev/null | grep -q "$APP_DIR/monitor-containers.sh"; then
-    # Add the cron job
-    (
-        crontab -l 2>/dev/null
-        echo "$CRON_JOB"
-    ) | crontab -
-    echo "✅ Added cron job to monitor containers every 5 minutes"
+# --- Cron job and global changes ---
+if [[ $SAFE_MODE -eq 0 ]]; then
+    # Create cron job to monitor containers every 5 minutes
+    echo "⏰ Setting up cron job for container monitoring..."
+    CRON_JOB="*/5 * * * * $APP_DIR/monitor-containers.sh"
+    if ! crontab -l 2>/dev/null | grep -q "$APP_DIR/monitor-containers.sh"; then
+        (
+            crontab -l 2>/dev/null
+            echo "$CRON_JOB"
+        ) | crontab -
+        echo "✅ Added cron job to monitor containers every 5 minutes"
+    else
+        echo "🔄 Cron job already exists"
+    fi
 else
-    echo "🔄 Cron job already exists"
+    echo "🛡️  [Safe mode] Skipping cron job and global environment changes."
 fi
 
+# --- Next steps ---
 echo "🎉 GPU server setup completed!"
 echo ""
-echo "📋 Next steps:"
-echo "1. ⚙️  Configure environment variables in:"
-echo "   $APP_DIR/config/.env"
-echo ""
-echo "2. 🔑 Set up GCP service account credentials:"
-echo "   - Place your service-account-key.json in $APP_DIR/config/"
-echo "   - The containers will automatically use it from /app/config/"
-echo ""
-echo "3. 🔐 Login to GitHub Container Registry:"
-echo "   echo \$GITHUB_TOKEN | sudo docker login ghcr.io -u USERNAME --password-stdin"
-echo ""
-echo "4. 🚀 Start the containers manually (first time):"
-echo "   bash $APP_DIR/run-app-subscriber.sh"
-echo "   bash $APP_DIR/run-build-subscriber.sh"
-echo ""
-echo "5. 📊 Check container status:"
-echo "   sudo docker ps | grep whaled"
-echo "   sudo docker logs whaled-app-subscriber"
-echo "   sudo docker logs whaled-build-subscriber"
-echo "   tail -f $APP_DIR/logs/monitor.log"
-echo ""
-echo "6. ⏰ The cron job will automatically restart containers if they stop"
-echo "   To view cron jobs: crontab -l"
-echo "   To remove cron job: crontab -e (then delete the line)"
+if [[ $SAFE_MODE -eq 1 ]]; then
+    echo "🛡️  [Safe mode] Next steps:"
+    echo "1. ⚙️  Configure environment variables in:"
+    echo "   $APP_DIR/config/.env"
+    echo ""
+    echo "2. 🔑 Set up GCP service account credentials:"
+    echo "   - Place your service-account-key.json in $APP_DIR/config/"
+    echo "   - The containers will automatically use it from /app/config/"
+    echo ""
+    echo "3. 🚀 Start the containers manually:"
+    echo "   bash $APP_DIR/run-app-subscriber.sh"
+    echo "   bash $APP_DIR/run-build-subscriber.sh"
+    echo ""
+    echo "4. 📊 Check container status:"
+    echo "   sudo docker ps | grep whaled"
+    echo "   sudo docker logs whaled-app-subscriber"
+    echo "   sudo docker logs whaled-build-subscriber"
+    echo "   tail -f $APP_DIR/logs/monitor.log"
+    echo ""
+    echo "5. ⏰ [Safe mode] Cron job is not set up. Monitor containers manually if needed."
+    echo "   (You can run $APP_DIR/monitor-containers.sh manually)"
+else
+    echo "📋 Next steps:"
+    echo "1. ⚙️  Configure environment variables in:"
+    echo "   $APP_DIR/config/.env"
+    echo ""
+    echo "2. 🔑 Set up GCP service account credentials:"
+    echo "   - Place your service-account-key.json in $APP_DIR/config/"
+    echo "   - The containers will automatically use it from /app/config/"
+    echo ""
+    echo "3. 🔐 Login to GitHub Container Registry:"
+    echo "   echo \$GITHUB_TOKEN | sudo docker login ghcr.io -u USERNAME --password-stdin"
+    echo ""
+    echo "4. 🚀 Start the containers manually (first time):"
+    echo "   bash $APP_DIR/run-app-subscriber.sh"
+    echo "   bash $APP_DIR/run-build-subscriber.sh"
+    echo ""
+    echo "5. 📊 Check container status:"
+    echo "   sudo docker ps | grep whaled"
+    echo "   sudo docker logs whaled-app-subscriber"
+    echo "   sudo docker logs whaled-build-subscriber"
+    echo "   tail -f $APP_DIR/logs/monitor.log"
+    echo ""
+    echo "6. ⏰ The cron job will automatically restart containers if they stop"
+    echo "   To view cron jobs: crontab -l"
+    echo "   To remove cron job: crontab -e (then delete the line)"
+fi

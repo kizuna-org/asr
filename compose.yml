@@ -1,0 +1,57 @@
+services:
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    command: server /data --console-address ":9001"
+    ports:
+      - "9000:9000" # S3 API
+      - "9001:9001" # 管理画面
+    volumes:
+      - minio-data:/data
+    networks:
+      - asr-net
+
+  pubsub:
+    image: google/cloud-sdk:latest
+    container_name: pubsub
+    command: >
+      gcloud beta emulators pubsub start --host-port=0.0.0.0:8085
+    ports:
+      - "8085:8085"
+    networks:
+      - asr-net
+
+  host:
+    build:
+      context: .
+      dockerfile: test/host/Dockerfile
+    container_name: host
+    privileged: true
+    environment:
+      DOCKER_TLS_CERTDIR: ""
+    volumes:
+      - host-data:/data
+    ports:
+      - "2375:2375" # Dockerデーモン
+    networks:
+      - asr-net
+      # GPUが必要な場合は以下を有効化
+      # deploy:
+      #   resources:
+      #     reservations:
+      #       devices:
+      #         - driver: nvidia
+      #           count: all
+      #           capabilities: [gpu]
+
+volumes:
+  minio-data:
+  host-data:
+
+networks:
+  asr-net:
+    driver: bridge
+
