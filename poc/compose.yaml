@@ -1,19 +1,45 @@
+# compose.yaml
+
 services:
+  # Jenkinsサービス
   jenkins:
     build:
-      context: .
+      context: ./jenkins
       dockerfile: Dockerfile
     ports:
       - "8080:8080"
       - "50000:50000"
     volumes:
       - jenkins_home:/var/jenkins_home
-      - /var/run/docker.sock:/var/run/docker.sock # ホストのDockerソケットをマウント
+      - /var/run/docker.sock:/var/run/docker.sock
     networks:
-      - jenkins
+      - ci-network
+    depends_on:
+      - git-server
+
+  # Gitサーバーサービス
+  git-server:
+    build: ./git-server
+    container_name: git-server
+    ports:
+      - "8081:80"
+    volumes:
+      # 変更点: named volumeの代わりに、ホストの相対パスをマウント
+      # './git-data' ディレクトリがコンテナ内の '/git' にマウントされる
+      - ./git-data:/git
+    environment:
+      - GIT_USER_1=poc_user
+      - GIT_PASS_1=poc_password
+      # 所有権の問題を避けるため、PUIDとPGIDを指定
+      - PUID=1000
+      - PGID=1000
+    networks:
+      - ci-network
 
 volumes:
+  # jenkins_homeはnamed volumeのまま
   jenkins_home:
+  # git_dataの定義は不要になったので削除
 
 networks:
-  jenkins:
+  ci-network:
