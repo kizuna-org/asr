@@ -64,7 +64,7 @@ RUN pip install --no-cache-dir "numpy>=1.21.0"
 RUN pip install --no-cache-dir "pydub>=0.25.1"
 
 ARG REF=main
-RUN git clone https://github.com/huggingface/transformers && cd transformers && git checkout $REF
+RUN git clone https://github.com/huggingface/transformers --depth=1 -b $REF
 # Install transformers without dev-tensorflow to avoid version conflicts
 RUN pip install --no-cache-dir -e ./transformers[testing]
 
