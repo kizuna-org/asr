@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.9.1-cudnn-devel-ubuntu24.04
+FROM nvidia/cuda:12.3.2-cudnn9-devel-ubuntu22.04
 LABEL maintainer="Hugging Face"
 
 # Accept proxy arguments
