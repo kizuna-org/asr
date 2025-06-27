@@ -1,4 +1,4 @@
-# jenkins/casc.yaml (最終・確定版)
+# jenkins/casc.yaml
 credentials:
   system:
     domainCredentials:
@@ -13,25 +13,39 @@ credentials:
 jobs:
   - script: >
       multibranchPipelineJob('gitea-poc-multibranch') {
-        description('Job created by Jenkins as Code')
+        description('Job created by Jenkins as Code - Using Git branch source for Gitea')
         branchSources {
-          github {
-            id('gitea-source-from-jcasc')
-            apiUri("${GITEA_API_URL}")
-            scanCredentialsId("${GITEA_CREDENTIALS_ID}")
-            repoOwner("${GITEA_USER}")
-            repository("${GITEA_REPO}")
-            // --- ここからが修正点 ---
-            // 不要な traits {} ブロックを削除し、インデントを修正
-            gitHubBranchDiscovery {
-              strategyId(1)
+          git {
+            id('gitea-git-source')
+            remote("${GITEA_API_URL}/${GITEA_USER}/${GITEA_REPO}.git")
+            credentialsId("${GITEA_CREDENTIALS_ID}")
+            traits {
+              // ブランチを検出
+              gitBranchDiscovery()
+              // 必要に応じてPull Requestを検出
+              // gitTagDiscovery()
             }
-            // --- ここまで ---
+          }
+        }
+        configure { node ->
+          // Giteaのwebhookサポートを有効化
+          def traits = node / 'sources' / 'data' / 'jenkins.branch.BranchSource' / 'source' / 'traits'
+          traits << 'jenkins.plugins.git.traits.RefSpecsSCMSourceTrait' {
+            templates {
+              'jenkins.plugins.git.traits.RefSpecsSCMSourceTrait_-RefSpecTemplate' {
+                value('+refs/heads/*:refs/remotes/@{remote}/*')
+              }
+            }
           }
         }
         orphanedItemStrategy {
           pruneDeadBranches(true)
           daysToKeep(7)
           numToKeep(10)
+        }
+        factory {
+          workflowBranchProjectFactory {
+            scriptPath('Jenkinsfile')
+          }
         }
       }

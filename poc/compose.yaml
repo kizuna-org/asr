@@ -20,7 +20,7 @@ services:
     user: "${UID}:${GID}"
     # --- ここまでが追記 ---
     environment:
-      - CASC_JENKINS_CONFIG=/var/jenkins_home/casc.yaml
+      - CASC_JENKINS_CONFIG=/usr/share/jenkins/ref/casc.yaml
     env_file:
       - .env
     depends_on:

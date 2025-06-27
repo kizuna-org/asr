@@ -3,3 +3,4 @@ job-dsl:latest
 workflow-aggregator:latest
 git:latest
 github-branch-source:latest
+gitea:latest
