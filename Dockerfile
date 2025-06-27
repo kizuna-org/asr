@@ -29,6 +29,19 @@ RUN apt-get install -y --no-install-recommends \
     cuda-nvrtc-12-9 \
     cuda-nvrtc-dev-12-9
 
+RUN apt-get install -y --no-install-recommends \
+    cuda-cccl-12-9 \
+    libcublas-12-9 \
+    libcublas-dev-12-9 \
+    libcufft-12-9 \
+    libcufft-dev-12-9 \
+    libcurand-12-9 \
+    libcurand-dev-12-9 \
+    libcusolver-12-9 \
+    libcusolver-dev-12-9 \
+    libcusparse-12-9 \
+    libcusparse-dev-12-9
+
 # Add CUDA libraries to the path
 ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/local/cuda/extras/CUPTI/lib64:${LD_LIBRARY_PATH}
 ENV CUDA_HOME=/usr/local/cuda
@@ -98,8 +111,9 @@ COPY ./scripts/test_dataset.py /opt/test_dataset.py
 COPY ./gpu-check/check_gpu.py /opt/check_gpu.py
 COPY ./gpu-check/quick_gpu_check.py /opt/quick_gpu_check.py
 
-# Run GPU check before dataset testing
-RUN python /opt/quick_gpu_check.py || :
+# Run detailed GPU check before dataset testing
+RUN echo "=== 詳細 GPU チェック実行中 ===" && \
+    python /opt/check_gpu.py || echo "GPU チェック完了（警告があっても続行）"
 
 # Test dataset loading
 RUN python /opt/test_dataset.py
@@ -110,8 +124,16 @@ RUN mkdir -p /opt/outputs
 # Copy LJSpeech learning script
 COPY ./scripts/ljspeech_demo.py /opt/ljspeech_demo.py
 
+# Create a script to run GPU check and then the main application
+RUN echo '#!/bin/bash' > /opt/run_with_gpu_check.sh && \
+    echo 'echo "=== 実行前 GPU チェック ==="' >> /opt/run_with_gpu_check.sh && \
+    echo 'python /opt/check_gpu.py' >> /opt/run_with_gpu_check.sh && \
+    echo 'echo "=== GPU チェック完了、メインアプリケーション開始 ==="' >> /opt/run_with_gpu_check.sh && \
+    echo 'exec python ljspeech_demo.py "$@"' >> /opt/run_with_gpu_check.sh && \
+    chmod +x /opt/run_with_gpu_check.sh
+
 # Set working directory
 WORKDIR /opt
 
-# Default command to run tensorflow learning script
-CMD ["python", "ljspeech_demo.py", "--mode", "train"]
+# Default command to run with GPU check first
+CMD ["./run_with_gpu_check.sh", "--mode", "train"]

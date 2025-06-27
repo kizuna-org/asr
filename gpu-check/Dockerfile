@@ -33,6 +33,19 @@ RUN apt-get install -y --no-install-recommends \
   cuda-nvrtc-12-9 \
   cuda-nvrtc-dev-12-9
 
+RUN apt-get install -y --no-install-recommends \
+  cuda-cccl-12-9 \
+  libcublas-12-9 \
+  libcublas-dev-12-9 \
+  libcufft-12-9 \
+  libcufft-dev-12-9 \
+  libcurand-12-9 \
+  libcurand-dev-12-9 \
+  libcusolver-12-9 \
+  libcusolver-dev-12-9 \
+  libcusparse-12-9 \
+  libcusparse-dev-12-9
+
 # Add CUDA libraries to the path
 ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/local/cuda/extras/CUPTI/lib64:${LD_LIBRARY_PATH}
 ENV CUDA_HOME=/usr/local/cuda

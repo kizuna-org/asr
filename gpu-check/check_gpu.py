@@ -76,13 +76,24 @@ def check_gpu_availability():
     # 簡単なGPU計算テスト
     print("7. GPU計算テスト:")
     try:
-        with tf.device('/GPU:0'):
-            # 簡単な行列乗算テスト
-            a = tf.constant([[1.0, 2.0], [3.0, 4.0]])
-            b = tf.constant([[1.0, 1.0], [0.0, 1.0]])
-            c = tf.matmul(a, b)
-            print(f"   GPU計算結果: \n{c.numpy()}")
-            print("   ✅ GPU計算が正常に実行されました")
+        # まずGPUが利用可能かチェック
+        if len(tf.config.list_physical_devices('GPU')) == 0:
+            print("   ❌ 物理GPUが検知されていないため、GPU計算はできません")
+        else:
+            # GPU計算を強制実行
+            with tf.device('/GPU:0'):
+                # より詳細な計算テスト
+                a = tf.constant([[1.0, 2.0], [3.0, 4.0]])
+                b = tf.constant([[1.0, 1.0], [0.0, 1.0]])
+                c = tf.matmul(a, b)
+                
+                # 実際にGPUで実行されたかを確認
+                if c.device.endswith('GPU:0'):
+                    print(f"   GPU計算結果: \n{c.numpy()}")
+                    print("   ✅ 実際にGPUで計算が実行されました")
+                else:
+                    print(f"   CPU計算結果: \n{c.numpy()}")
+                    print(f"   ⚠️ GPU指定したが、実際は{c.device}で計算されました")
     except Exception as e:
         print(f"   ❌ GPU計算エラー: {e}")
         try:

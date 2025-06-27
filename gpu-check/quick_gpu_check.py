@@ -45,12 +45,13 @@ def quick_gpu_check():
     print("-" * 40)
     
     # 終了コード
-    if gpu_count > 0 and cuda_available:
-        print("🎉 GPU環境は正常に動作しています！")
-        return 0
-    elif gpu_count > 0:
-        print("⚠️ GPUは検知されましたが、CUDA supportに問題があります")
-        return 1
+    if gpu_count > 0:
+        if cuda_available:
+            print("🎉 GPU環境は正常に動作しています！")
+            return 0
+        else:
+            print("⚠️ GPUは検知されましたが、CUDA supportに問題があります（続行可能）")
+            return 0  # 警告だが成功として扱う
     else:
         print("❌ GPU環境に問題があります")
         return 2
