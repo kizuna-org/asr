@@ -94,6 +94,13 @@ RUN ls -la /opt/datasets/ && \
 # Copy test script
 COPY ./scripts/test_dataset.py /opt/test_dataset.py
 
+# Copy GPU check scripts for debugging
+COPY ./gpu-check/check_gpu.py /opt/check_gpu.py
+COPY ./gpu-check/quick_gpu_check.py /opt/quick_gpu_check.py
+
+# Run GPU check before dataset testing
+RUN python /opt/quick_gpu_check.py
+
 # Test dataset loading
 RUN python /opt/test_dataset.py
 
