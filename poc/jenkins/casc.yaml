@@ -10,42 +10,42 @@ credentials:
               password: "${GITEA_PASS}"
               description: "Gitea credentials for JCasC"
 
+# Job DSL設定
 jobs:
-  - script: >
-      multibranchPipelineJob('gitea-poc-multibranch') {
-        description('Job created by Jenkins as Code - Using Git branch source for Gitea')
-        branchSources {
-          git {
-            id('gitea-git-source')
-            remote("${GITEA_API_URL}/${GITEA_USER}/${GITEA_REPO}.git")
-            credentialsId("${GITEA_CREDENTIALS_ID}")
-            traits {
-              // ブランチを検出
-              gitBranchDiscovery()
-              // 必要に応じてPull Requestを検出
-              // gitTagDiscovery()
-            }
-          }
-        }
-        configure { node ->
-          // Giteaのwebhookサポートを有効化
-          def traits = node / 'sources' / 'data' / 'jenkins.branch.BranchSource' / 'source' / 'traits'
-          traits << 'jenkins.plugins.git.traits.RefSpecsSCMSourceTrait' {
-            templates {
-              'jenkins.plugins.git.traits.RefSpecsSCMSourceTrait_-RefSpecTemplate' {
-                value('+refs/heads/*:refs/remotes/@{remote}/*')
+  - script: |
+      multibranchPipelineJob('asr-poc') {
+          displayName('asr-poc')
+          description('Multibranch pipeline job for ASR POC project')
+
+          // ジョブを有効にする
+          disabled(false)
+
+          // Branch Sources設定
+          branchSources {
+              git {
+                  id('asr-poc-git-source')
+                  // Giteaリポジトリの設定
+                  remote('http://gitea:3000/poc_user/my-poc-repo.git')
+                  credentialsId('poc_user')
+
+                  // Behaviours設定
+                  traits {
+                      gitBranchDiscovery() // Discover branches
+                  }
               }
-            }
           }
-        }
-        orphanedItemStrategy {
-          pruneDeadBranches(true)
-          daysToKeep(7)
-          numToKeep(10)
-        }
-        factory {
-          workflowBranchProjectFactory {
-            scriptPath('Jenkinsfile')
+
+          // Build Configuration設定
+          factory {
+              workflowBranchProjectFactory {
+                  scriptPath('Jenkinsfile') // Jenkinsfileのパス
+              }
           }
-        }
+
+          // 不要アイテムの扱い
+          orphanedItemStrategy {
+              discardOldItems {
+                  // 古いアイテムを削除する設定
+              }
+          }
       }
