@@ -13,6 +13,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update
 
+# Second stage: Install packages
 RUN apt-get install -y --no-install-recommends \
     git \
     libsndfile1-dev \
@@ -23,24 +24,26 @@ RUN apt-get install -y --no-install-recommends \
     python3-venv \
     ffmpeg \
     libnvinfer-dev \
-    libnvonnxparsers-dev \
-    libcudnn9-dev-cuda-12 \
-    libcudnn9-cuda-12 \
-    cuda-nvrtc-12-9 \
-    cuda-nvrtc-dev-12-9
+    libnvonnxparsers-dev
 
 RUN apt-get install -y --no-install-recommends \
-    cuda-cccl-12-9 \
-    libcublas-12-9 \
-    libcublas-dev-12-9 \
-    libcufft-12-9 \
-    libcufft-dev-12-9 \
-    libcurand-12-9 \
-    libcurand-dev-12-9 \
-    libcusolver-12-9 \
-    libcusolver-dev-12-9 \
-    libcusparse-12-9 \
-    libcusparse-dev-12-9
+    libcudnn8-dev \
+    libcudnn8 \
+    cuda-nvrtc-12-3 \
+    cuda-nvrtc-dev-12-3
+
+RUN apt-get install -y --no-install-recommends \
+    cuda-cccl-12-3 \
+    libcublas-12-3 \
+    libcublas-dev-12-3 \
+    libcufft-12-3 \
+    libcufft-dev-12-3 \
+    libcurand-12-3 \
+    libcurand-dev-12-3 \
+    libcusolver-12-3 \
+    libcusolver-dev-12-3 \
+    libcusparse-12-3 \
+    libcusparse-dev-12-3
 
 # Add CUDA libraries to the path
 ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:/usr/local/cuda/extras/CUPTI/lib64:${LD_LIBRARY_PATH}
