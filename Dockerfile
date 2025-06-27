@@ -11,7 +11,9 @@ ENV HTTPS_PROXY=${HTTPS_PROXY}
 
 ARG DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN apt-get update
+
+RUN apt-get install -y --no-install-recommends \
     git \
     libsndfile1-dev \
     tesseract-ocr \
@@ -22,7 +24,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     libnvinfer-dev \
     libnvonnxparsers-dev \
-    && rm -rf /var/lib/apt/lists/*
+    libcudnn9-dev-cuda-12 \
+    libcudnn9-cuda-12 \
+    cuda-nvrtc-12-9 \
+    cuda-nvrtc-dev-12-9
 
 # Add CUDA libraries to the path
 ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH}
