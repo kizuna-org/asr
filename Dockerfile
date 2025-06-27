@@ -1,4 +1,4 @@
-FROM nvidia/cuda:12.9.1-cudnn-devel-ubuntu24.04
+FROM nvidia/cuda:12.3.2-cudnn8-devel-ubuntu22.04
 LABEL maintainer="Hugging Face"
 
 # Accept proxy arguments
@@ -11,8 +11,21 @@ ENV HTTPS_PROXY=${HTTPS_PROXY}
 
 ARG DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update
-RUN apt-get install -y git libsndfile1-dev tesseract-ocr espeak-ng python3 python3-pip python3-venv ffmpeg
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    libsndfile1-dev \
+    tesseract-ocr \
+    espeak-ng \
+    python3 \
+    python3-pip \
+    python3-venv \
+    ffmpeg \
+    libnvinfer-dev \
+    libnvonnxparsers-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Add CUDA libraries to the path
+ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH}
 
 # Create and activate virtual environment
 RUN python3 -m venv /opt/venv
@@ -76,12 +89,8 @@ RUN mkdir -p /opt/outputs
 # Copy LJSpeech learning script
 COPY ./scripts/ljspeech_demo.py /opt/ljspeech_demo.py
 
-# Copy startup script
-COPY ./scripts/start_training.sh /opt/start_training.sh
-RUN chmod +x /opt/start_training.sh
-
 # Set working directory
 WORKDIR /opt
 
 # Default command to run tensorflow learning script
-CMD ["/opt/start_training.sh"]
+CMD ["python", "ljspeech_demo.py", "--mode", "train"]
