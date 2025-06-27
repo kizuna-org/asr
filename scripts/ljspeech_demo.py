@@ -115,11 +115,11 @@ def build_text_to_spectrogram_model(
     text_input = tf.keras.layers.Input(shape=(None,), name="text_input")
 
     # Text Embedding and Encoding
-    text_features = tf.keras.layers.Embedding(vocab_size, 256, mask_zero=True)(
+    text_features = tf.keras.layers.Embedding(vocab_size, 2, mask_zero=True)(
         text_input
     )
-    text_features = tf.keras.layers.LSTM(512, return_sequences=True)(text_features)
-    text_features = tf.keras.layers.LSTM(512, return_sequences=True)(text_features)
+    text_features = tf.keras.layers.LSTM(4, return_sequences=True)(text_features)
+    text_features = tf.keras.layers.LSTM(4, return_sequences=True)(text_features)
 
     # Output layer to predict mel-spectrogram
     mel_output = tf.keras.layers.TimeDistributed(
@@ -229,8 +229,8 @@ def save_training_state(epoch, text_encoder, model):
         "epoch": epoch,
         "vocab_size": text_encoder.vocabulary_size(),
         "max_tokens": text_encoder._max_tokens,
-        "output_sequence_length": text_encoder.output_sequence_length,
-        "standardize": text_encoder.standardize,
+        "output_sequence_length": text_encoder._output_sequence_length,
+        "standardize": text_encoder._standardize,
     }
     with open(TRAINING_STATE_PATH, "w") as f:
         json.dump(training_state, f)
@@ -403,9 +403,9 @@ def main():
         training_state_callback = TrainingStateCallback(text_encoder)
 
         # model.fitにcallbacks引数を追加
-        history = model.fit(
+        model.fit(
             train_dataset,
-            epochs=2000,
+            epochs=3,
             initial_epoch=start_epoch,
             callbacks=[
                 synthesis_callback,
