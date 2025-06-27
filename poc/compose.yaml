@@ -1,38 +1,49 @@
-# compose.yaml
+# compose.yaml (bind mount対応版)
 
 services:
-  # Jenkinsサービス (変更なし)
   jenkins:
     build:
       context: ./jenkins
-      dockerfile: Dockerfile
     ports:
       - "8080:8080"
       - "50000:50000"
     volumes:
+      # --- ここからが変更点 ---
+      # 名前付きボリュームからホストのディレクトリへのマウントに変更
       - ./jenkins_home:/var/jenkins_home
+      # --- ここまでが変更点 ---
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - ci-network
-    depends_on:
-      - git-server
-
-  # Gitサーバーサービス
-  git-server:
-    build: ./git-server
-    container_name: git-server
-    ports:
-      - "8081:80"
-    volumes:
-      - ./git-data:/git
+    # --- ここからが追記 ---
+    # コンテナの実行ユーザーをホストのユーザーに合わせ、権限問題を回避する
+    user: "${UID}:${GID}"
+    # --- ここまでが追記 ---
     environment:
-      # --- 修正点: PUID/PGIDの定義を元に戻す ---
-      - GIT_USER_1=poc_user
-      - GIT_PASS_1=poc_password
-      - PUID=1000
-      - PGID=1000
+      - CASC_JENKINS_CONFIG=/var/jenkins_home/casc.yaml
+    env_file:
+      - .env
+    depends_on:
+      - gitea
+
+  gitea:
+    image: gitea/gitea:latest
+    container_name: gitea
+    environment:
+      - USER_UID=1000
+      - USER_GID=1000
+    volumes:
+      - ./gitea-data:/data
+      - ./gitea/app.ini:/data/gitea/conf/app.ini
+    ports:
+      - "3000:3000"
+      - "222:22"
     networks:
       - ci-network
+
+# --- ここからが変更点 ---
+# jenkins_home の定義を削除
+# --- ここまでが変更点 ---
 
 networks:
   ci-network:

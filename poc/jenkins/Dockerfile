@@ -1,8 +1,12 @@
+# jenkins/Dockerfile (最終確定版)
+
 FROM jenkins/jenkins:lts
 
 USER root
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+
+# OSレベルのパッケージインストール
 RUN apt-get update && \
   apt-get install -y --no-install-recommends apt-transport-https ca-certificates curl gnupg2 software-properties-common git && \
   mkdir -p /etc/apt/keyrings && \
@@ -14,5 +18,13 @@ RUN apt-get update && \
   apt-get install -y --no-install-recommends docker-ce-cli && \
   rm -rf /var/lib/apt/lists/*
 
-USER jenkins
+# Jenkinsプラグインのインストール
+COPY plugins.txt /usr/share/jenkins/ref/plugins.txt
+RUN jenkins-plugin-cli -f /usr/share/jenkins/ref/plugins.txt
 
+# --- ここからが最終修正 ---
+# ホストのjenkins.yamlを、コンテナ内のcasc.yamlという名前でコピーする
+COPY casc.yaml /usr/share/jenkins/ref/casc.yaml
+# --- ここまでが最終修正 ---
+
+USER jenkins

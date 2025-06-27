@@ -1,0 +1,37 @@
+# jenkins/casc.yaml (最終・確定版)
+credentials:
+  system:
+    domainCredentials:
+      - credentials:
+          - usernamePassword:
+              scope: GLOBAL
+              id: "${GITEA_CREDENTIALS_ID}"
+              username: "${GITEA_USER}"
+              password: "${GITEA_PASS}"
+              description: "Gitea credentials for JCasC"
+
+jobs:
+  - script: >
+      multibranchPipelineJob('gitea-poc-multibranch') {
+        description('Job created by Jenkins as Code')
+        branchSources {
+          github {
+            id('gitea-source-from-jcasc')
+            apiUri("${GITEA_API_URL}")
+            scanCredentialsId("${GITEA_CREDENTIALS_ID}")
+            repoOwner("${GITEA_USER}")
+            repository("${GITEA_REPO}")
+            // --- ここからが修正点 ---
+            // 不要な traits {} ブロックを削除し、インデントを修正
+            gitHubBranchDiscovery {
+              strategyId(1)
+            }
+            // --- ここまで ---
+          }
+        }
+        orphanedItemStrategy {
+          pruneDeadBranches(true)
+          daysToKeep(7)
+          numToKeep(10)
+        }
+      }

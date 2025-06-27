@@ -1,0 +1,5 @@
+configuration-as-code:latest
+job-dsl:latest
+workflow-aggregator:latest
+git:latest
+github-branch-source:latest
