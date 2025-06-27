@@ -4,6 +4,7 @@ LJSpeech Dataset Learning Script (Speech Synthesis Version with Epoch Callback)
 This script demonstrates how to load, work with, and train a Text-to-Speech model on the LJSpeech dataset.
 This version has been modified to generate audio from text and includes a callback to output
 a sample audio file at the end of each training epoch.
+Enhanced with robust checkpoint and resume functionality.
 """
 
 import tensorflow as tf
@@ -14,6 +15,10 @@ import librosa.display
 import os
 import soundfile as sf
 import json
+import signal
+import sys
+import time
+from datetime import datetime
 
 # Set memory growth to avoid GPU memory issues
 try:
@@ -35,7 +40,35 @@ CHECKPOINT_DIR = "outputs/checkpoints"
 MODEL_CHECKPOINT_PATH = os.path.join(CHECKPOINT_DIR, "model.keras")
 TEXT_ENCODER_PATH = os.path.join(CHECKPOINT_DIR, "text_encoder")
 TRAINING_STATE_PATH = os.path.join(CHECKPOINT_DIR, "training_state.json")
+DATASET_CACHE_PATH = os.path.join(CHECKPOINT_DIR, "dataset_processed.cache")
 
+# Global variables for graceful shutdown
+training_interrupted = False
+current_model = None
+current_text_encoder = None
+current_epoch = 0
+
+def signal_handler(signum, frame):
+    """Handle interrupt signals (Ctrl+C) gracefully."""
+    global training_interrupted, current_model, current_text_encoder, current_epoch
+    print(f"\n\n=== 中断シグナルを受信しました (Signal: {signum}) ===")
+    print("トレーニングを安全に停止しています...")
+    training_interrupted = True
+    
+    if current_model is not None and current_text_encoder is not None:
+        print("現在の状態を保存中...")
+        try:
+            save_training_state(current_epoch, current_text_encoder, current_model)
+            print("✅ チェックポイントが正常に保存されました")
+        except Exception as e:
+            print(f"❌ チェックポイント保存中にエラーが発生しました: {e}")
+    
+    print("プログラムを終了します...")
+    sys.exit(0)
+
+# Register signal handlers
+signal.signal(signal.SIGINT, signal_handler)  # Ctrl+C
+signal.signal(signal.SIGTERM, signal_handler)  # Termination signal
 
 def load_ljspeech_dataset(
     split: str = "train", batch_size: int = 32
@@ -177,146 +210,260 @@ class SynthesisCallback(tf.keras.callbacks.Callback):
         self.inference_text = "This is a test of the model at the end of each epoch."
         os.makedirs("outputs/epoch_samples", exist_ok=True)
 
+    def on_epoch_begin(self, epoch, logs=None):
+        """Update global variables at the start of each epoch."""
+        global current_epoch, current_model, current_text_encoder
+        current_epoch = epoch
+        current_model = self.model
+        current_text_encoder = self.text_encoder
+        print(f"\n🚀 エポック {epoch + 1} を開始しています...")
+
     def on_epoch_end(self, epoch, logs=None):
-        print(f"\n\n--- Generating audio sample at end of epoch {epoch + 1} ---")
+        """Generate audio sample and save state at the end of each epoch."""
+        global training_interrupted
+        
+        if training_interrupted:
+            print("\n⚠️  中断が要求されました。音声生成をスキップします。")
+            return
+            
+        print(f"\n\n--- エポック {epoch + 1} 終了時の音声サンプル生成 ---")
 
-        # テキストをベクトル化
-        text_vec = self.text_encoder([self.inference_text])
+        try:
+            # テキストをベクトル化
+            text_vec = self.text_encoder([self.inference_text])
 
-        # モデルでメルスペクトログラムを予測
-        predicted_mel_spec = self.model.predict(text_vec)
+            # モデルでメルスペクトログラムを予測
+            predicted_mel_spec = self.model.predict(text_vec)
 
-        # バッチ次元を削除し、numpy配列に変換
-        predicted_mel_spec_np = predicted_mel_spec[0]
+            # バッチ次元を削除し、numpy配列に変換
+            predicted_mel_spec_np = predicted_mel_spec[0]
 
-        # スペクトログラムをデシベルからパワーに変換
-        predicted_mel_spec_db_t = predicted_mel_spec_np.T
-        power_spec = librosa.db_to_power(predicted_mel_spec_db_t)
+            # スペクトログラムをデシベルからパワーに変換
+            predicted_mel_spec_db_t = predicted_mel_spec_np.T
+            power_spec = librosa.db_to_power(predicted_mel_spec_db_t)
 
-        # Griffin-Limアルゴリズムで音声を復元
-        generated_audio = librosa.feature.inverse.mel_to_audio(
-            power_spec,
-            sr=self.sample_rate,
-            n_fft=self.n_fft,
-            hop_length=self.hop_length,
-        )
+            # Griffin-Limアルゴリズムで音声を復元
+            generated_audio = librosa.feature.inverse.mel_to_audio(
+                power_spec,
+                sr=self.sample_rate,
+                n_fft=self.n_fft,
+                hop_length=self.hop_length,
+            )
 
-        # 生成された音声をエポック番号付きで保存
-        output_audio_path = (
-            f"outputs/epoch_samples/synthesized_epoch_{epoch + 1:02d}.wav"
-        )
-        sf.write(output_audio_path, generated_audio, self.sample_rate)
-        print(
-            f"--- Synthesized audio for epoch {epoch + 1} saved to: {output_audio_path} ---\n"
-        )
+            # 生成された音声をエポック番号付きで保存
+            output_audio_path = (
+                f"outputs/epoch_samples/synthesized_epoch_{epoch + 1:02d}.wav"
+            )
+            sf.write(output_audio_path, generated_audio, self.sample_rate)
+            print(f"🎵 エポック {epoch + 1} の音声を保存: {output_audio_path}")
+            
+        except Exception as e:
+            print(f"❌ エポック {epoch + 1} の音声生成中にエラーが発生: {e}")
+            # Continue training even if synthesis fails
+
+    def on_train_begin(self, logs=None):
+        """Called at the beginning of training."""
+        print("🎯 トレーニングを開始します...")
+        print(f"📝 テスト用テキスト: '{self.inference_text}'")
+
+    def on_train_end(self, logs=None):
+        """Called at the end of training."""
+        global training_interrupted
+        if training_interrupted:
+            print("\n⚠️  トレーニングが中断されました")
+        else:
+            print("\n✅ トレーニングが正常に完了しました")
 
 
 def save_training_state(epoch, text_encoder, model):
     """Save training state including epoch number and text encoder."""
-    os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+    try:
+        os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
-    # Save model
-    model.save(MODEL_CHECKPOINT_PATH)
+        print(f"💾 エポック {epoch} の状態を保存中...")
+        
+        # Save model
+        model.save(MODEL_CHECKPOINT_PATH)
+        print(f"  ✅ モデルを保存: {MODEL_CHECKPOINT_PATH}")
 
-    # Save text encoder vocabulary
-    vocab = text_encoder.get_vocabulary()
-    vocab_path = os.path.join(CHECKPOINT_DIR, "vocabulary.json")
-    with open(vocab_path, "w") as f:
-        json.dump(vocab, f)
+        # Save text encoder vocabulary
+        vocab = text_encoder.get_vocabulary()
+        vocab_path = os.path.join(CHECKPOINT_DIR, "vocabulary.json")
+        with open(vocab_path, "w", encoding='utf-8') as f:
+            json.dump(vocab, f, ensure_ascii=False, indent=2)
+        print(f"  ✅ 語彙を保存: {vocab_path}")
 
-    # Save training state
-    training_state = {
-        "epoch": epoch,
-        "vocab_size": text_encoder.vocabulary_size(),
-        "max_tokens": text_encoder._max_tokens,
-        "output_sequence_length": text_encoder._output_sequence_length,
-        "standardize": text_encoder._standardize,
-    }
-    with open(TRAINING_STATE_PATH, "w") as f:
-        json.dump(training_state, f)
+        # Save training state with timestamp
+        training_state = {
+            "epoch": epoch,
+            "vocab_size": text_encoder.vocabulary_size(),
+            "max_tokens": text_encoder._max_tokens,
+            "output_sequence_length": text_encoder._output_sequence_length,
+            "standardize": text_encoder._standardize,
+            "saved_at": datetime.now().isoformat(),
+            "tensorflow_version": tf.__version__,
+            "checkpoint_version": "2.0"
+        }
+        
+        # Create backup of previous state
+        if os.path.exists(TRAINING_STATE_PATH):
+            backup_path = TRAINING_STATE_PATH + ".backup"
+            os.rename(TRAINING_STATE_PATH, backup_path)
+            print(f"  📋 前回の状態をバックアップ: {backup_path}")
+        
+        with open(TRAINING_STATE_PATH, "w", encoding='utf-8') as f:
+            json.dump(training_state, f, ensure_ascii=False, indent=2)
+        print(f"  ✅ トレーニング状態を保存: {TRAINING_STATE_PATH}")
 
-    print(f"Training state saved at epoch {epoch}")
+        print(f"💾 エポック {epoch} の保存完了")
+        
+    except Exception as e:
+        print(f"❌ 状態保存中にエラーが発生しました: {e}")
+        import traceback
+        traceback.print_exc()
+        raise
 
 
 def load_training_state():
     """Load training state and return epoch number, text encoder, and model if available."""
+    print("🔍 保存された状態を確認中...")
+    
     if not os.path.exists(TRAINING_STATE_PATH):
+        print("ℹ️  保存された状態が見つかりません。最初から開始します。")
         return 0, None, None
 
     try:
         # Load training state
-        with open(TRAINING_STATE_PATH, "r") as f:
+        print(f"📂 トレーニング状態を読み込み中: {TRAINING_STATE_PATH}")
+        with open(TRAINING_STATE_PATH, "r", encoding='utf-8') as f:
             training_state = json.load(f)
+        
+        # Validate checkpoint version compatibility
+        checkpoint_version = training_state.get("checkpoint_version", "1.0")
+        print(f"  📋 チェックポイントバージョン: {checkpoint_version}")
+        
+        if training_state.get("tensorflow_version"):
+            print(f"  🔧 保存時のTensorFlowバージョン: {training_state['tensorflow_version']}")
+            print(f"  🔧 現在のTensorFlowバージョン: {tf.__version__}")
+        
+        saved_at = training_state.get("saved_at", "不明")
+        print(f"  ⏰ 保存時刻: {saved_at}")
+
+        # Check if model file exists
+        if not os.path.exists(MODEL_CHECKPOINT_PATH):
+            print(f"❌ モデルファイルが見つかりません: {MODEL_CHECKPOINT_PATH}")
+            return 0, None, None
 
         # Load vocabulary
         vocab_path = os.path.join(CHECKPOINT_DIR, "vocabulary.json")
-        with open(vocab_path, "r") as f:
+        if not os.path.exists(vocab_path):
+            print(f"❌ 語彙ファイルが見つかりません: {vocab_path}")
+            return 0, None, None
+            
+        print(f"📖 語彙を読み込み中: {vocab_path}")
+        with open(vocab_path, "r", encoding='utf-8') as f:
             vocab = json.load(f)
 
         # Recreate text encoder
+        print("🔤 テキストエンコーダーを再構築中...")
         text_encoder = tf.keras.layers.TextVectorization(
             max_tokens=training_state["max_tokens"],
             output_sequence_length=training_state["output_sequence_length"],
             standardize=training_state["standardize"],
         )
         text_encoder.set_vocabulary(vocab)
+        print(f"  ✅ 語彙サイズ: {len(vocab)}")
 
         # Load model
+        print(f"🤖 モデルを読み込み中: {MODEL_CHECKPOINT_PATH}")
         model = tf.keras.models.load_model(MODEL_CHECKPOINT_PATH)
+        print(f"  ✅ モデル読み込み完了")
 
-        print(f"Resuming from epoch {training_state['epoch']}")
-        return training_state["epoch"], text_encoder, model
+        epoch = training_state["epoch"]
+        print(f"🎯 エポック {epoch} から再開します")
+        print("=" * 50)
+        
+        return epoch, text_encoder, model
 
     except Exception as e:
-        print(f"Error loading checkpoint: {e}")
+        print(f"❌ チェックポイント読み込み中にエラーが発生しました: {e}")
+        print("⚠️  最初から開始します...")
+        import traceback
+        traceback.print_exc()
+        
+        # Try to use backup if available
+        backup_path = TRAINING_STATE_PATH + ".backup"
+        if os.path.exists(backup_path):
+            print(f"🔄 バックアップから復元を試行中: {backup_path}")
+            try:
+                os.rename(backup_path, TRAINING_STATE_PATH)
+                return load_training_state()  # Recursive call with backup
+            except Exception as backup_error:
+                print(f"❌ バックアップからの復元も失敗しました: {backup_error}")
+        
         return 0, None, None
 
 
 def main():
     """Main function to run the LJSpeech learning script."""
-    print("=== LJSpeech Speech Synthesis Script ===")
+    print("=== LJSpeech 音声合成スクリプト ===")
+    print(f"🕐 開始時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print("=" * 50)
+    
     try:
         # Check for existing checkpoint
         start_epoch, text_encoder, model = load_training_state()
 
         if start_epoch > 0:
-            print(f"Found checkpoint, resuming from epoch {start_epoch}")
+            print(f"🔄 チェックポイントが見つかりました。エポック {start_epoch + 1} から再開します")
         else:
-            print("No checkpoint found, starting from scratch")
+            print("🆕 新規トレーニングを開始します")
 
         # Load dataset
+        print("\n=== データセット読み込み ===")
         dataset = load_ljspeech_dataset(split="train", batch_size=1)
         os.makedirs("outputs", exist_ok=True)
 
         # Print dataset size before preparation
+        print("📊 データセットサイズを確認中...")
         num_before = (
             dataset.unbatch()
             .reduce(tf.constant(0, dtype=tf.int64), lambda x, _: x + 1)
             .numpy()
         )
-        print(f"Number of samples before preparation: {num_before}")
+        print(f"📈 前処理前のサンプル数: {num_before:,}")
 
         # Text processing setup
-        print("\n=== Text Processing ===")
+        print("\n=== テキスト処理 ===")
         if text_encoder is None:
+            print("🔤 新しいテキストエンコーダーを作成中...")
             text_encoder = create_text_encoder(vocab_size=1000)
             # フィルタリングする前のデータセットで語彙を構築
+            print("📚 語彙を構築中...")
             example_texts = dataset.unbatch().map(lambda text, audio: text).take(5000)
             text_encoder.adapt(example_texts)
-        print(f"Vocabulary size: {text_encoder.vocabulary_size()}")
+        else:
+            print("♻️  保存されたテキストエンコーダーを使用")
+            
+        print(f"📖 語彙サイズ: {text_encoder.vocabulary_size():,}")
 
         # Build model
-        print("\n=== Model Architecture ===")
+        print("\n=== モデル構築 ===")
         if model is None:
+            print("🤖 新しいモデルを構築中...")
             model = build_text_to_spectrogram_model(
                 vocab_size=text_encoder.vocabulary_size(),
                 mel_bins=80,
                 max_sequence_length=MAX_FRAMES,
             )
+        else:
+            print("♻️  保存されたモデルを使用")
+            
+        print("📋 モデル構造:")
         model.summary()
 
         # --- Training Part ---
-        print("\n=== Preparing Dataset for Training ===")
+        print("\n=== トレーニング用データセット準備 ===")
 
         # スペクトログラム計算に必要な最小の音声長を定義
         N_FFT = 1024
@@ -354,6 +501,7 @@ def main():
             mel_spec.set_shape((MAX_FRAMES, 80))
             return text_vec, mel_spec
 
+        print("⚙️  データセットパイプラインを構築中...")
         train_dataset = (
             dataset.unbatch()
             .filter(filter_short_audio)  # 短すぎる音声を除外
@@ -371,12 +519,13 @@ def main():
         )
 
         # Print dataset size after preparation
+        print("📊 前処理後のデータセットサイズを確認中...")
         num_after = 0
         for _ in train_dataset.unbatch():
             num_after += 1
-        print(f"Number of samples after preparation: {num_after}")
+        print(f"📈 前処理後のサンプル数: {num_after:,}")
 
-        print("\n=== Starting Model Training ===")
+        print("\n=== モデルトレーニング開始 ===")
 
         # エポックごとに音声を出力するためのコールバックを作成
         synthesis_callback = SynthesisCallback(
@@ -398,12 +547,39 @@ def main():
                 self.text_encoder = text_encoder
 
             def on_epoch_end(self, epoch, logs=None):
-                save_training_state(epoch, self.text_encoder, self.model)
+                """Save training state at the end of each epoch."""
+                global training_interrupted
+                
+                if training_interrupted:
+                    print("\n⚠️  中断が要求されたため、状態保存をスキップします。")
+                    return
+                
+                try:
+                    save_training_state(epoch + 1, self.text_encoder, self.model)  # Save next epoch number
+                except Exception as e:
+                    print(f"❌ 状態保存中にエラーが発生しましたが、トレーニングを継続します: {e}")
+
+            def on_batch_end(self, batch, logs=None):
+                """Check for interruption during training."""
+                global training_interrupted
+                if training_interrupted:
+                    print("\n⚠️  中断が要求されました。現在のエポックを完了後に停止します。")
+                    self.model.stop_training = True
 
         training_state_callback = TrainingStateCallback(text_encoder)
 
+        # Update global variables before training
+        global current_model, current_text_encoder, current_epoch
+        current_model = model
+        current_text_encoder = text_encoder
+        current_epoch = start_epoch
+
+        print(f"🎯 エポック {start_epoch + 1} から {3} まで学習します")
+        print("💡 Ctrl+C で安全に中断できます")
+        print("=" * 50)
+        
         # model.fitにcallbacks引数を追加
-        model.fit(
+        history = model.fit(
             train_dataset,
             epochs=3,
             initial_epoch=start_epoch,
@@ -414,22 +590,37 @@ def main():
             ],
         )
 
-        print("\n=== Training completed! ===")
+        # Check if training was interrupted
+        global training_interrupted
+        if training_interrupted:
+            print("\n⚠️  トレーニングが中断されました")
+            print("💾 最終状態を保存中...")
+            try:
+                save_training_state(current_epoch, text_encoder, model)
+                print("✅ 中断時の状態保存が完了しました")
+            except Exception as e:
+                print(f"❌ 中断時の状態保存に失敗しました: {e}")
+            return  # Early return on interruption
+
+        print("\n=== トレーニングが完了しました! ===")
 
         # --- Save the Trained Model ---
-        print("\n=== Saving Trained Model ===")
+        print("\n=== 最終モデル保存 ===")
         model_save_path = "outputs/ljspeech_synthesis_model.keras"
         model.save(model_save_path)
-        print(f"Model saved successfully to {model_save_path}")
+        print(f"💾 最終モデルを保存: {model_save_path}")
+
+        # Save final training state
+        save_training_state(3, text_encoder, model)  # Final epoch
 
         # --- Perform Final Inference (Text-to-Speech) ---
-        print("\n=== Performing Final Inference (Text to Speech) ===")
+        print("\n=== 最終推論実行 (テキストから音声) ===")
 
         # 推論に使用するテキスト
         inference_text = (
             "Hello, this is a final test of the new speech synthesis model."
         )
-        print(f"Input text for synthesis: '{inference_text}'")
+        print(f"🎤 合成用テキスト: '{inference_text}'")
 
         # テキストをベクトル化
         text_vec = text_encoder([inference_text])
@@ -445,7 +636,7 @@ def main():
         power_spec = librosa.db_to_power(predicted_mel_spec_db_t)
 
         # Griffin-Limアルゴリズムで音声を復元
-        print("Synthesizing audio from spectrogram using Griffin-Lim algorithm...")
+        print("🎵 Griffin-Limアルゴリズムで音声を合成中...")
         generated_audio = librosa.feature.inverse.mel_to_audio(
             power_spec, sr=22050, n_fft=N_FFT, hop_length=HOP_LENGTH
         )
@@ -453,7 +644,7 @@ def main():
         # 生成された音声を保存
         output_audio_path = "outputs/synthesized_audio_final.wav"
         sf.write(output_audio_path, generated_audio, 22050)
-        print(f"Synthesized audio saved to: {output_audio_path}")
+        print(f"🎵 最終合成音声を保存: {output_audio_path}")
 
         # 生成されたスペクトログラムと音声を可視化
         visualize_audio_and_spectrogram(
@@ -462,13 +653,25 @@ def main():
             save_path="outputs/synthesis_visualization_final.png",
         )
 
-        print("\n=== Script completed successfully! ===")
+        print(f"\n🕐 完了時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print("\n✅ スクリプトが正常に完了しました!")
 
+    except KeyboardInterrupt:
+        print("\n\n⚠️  ユーザーによって中断されました")
+        signal_handler(signal.SIGINT, None)
     except Exception as e:
-        print(f"\nAN ERROR OCCURRED: {e}")
+        print(f"\n❌ エラーが発生しました: {e}")
         import traceback
-
         traceback.print_exc()
+        
+        # Try to save current state if possible
+        try:
+            if 'current_model' in globals() and current_model is not None:
+                print("🆘 エラー発生時の緊急状態保存を試行中...")
+                save_training_state(current_epoch, current_text_encoder, current_model)
+                print("✅ 緊急状態保存が完了しました")
+        except Exception as save_error:
+            print(f"❌ 緊急状態保存に失敗しました: {save_error}")
 
 
 if __name__ == "__main__":
