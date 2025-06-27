@@ -64,6 +64,9 @@ RUN pip install -U "itsdangerous<2.1.0"
 # this line must be added in order for python to be aware of transformers.
 RUN cd transformers && python setup.py develop
 
+# Copy local dataset
+COPY ./datasets /opt/datasets/
+
 # Copy dataset download script
 COPY ./scripts/download_dataset.py /opt/download_dataset.py
 
