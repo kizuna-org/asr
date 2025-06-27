@@ -31,6 +31,12 @@ RUN apt-get install -y --no-install-recommends \
 
 # Add CUDA libraries to the path
 ENV LD_LIBRARY_PATH=/usr/local/cuda/lib64:${LD_LIBRARY_PATH}
+ENV CUDA_HOME=/usr/local/cuda
+ENV PATH=${CUDA_HOME}/bin:${PATH}
+
+# Additional environment variables for TensorFlow GPU
+ENV TF_FORCE_GPU_ALLOW_GROWTH=true
+ENV TF_GPU_ALLOCATOR=cuda_malloc_async
 
 # Create and activate virtual environment
 RUN python3 -m venv /opt/venv
