@@ -35,6 +35,15 @@ jobs:
           cron('H 2 * * *')
         }
 
+        properties {
+          buildDiscarder {
+            logRotator {
+              daysToKeepStr('30')
+              numToKeepStr('10')
+            }
+          }
+        }
+
         steps {
           jobDsl {
             targets('poc/jenkins/poc_job.groovy')
@@ -43,3 +52,7 @@ jobs:
           }
         }
       }
+
+  # Jenkins起動時にSeed Jobを自動実行
+  - script: >
+      queue('my-project-seed-job')
