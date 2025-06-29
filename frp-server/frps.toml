@@ -20,4 +20,4 @@ log.level = "info"
 log.maxDays = 7
 
 # サブドメイン設定
-subDomainHost = "frp.local"
+subDomainHost = "shiron.dev"

@@ -1,7 +1,7 @@
 # frpc.toml - frp client configuration (外部frpsサーバー接続)
 
 # サーバー設定（外部frpsサーバー）
-serverAddr = "${FRP_SERVER_HOST:-your-frp-server.com}"
+serverAddr = "frps.shiron.dev"
 serverPort = 7000
 
 # 認証設定
@@ -18,7 +18,7 @@ name = "jenkins-http"
 type = "http"
 localIP = "jenkins"
 localPort = 8080
-customDomains = ["jenkins.yourdomain.com"]
+customDomains = ["jenkins.shiron.dev"]
 
 [proxies.healthCheck]
 type = "http"
@@ -31,7 +31,7 @@ name = "gitea-http"
 type = "http"
 localIP = "gitea"
 localPort = 3000
-customDomains = ["gitea.yourdomain.com"]
+customDomains = ["gitea.shiron.dev"]
 
 [proxies.healthCheck]
 type = "http"

@@ -1,16 +1,16 @@
-# FRP Server + Cloudflare Tunnel セットアップ
+# FRP Server セットアップ (Cloudflare Dashboard管理)
 
-このディレクトリには、frpサーバーとCloudflare Tunnelを組み合わせたホスティング環境の設定が含まれています。
+このディレクトリには、frpサーバーの設定が含まれています。Cloudflare Tunnelの設定はCloudflareダッシュボードで行います。
 
 ## 概要
 
 - **frps**: 逆プロキシサーバー（Jenkins/Gitea等のサービスを公開）
-- **Cloudflare Tunnel**: セキュアな外部公開（直接ポート開放不要）
+- **Cloudflare Tunnel**: Cloudflareダッシュボードで管理
 
 ## アーキテクチャ
 
 ```
-[Jenkins/Gitea] → [frpc] → インターネット → [Cloudflare] → [cloudflared] → [frps] → [Dashboard]
+[Jenkins/Gitea Container] → [frpc] → インターネット → [frps.shiron.dev] → [Cloudflare Tunnel] → [外部公開]
 ```
 
 ## セットアップ手順
@@ -18,86 +18,54 @@
 ### 1. 前提条件
 
 - Cloudflareアカウント
-- ドメインがCloudflareで管理されている
+- shiron.devドメインがCloudflareで管理されている
 - Docker & Docker Compose
 
-### 2. Cloudflare Tunnel作成
+### 2. frpサーバー起動
 
 ```bash
-# cloudflaredをインストール（ローカル設定用）
-# macOS
-brew install cloudflared
+cd frp-server
 
-# Ubuntu/Debian
-wget -q https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
-sudo dpkg -i cloudflared-linux-amd64.deb
-```
-
-```bash
-# Cloudflareにログイン
-cloudflared tunnel login
-
-# Tunnelを作成
-cloudflared tunnel create jenkins-frp-tunnel
-
-# Tunnel情報を確認
-cloudflared tunnel list
-```
-
-### 3. 認証情報設定
-
-```bash
-# 認証情報をコピー
-cp cloudflared/credentials.json.template cloudflared/credentials.json
-
-# credentials.jsonを編集
-# - AccountTag: CloudflareアカウントID
-# - TunnelSecret: Tunnel作成時に生成された秘密鍵
-# - TunnelID: Tunnel作成時に生成されたID
-# - TunnelName: jenkins-frp-tunnel
-```
-
-### 4. 環境変数設定
-
-```bash
-# 環境変数ファイルをコピー
+# 環境変数設定
 cp env.template .env
+# .envを編集（FRP_TOKEN等）
 
-# .envを編集
-nano .env
+# サービス起動
+./setup.sh
 ```
 
-必要な設定項目：
-- `CLOUDFLARE_TUNNEL_TOKEN`: Cloudflareダッシュボードから取得
-- `FRP_TOKEN`: frpサーバーとクライアント間の認証トークン
-- その他認証情報
+### 3. Cloudflare Dashboard設定
 
-### 5. DNS設定
+#### 3.1 Tunnelの作成
+1. Cloudflareダッシュボードにログイン
+2. Zero Trust → Access → Tunnels
+3. "Create a tunnel" をクリック
+4. "Cloudflared" を選択
+5. Tunnel名を入力（例: jenkins-frp-tunnel）
 
-Cloudflareダッシュボードで以下のCNAMEレコードを追加：
+#### 3.2 ルートの設定
+以下のPublic Hostnameを追加：
 
-```
-jenkins.yourdomain.com → jenkins-frp-tunnel.cfargotunnel.com
-gitea.yourdomain.com → jenkins-frp-tunnel.cfargotunnel.com
-frp-admin.yourdomain.com → jenkins-frp-tunnel.cfargotunnel.com
-```
+| Subdomain | Domain | Service |
+|-----------|--------|---------|
+| jenkins | shiron.dev | HTTP, frps.shiron.dev:80 |
+| gitea | shiron.dev | HTTP, frps.shiron.dev:80 |
+| frp-admin | shiron.dev | HTTP, frps.shiron.dev:8000 |
 
-### 6. サービス起動
+#### 3.3 cloudflaredの起動
+Tunnelを保存すると、cloudflaredの起動コマンドが表示されます：
 
 ```bash
-# 自動セットアップ実行
-./setup.sh
-
-# または手動実行
-docker compose up -d
+# 例：
+sudo cloudflared service install your-tunnel-token
 ```
 
-## アクセス方法
+## 公開URL
 
 ### 外部公開URL（Cloudflare Tunnel経由）
-- **Jenkins**: https://jenkins.yourdomain.com
-- **Gitea**: https://gitea.yourdomain.com
-- **FRP Dashboard**: https://frp-admin.yourdomain.com
+- **Jenkins**: https://jenkins.shiron.dev
+- **Gitea**: https://gitea.shiron.dev
+- **FRP Dashboard**: https://frp-admin.shiron.dev
 
 ### ローカルアクセス（サーバー内部）
 - **FRP Dashboard**: http://localhost:8000
@@ -109,8 +77,6 @@ docker compose up -d
 |---------|------|
 | `compose.yaml` | Docker Compose設定 |
 | `frps.toml` | frpサーバー設定 |
-| `cloudflared/config.yml` | Cloudflare Tunnel設定 |
-| `cloudflared/credentials.json` | Cloudflare認証情報 |
 | `.env` | 環境変数 |
 
 ## セキュリティ設定
@@ -127,16 +93,18 @@ docker compose up -d
 ### ファイアウォール設定
 ```bash
 # 必要なポートのみ開放
+sudo ufw allow 80/tcp     # HTTP（Cloudflare Tunnel経由）
+sudo ufw allow 443/tcp    # HTTPS（Cloudflare Tunnel経由）
+sudo ufw allow 7000/tcp   # frp管理
+sudo ufw allow 8000/tcp   # frpダッシュボード
 sudo ufw allow 50000/tcp  # Jenkins エージェント
 sudo ufw allow 2222/tcp   # Gitea SSH
-# HTTP/HTTPSは直接開放不要（Cloudflare Tunnel経由）
 ```
 
 ## 監視とログ
 
 ### ログファイル
 - **frps**: `logs/frps.log`
-- **cloudflared**: `logs/cloudflared.log`
 
 ### ヘルスチェック
 ```bash
@@ -145,33 +113,16 @@ docker compose ps
 
 # ログ確認
 docker compose logs frps
-docker compose logs cloudflared
 
-# Cloudflare Tunnel状態確認
-curl -H "Host: jenkins.yourdomain.com" http://localhost:80
+# ポート確認
+curl http://localhost:8000
 ```
 
 ## トラブルシューティング
 
 ### よくある問題
 
-1. **Tunnel接続エラー**
-   ```bash
-   # 認証情報確認
-   docker compose logs cloudflared
-   
-   # Tunnel状態確認
-   cloudflared tunnel info jenkins-frp-tunnel
-   ```
-
-2. **DNS解決エラー**
-   ```bash
-   # DNS設定確認
-   dig jenkins.yourdomain.com
-   nslookup jenkins.yourdomain.com
-   ```
-
-3. **frp接続エラー**
+1. **frpc接続エラー**
    ```bash
    # frpサーバーログ確認
    docker compose logs frps
@@ -180,17 +131,27 @@ curl -H "Host: jenkins.yourdomain.com" http://localhost:80
    netstat -tulpn | grep 7000
    ```
 
+2. **Cloudflare Tunnel接続エラー**
+   ```bash
+   # Cloudflareダッシュボードでトンネル状態確認
+   # cloudflaredサービス状態確認
+   sudo systemctl status cloudflared
+   ```
+
+3. **DNS解決エラー**
+   ```bash
+   # DNS設定確認
+   dig jenkins.shiron.dev
+   nslookup jenkins.shiron.dev
+   ```
+
 ### デバッグコマンド
 ```bash
 # 全サービス再起動
 docker compose restart
 
 # 設定テスト
-cloudflared tunnel --config cloudflared/config.yml ingress validate
-
-# 手動Tunnel実行（デバッグ）
-docker run --rm -v $(pwd)/cloudflared:/etc/cloudflared \
-  cloudflare/cloudflared:latest tunnel --config /etc/cloudflared/config.yml run
+curl -H "Host: jenkins.shiron.dev" http://localhost:80
 ```
 
 ## 本番環境設定
@@ -207,7 +168,7 @@ Cloudflare設定で「Full (strict)」に設定
 ```bash
 # 設定ファイルのバックアップ
 tar -czf frp-server-backup-$(date +%Y%m%d).tar.gz \
-  *.toml *.yml .env cloudflared/
+  *.toml .env logs/
 ```
 
 ## 更新手順
@@ -221,4 +182,23 @@ docker compose up -d
 
 # 動作確認
 ./setup.sh
+```
+
+## Cloudflare Tunnel管理コマンド
+
+```bash
+# トンネル一覧表示
+cloudflared tunnel list
+
+# トンネル情報表示
+cloudflared tunnel info jenkins-frp-tunnel
+
+# トンネル削除
+cloudflared tunnel delete jenkins-frp-tunnel
+
+# サービス停止
+sudo systemctl stop cloudflared
+
+# サービス開始
+sudo systemctl start cloudflared
 ``` 
