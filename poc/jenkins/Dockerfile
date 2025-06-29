@@ -22,7 +22,4 @@ RUN apt-get update && \
 COPY plugins.txt /usr/share/jenkins/ref/plugins.txt
 RUN jenkins-plugin-cli -f /usr/share/jenkins/ref/plugins.txt
 
-# Configuration as Code設定ファイルをコピー
-COPY casc.yaml /usr/share/jenkins/ref/casc.yaml
-
 USER jenkins

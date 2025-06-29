@@ -12,40 +12,29 @@ credentials:
 
 # Job DSL設定
 jobs:
-  - script: |
-      multibranchPipelineJob('asr-poc') {
-          displayName('asr-poc')
-          description('Multibranch pipeline job for ASR POC project')
+  - script: >
+      // この job {} ブロックはSeed Jobを定義します
+      job('my-project-seed-job') {
+        description('This seed job is created by JCasC. It reads DSL scripts from Git.')
 
-          // ジョブを有効にする
-          disabled(false)
-
-          // Branch Sources設定
-          branchSources {
-              git {
-                  id('asr-poc-git-source')
-                  // Giteaリポジトリの設定
-                  remote('http://gitea:3000/poc_user/my-poc-repo.git')
-                  credentialsId('poc_user')
-
-                  // Behaviours設定
-                  traits {
-                      gitBranchDiscovery() // Discover branches
-                  }
-              }
+        // ジョブ定義(DSL)を管理するGitリポジトリを指定
+        scm {
+          git {
+            remote {
+              url('https://github.com/kizuna-org/asr.git')
+              // credentials('your-git-credentials-id')
+            }
+            branch('feat/poc')
           }
+        }
 
-          // Build Configuration設定
-          factory {
-              workflowBranchProjectFactory {
-                  scriptPath('Jenkinsfile') // Jenkinsfileのパス
-              }
+        steps {
+          // "Process Job DSLs" のビルドステップに相当
+          jobDsl {
+            // SCMからチェックアウトしたファイルを実行する
+            targets('poc/jenkins/poc-job.groovy') // リポジトリ内のDSLファイルへのパス
+            removedJobAction('DELETE')
+            removedViewAction('DELETE')
           }
-
-          // 不要アイテムの扱い
-          orphanedItemStrategy {
-              discardOldItems {
-                  // 古いアイテムを削除する設定
-              }
-          }
+        }
       }

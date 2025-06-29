@@ -11,6 +11,7 @@ services:
       # --- ここからが変更点 ---
       # 名前付きボリュームからホストのディレクトリへのマウントに変更
       - ./jenkins_home:/var/jenkins_home
+      - ./jenkins/casc.yaml:/usr/share/jenkins/ref/casc.yaml
       # --- ここまでが変更点 ---
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
