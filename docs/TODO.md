@@ -29,6 +29,66 @@
 - [ ] カスタムWebhookエンドポイントの設定
 - [ ] 複数Gitプラットフォーム対応
 
+### 🚀 Jenkins起動時実行の実装
+
+#### 現状の課題
+- [ ] JCaSC内でのスクリプト自動実行は構文エラーを引き起こす
+- [ ] 複数jobスクリプトの実行順序制御が困難
+- [ ] Jenkins初期化完了タイミングの検出が複雑
+
+#### 実装候補
+
+##### 1. Docker Compose ヘルスチェック連携
+- [ ] Jenkinsコンテナのヘルスチェック実装
+- [ ] 起動完了後のcurlによるSeed Job実行
+- [ ] docker-compose.ymlの設定追加
+
+```yaml
+# 実装例
+healthcheck:
+  test: ["CMD", "curl", "-f", "http://localhost:8080/login"]
+  interval: 30s
+  timeout: 10s
+  retries: 3
+  start_period: 90s
+```
+
+##### 2. Init Script（推奨）
+- [ ] `/usr/share/jenkins/ref/init.groovy.d/`に起動スクリプト配置
+- [ ] Dockerfileでの自動配置設定
+- [ ] Jenkins初期化完了後の自動実行
+
+```groovy
+// 実装例
+import jenkins.model.Jenkins
+
+def jenkins = Jenkins.getInstance()
+Thread.start {
+  Thread.sleep(10000) // 初期化完了待機
+  def job = jenkins.getItem('my-project-seed-job')
+  if (job) {
+    job.scheduleBuild2(0)
+    println "Seed job triggered automatically"
+  }
+}
+```
+
+##### 3. External Trigger Script
+- [ ] Bash/Python外部スクリプトの作成
+- [ ] Jenkins REST APIによる実行
+- [ ] Crontabまたはsystemdタイマーでの定期チェック
+
+##### 4. Jenkins Plugin開発
+- [ ] カスタムプラグインでの起動時実行
+- [ ] JCasCとの完全統合
+- [ ] より高度な制御とログ機能
+
+#### 実装優先度
+1. **Init Script** - 最も確実で標準的
+2. **Docker Healthcheck** - インフラレベルで制御
+3. **External Script** - シンプルで柔軟
+4. **Custom Plugin** - 最も高機能だが開発コスト大
+
 ### 📈 パフォーマンス向上
 
 #### 現状の課題
@@ -68,14 +128,16 @@
 ### 📋 実装優先度
 
 #### High Priority
-1. **GitHub Webhooks** - 本番環境での即時反映
-2. **Generic Webhook Plugin** - 汎用性確保
-3. **セキュリティ設定** - 安全な運用
+1. **Jenkins起動時実行（Init Script）** - 手動実行の自動化
+2. **GitHub Webhooks** - 本番環境での即時反映
+3. **Generic Webhook Plugin** - 汎用性確保
+4. **セキュリティ設定** - 安全な運用
 
 #### Medium Priority
-1. **Gitea Webhooks** - 開発環境の改善
-2. **パフォーマンス最適化** - 大規模対応
-3. **モニタリング強化** - 運用品質向上
+1. **Docker Healthcheck連携** - インフラ統合
+2. **Gitea Webhooks** - 開発環境の改善
+3. **パフォーマンス最適化** - 大規模対応
+4. **モニタリング強化** - 運用品質向上
 
 #### Low Priority
 1. **高度な並列化** - 将来的な拡張
@@ -85,6 +147,7 @@
 ### 📝 関連ドキュメント
 
 - [ ] Webhook設定手順書の作成
+- [ ] 起動時実行実装ガイド
 - [ ] トラブルシューティングガイド
 - [ ] セキュリティベストプラクティス
 - [ ] パフォーマンスチューニングガイド
@@ -93,6 +156,7 @@
 
 #### 機能テスト
 - [ ] Webhook受信テスト
+- [ ] 起動時実行テスト
 - [ ] フォールバック機能テスト
 - [ ] セキュリティテスト
 
@@ -112,4 +176,5 @@
 
 - 現在のSCMポーリング設定は後方互換性として保持
 - Push型実装後も、フォールバック機能として機能
-- 段階的移行により安全な実装を目指す 
+- 段階的移行により安全な実装を目指す
+- Jenkins起動時実行は安定性確保後に追加実装 
