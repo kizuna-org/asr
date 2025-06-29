@@ -10,6 +10,11 @@ credentials:
               password: "${GITEA_PASS}"
               description: "Gitea credentials for JCasC"
 
+# Script Security設定
+security:
+  globalJobDslSecurityConfiguration:
+    useScriptSecurity: false
+
 # Job DSL設定
 jobs:
   - script: >
