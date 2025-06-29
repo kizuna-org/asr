@@ -29,3 +29,13 @@ git commit -m "docs: update documentation"
 git commit -m "refactor: refactor code"
 git commit -m "chore: update configuration files"
 ```
+
+## Docker
+
+`docker compose up`の実行時は`-d`を必ずつけてください
+
+### poc環境
+
+起動時は`docker compose down && rm jenkins_home  && docker compose --progress plain up -d`です。
+ちゃんと`rm jenkins_home`をしないと再起動後も過去のデータが残ったままになります
+起動確認は数秒待った後`docker compose ps`や`docker compose logs jenkins`でできます

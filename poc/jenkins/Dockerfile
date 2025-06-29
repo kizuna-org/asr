@@ -22,4 +22,8 @@ RUN apt-get update && \
 COPY plugins.txt /usr/share/jenkins/ref/plugins.txt
 RUN jenkins-plugin-cli -f /usr/share/jenkins/ref/plugins.txt
 
+# Create init.groovy.d directory and add startup script
+RUN mkdir -p /usr/share/jenkins/ref/init.groovy.d
+COPY startup-trigger.groovy /usr/share/jenkins/ref/init.groovy.d/startup-trigger.groovy
+
 USER jenkins
