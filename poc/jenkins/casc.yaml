@@ -27,7 +27,7 @@ jobs:
 
         steps {
           jobDsl {
-            targets('poc/jenkins/poc-job.groovy')
+            targets('poc/jenkins/poc_job.groovy')
             removedJobAction('DELETE')
             removedViewAction('DELETE')
           }
