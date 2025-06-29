@@ -81,7 +81,7 @@ jobs:
         }
         steps {
           jobDsl {
-            targets('poc/jenkins/poc-job.groovy')
+            targets('poc/jenkins/poc_job.groovy')
             removedJobAction('DELETE')
             removedViewAction('DELETE')
           }
@@ -89,16 +89,35 @@ jobs:
       }
 ```
 
+## 追加の問題と修正
+
+### Job DSLファイル名エラー
+Seed Jobが実行されたが、以下のエラーが発生：
+```
+ERROR: invalid script name 'poc-job.groovy; script names may only contain letters, digits and underscores, but may not start with a digit
+```
+
+**原因**: Job DSLファイル名にハイフン（`-`）が含まれていたため  
+**解決方法**: ファイル名を`poc-job.groovy`から`poc_job.groovy`に変更
+
+### 修正内容
+- `poc/jenkins/poc-job.groovy` → `poc/jenkins/poc_job.groovy`
+- `casc.yaml`内の参照も`targets('poc/jenkins/poc_job.groovy')`に更新
+
 ## 結果
 - Jenkins・Giteaコンテナが正常起動
 - JCasCによるJob DSL設定が正常に読み込まれることを確認
+- Seed Jobが正常実行され、Job DSLスクリプトが処理されることを確認
 
 ## 学習事項
 - YAMLの`script: >`ブロック内はGroovyコードとして厳密に解釈される
 - 日本語文字やUnicodeコメントはGroovyパーサーでエラーを引き起こす可能性
 - JCascのデバッグは段階的なコメントアウトが効果的
 - jenkins_homeディレクトリは手動作成せず、Dockerの自動作成に任せるべき
+- **Job DSLファイル名は文字、数字、アンダースコアのみ使用可能（ハイフン不可）**
+- **Job DSLファイル名は数字で始まってはいけない**
 
 ## 関連ファイル
 - `poc/jenkins/casc.yaml`
+- `poc/jenkins/poc_job.groovy` (旧: `poc-job.groovy`)
 - `poc/compose.yaml` 
