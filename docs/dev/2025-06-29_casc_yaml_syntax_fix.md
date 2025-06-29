@@ -1,7 +1,7 @@
 # 2025-06-29: Jenkins Configuration as Code YAML構文エラー修正
 
 ## 概要
-Jenkins Configuration as Code（JCasC）のYAMLファイル（`poc/jenkins/casc.yaml`）において、`jobs.script`セクションの構文エラーを特定・修正しました。
+Jenkins Configuration as Code（JCasC）のYAMLファイル（`poc/jenkins/casc.yaml`）において、`jobs.script`セクションの構文エラーを特定・修正し、Seed Jobの自動実行設定も追加しました。
 
 ## 発生していた問題
 - Jenkinsの起動時に以下のエラーが発生：
@@ -121,11 +121,37 @@ security:
     useScriptSecurity: false
 ```
 
+## Seed Job自動実行設定
+
+### 設定追加の背景
+初期設定では、Seed Jobは手動実行のみでした。実用的な運用のため、自動実行トリガーを追加しました。
+
+### 追加したトリガー設定
+```yaml
+triggers {
+  scm('H/5 * * * *')
+  cron('H 2 * * *')
+}
+```
+
+### トリガーの説明
+1. **SCMポーリング** (`H/5 * * * *`)
+   - 5分ごと（ランダム化された時間）にGitリポジトリをチェック
+   - 変更があった場合に自動実行
+   - Git commitやpushによって自動的にJob DSLが更新される
+
+2. **定期実行** (`H 2 * * *`)
+   - 毎日午前2時頃（ランダム化された時間）に実行
+   - 変更がなくても定期的に実行してシステムの整合性を保つ
+   - Job DSLファイルの外部削除などに対する復旧機能
+
 ## 結果
 - Jenkins・Giteaコンテナが正常起動
 - JCasCによるJob DSL設定が正常に読み込まれることを確認
 - Seed Jobが正常実行され、Job DSLスクリプトが処理されることを確認
 - Script Securityによる承認プロセスをスキップし、Job DSLが自動実行される
+- **Gitリポジトリへの変更が自動的にJenkinsジョブに反映される**
+- **手動実行不要でJob DSLスクリプトが定期的に処理される**
 
 ## 学習事項
 - YAMLの`script: >`ブロック内はGroovyコードとして厳密に解釈される
@@ -136,8 +162,10 @@ security:
 - **Job DSLファイル名は数字で始まってはいけない**
 - **開発環境ではScript Securityを無効化することで自動化を促進できる**
 - **本番環境では適切なScript Securityポリシーを検討する必要がある**
+- **SCMポーリングによりGit-Jenkins間の自動同期が実現できる**
+- **cronトリガーにより定期的なシステム整合性チェックが可能**
 
 ## 関連ファイル
 - `poc/jenkins/casc.yaml`
 - `poc/jenkins/poc_job.groovy` (旧: `poc-job.groovy`)
-- `poc/compose.yaml` 
+- `poc/compose.yaml`
