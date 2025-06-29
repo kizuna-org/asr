@@ -1,0 +1,104 @@
+# 2025-06-29: Jenkins Configuration as Code YAML構文エラー修正
+
+## 概要
+Jenkins Configuration as Code（JCasC）のYAMLファイル（`poc/jenkins/casc.yaml`）において、`jobs.script`セクションの構文エラーを特定・修正しました。
+
+## 発生していた問題
+- Jenkinsの起動時に以下のエラーが発生：
+```
+script: 24: unexpected token: } @ line 24, column 1.
+   }
+   ^
+1 error
+```
+
+## 原因の特定プロセス
+段階的なコメントアウトテストを実施：
+
+1. **jobs.scriptセクション全体をコメントアウト** → 正常起動
+2. **最小限のjobブロックのみ有効化** → 正常起動  
+3. **SCMセクション追加** → 正常起動
+4. **stepsセクション（jobDsl）追加** → 正常起動
+5. **元の設定（日本語コメント含む）復元** → エラー発生
+
+## 特定された根本原因
+YAMLの`script: >`ブロック内で記述されるGroovyコードに以下の問題があった：
+
+1. **日本語コメント**: 
+   - `// この job {} ブロックはSeed Jobを定義します`
+   - `// ジョブ定義(DSL)を管理するGitリポジトリを指定`
+   - `// "Process Job DSLs" のビルドステップに相当`
+   - `// SCMからチェックアウトしたファイルを実行する`
+
+2. **インラインコメント**:
+   - `targets('poc/jenkins/poc-job.groovy') // リポジトリ内のDSLファイルへのパス`
+
+## 解決方法
+すべての日本語コメントとインラインコメントを削除し、基本的なJob DSL構文のみを残しました。
+
+### 修正前
+```yaml
+jobs:
+  - script: >
+      // この job {} ブロックはSeed Jobを定義します
+      job('my-project-seed-job') {
+        description('This seed job is created by JCasC. It reads DSL scripts from Git.')
+        // ジョブ定義(DSL)を管理するGitリポジトリを指定
+        scm {
+          git {
+            remote {
+              url('https://github.com/kizuna-org/asr.git')
+              // credentials('your-git-credentials-id')
+            }
+            branch('feat/poc')
+          }
+        }
+        steps {
+          // "Process Job DSLs" のビルドステップに相当
+          jobDsl {
+            // SCMからチェックアウトしたファイルを実行する
+            targets('poc/jenkins/poc-job.groovy') // リポジトリ内のDSLファイルへのパス
+            removedJobAction('DELETE')
+            removedViewAction('DELETE')
+          }
+        }
+      }
+```
+
+### 修正後
+```yaml
+jobs:
+  - script: >
+      job('my-project-seed-job') {
+        description('This seed job is created by JCasC. It reads DSL scripts from Git.')
+        scm {
+          git {
+            remote {
+              url('https://github.com/kizuna-org/asr.git')
+            }
+            branch('feat/poc')
+          }
+        }
+        steps {
+          jobDsl {
+            targets('poc/jenkins/poc-job.groovy')
+            removedJobAction('DELETE')
+            removedViewAction('DELETE')
+          }
+        }
+      }
+```
+
+## 結果
+- Jenkins・Giteaコンテナが正常起動
+- JCasCによるJob DSL設定が正常に読み込まれることを確認
+
+## 学習事項
+- YAMLの`script: >`ブロック内はGroovyコードとして厳密に解釈される
+- 日本語文字やUnicodeコメントはGroovyパーサーでエラーを引き起こす可能性
+- JCascのデバッグは段階的なコメントアウトが効果的
+- jenkins_homeディレクトリは手動作成せず、Dockerの自動作成に任せるべき
+
+## 関連ファイル
+- `poc/jenkins/casc.yaml`
+- `poc/compose.yaml` 

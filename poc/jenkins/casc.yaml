@@ -13,26 +13,21 @@ credentials:
 # Job DSL設定
 jobs:
   - script: >
-      // この job {} ブロックはSeed Jobを定義します
       job('my-project-seed-job') {
         description('This seed job is created by JCasC. It reads DSL scripts from Git.')
 
-        // ジョブ定義(DSL)を管理するGitリポジトリを指定
         scm {
           git {
             remote {
               url('https://github.com/kizuna-org/asr.git')
-              // credentials('your-git-credentials-id')
             }
             branch('feat/poc')
           }
         }
 
         steps {
-          // "Process Job DSLs" のビルドステップに相当
           jobDsl {
-            // SCMからチェックアウトしたファイルを実行する
-            targets('poc/jenkins/poc-job.groovy') // リポジトリ内のDSLファイルへのパス
+            targets('poc/jenkins/poc-job.groovy')
             removedJobAction('DELETE')
             removedViewAction('DELETE')
           }
