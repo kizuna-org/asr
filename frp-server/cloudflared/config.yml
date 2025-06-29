@@ -1,0 +1,32 @@
+# cloudflared/config.yml - Cloudflare Tunnel設定
+
+tunnel: ${CLOUDFLARE_TUNNEL_ID}
+credentials-file: /etc/cloudflared/credentials.json
+
+# Ingress設定 - ドメインベースルーティング
+ingress:
+  # Jenkins HTTP トラフィック
+  - hostname: jenkins.yourdomain.com
+    service: http://frps:80
+    originRequest:
+      httpHostHeader: jenkins.frp.local
+
+  # Gitea HTTP トラフィック
+  - hostname: gitea.yourdomain.com
+    service: http://frps:80
+    originRequest:
+      httpHostHeader: gitea.frp.local
+
+  # frp Web Dashboard（管理用）
+  - hostname: frp-admin.yourdomain.com
+    service: http://frps:8000
+
+  # デフォルトルート（404応答）
+  - service: http_status:404
+
+# ログ設定
+logLevel: info
+logFile: /var/log/cloudflared.log
+
+# メトリクス設定
+metrics: 0.0.0.0:9090

@@ -42,6 +42,19 @@ services:
     networks:
       - ci-network
 
+  # --- frpクライアント設定（外部frpsサーバーに接続）---
+  frpc:
+    image: snowdreamtech/frpc:latest
+    container_name: frpc
+    volumes:
+      - ./frp/frpc.toml:/etc/frp/frpc.toml
+    networks:
+      - ci-network
+    depends_on:
+      - jenkins
+      - gitea
+    restart: unless-stopped
+
 # --- ここからが変更点 ---
 # jenkins_home の定義を削除
 # --- ここまでが変更点 ---
