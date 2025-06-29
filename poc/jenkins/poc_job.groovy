@@ -1,5 +1,5 @@
 multibranchPipelineJob('my-poc-repo') {
-    description('')
+    description('Multibranch pipeline for POC repository')
 
     branchSources {
         git {
@@ -7,15 +7,16 @@ multibranchPipelineJob('my-poc-repo') {
             remote('http://gitea:3000/poc_user/my-poc-repo.git')
             credentialsId('gitea-credentials')
             traits {
-                branchDiscovery()
+                branchDiscoveryTrait()
             }
         }
     }
 
     orphanedItemStrategy {
-        pruneDeadBranches(true)
-        daysToKeep(-1)
-        numToKeep(-1)
+        discardOldItems {
+            daysToKeep(-1)
+            numToKeep(-1)
+        }
     }
 
     factory {
