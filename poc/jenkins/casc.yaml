@@ -30,6 +30,11 @@ jobs:
           }
         }
 
+        triggers {
+          scm('H/5 * * * *')
+          cron('H 2 * * *')
+        }
+
         steps {
           jobDsl {
             targets('poc/jenkins/poc_job.groovy')
