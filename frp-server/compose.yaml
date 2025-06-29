@@ -4,13 +4,6 @@ services:
   frps:
     image: snowdreamtech/frps:latest
     container_name: frps
-    ports:
-      - "7000:7000" # frpサーバー管理ポート
-      - "8000:8000" # Webダッシュボード
-      - "80:80" # HTTP公開ポート（Cloudflare Tunnel経由）
-      - "443:443" # HTTPS公開ポート（Cloudflare Tunnel経由）
-      - "50000:50000" # Jenkins エージェント接続用
-      - "2222:2222" # Gitea SSH接続用
     volumes:
       - ./frps.toml:/etc/frp/frps.toml
       - ./logs:/var/log/frp
