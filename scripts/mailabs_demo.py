@@ -344,21 +344,29 @@ def visualize_audio_and_spectrogram(
     plt.show()
 
 
-class SynthesisCallback(tf.keras.callbacks.Callback):
-    def __init__(self, text_encoder, n_fft, hop_length, sample_rate=22050):
+class MultiSpeakerSynthesisCallback(tf.keras.callbacks.Callback):
+    """Callback to generate audio at the end of each epoch for multi-speaker model."""
+    
+    def __init__(self, text_encoder, speaker_encoder, num_speakers, n_fft, hop_length, sample_rate=22050):
         super().__init__()
         self.text_encoder = text_encoder
+        self.speaker_encoder = speaker_encoder
+        self.num_speakers = num_speakers
         self.n_fft = n_fft
         self.hop_length = hop_length
         self.sample_rate = sample_rate
-        # 音声合成に使用するテスト用のテキスト
-        self.inference_text = "This is a test of the model at the end of each epoch."
+        # Test texts for different scenarios
+        self.inference_texts = [
+            "This is a test of the multi-speaker model at the end of each epoch.",
+            "Hello, how are you today?",
+            "The weather is beautiful."
+        ]
         os.makedirs("outputs/epoch_samples", exist_ok=True)
         
-        # 時間予測用の変数
+        # Time prediction variables
         self.training_start_time = None
         self.epoch_start_time = None
-        self.epoch_times = []  # 各エポックの実行時間を記録
+        self.epoch_times = []
         self.total_epochs = None
 
     def on_train_begin(self, logs=None):
@@ -383,26 +391,26 @@ class SynthesisCallback(tf.keras.callbacks.Callback):
         print(f"\n🚀 エポック {epoch + 1}/{self.total_epochs} を開始しています... (開始時刻: {epoch_start_str})")
 
     def on_epoch_end(self, epoch, logs=None):
-        """Generate audio sample, save state, and predict completion time at the end of each epoch."""
+        """Generate multi-speaker audio samples, save state, and predict completion time."""
         global training_interrupted
         
-        # エポック終了時刻を記録
+        # Record epoch end time
         epoch_end_time = time.time()
         epoch_duration = epoch_end_time - self.epoch_start_time
         self.epoch_times.append(epoch_duration)
         
-        # 時間予測の計算
+        # Time prediction calculations
         completed_epochs = epoch + 1
         remaining_epochs = self.total_epochs - completed_epochs
         
-        # 平均エポック時間を計算
+        # Calculate average epoch time
         avg_epoch_time = sum(self.epoch_times) / len(self.epoch_times)
         
-        # 残り時間を計算
+        # Calculate remaining time
         estimated_remaining_time = remaining_epochs * avg_epoch_time
         estimated_completion_time = epoch_end_time + estimated_remaining_time
         
-        # 時間情報を表示
+        # Display time information
         epoch_duration_min = epoch_duration / 60
         avg_epoch_time_min = avg_epoch_time / 60
         remaining_time_min = estimated_remaining_time / 60
@@ -427,35 +435,46 @@ class SynthesisCallback(tf.keras.callbacks.Callback):
             print("\n⚠️  中断が要求されました。音声生成をスキップします。")
             return
             
-        print(f"\n\n--- エポック {epoch + 1} 終了時の音声サンプル生成 ---")
+        print(f"\n🎵 エポック {epoch + 1} 完了 - マルチスピーカーサンプル音声を生成中...")
 
         try:
-            # テキストをベクトル化
-            text_vec = self.text_encoder([self.inference_text])
-
-            # モデルでメルスペクトログラムを予測
-            predicted_mel_spec = self.model.predict(text_vec)
-
-            # バッチ次元を削除し、numpy配列に変換
-            predicted_mel_spec_np = predicted_mel_spec[0]
-
-            # スペクトログラムをデシベルからパワーに変換
-            predicted_mel_spec_db_t = predicted_mel_spec_np.T
-            power_spec = librosa.db_to_power(predicted_mel_spec_db_t)
-
-            # Griffin-Limアルゴリズムで音声を復元
-            generated_audio = librosa.feature.inverse.mel_to_audio(
-                power_spec,
-                sr=self.sample_rate,
-                n_fft=self.n_fft,
-                hop_length=self.hop_length,
-            )
-
-            # 生成された音声を保存
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_audio_path = f"outputs/epoch_samples/epoch_{epoch + 1}_{timestamp}.wav"
-            sf.write(output_audio_path, generated_audio, self.sample_rate)
-            print(f"🎵 エポック {epoch + 1} の音声サンプルを保存: {output_audio_path}")
+            # Test with first few speakers and texts
+            test_speaker_ids = [0, min(1, self.num_speakers-1)]  # Test with available speakers
+            test_texts = self.inference_texts[:1]  # Use first text only for speed
+            
+            for text_idx, test_text in enumerate(test_texts):
+                for speaker_idx in test_speaker_ids:
+                    if speaker_idx >= self.num_speakers:
+                        continue
+                        
+                    try:
+                        # Prepare inputs
+                        text_vec = self.text_encoder([test_text])
+                        speaker_vec = tf.one_hot([speaker_idx], depth=self.num_speakers)
+                        
+                        # Generate mel-spectrogram
+                        predicted_mel_spec = self.model.predict([text_vec, speaker_vec], verbose=0)
+                        predicted_mel_spec_np = predicted_mel_spec[0]
+                        
+                        # Convert to audio using Griffin-Lim
+                        predicted_mel_spec_db_t = predicted_mel_spec_np.T
+                        power_spec = librosa.db_to_power(predicted_mel_spec_db_t)
+                        generated_audio = librosa.feature.inverse.mel_to_audio(
+                            power_spec, sr=self.sample_rate, n_fft=self.n_fft, hop_length=self.hop_length
+                        )
+                        
+                        # Save audio
+                        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                        output_path = f"outputs/epoch_samples/epoch_{epoch + 1}_speaker_{speaker_idx}_text_{text_idx}_{timestamp}.wav"
+                        sf.write(output_path, generated_audio, self.sample_rate)
+                        
+                        print(f"  💾 保存: {output_path}")
+                        
+                    except Exception as e:
+                        print(f"  ❌ スピーカー {speaker_idx} の音声生成エラー: {e}")
+                        continue
+            
+            print(f"✅ エポック {epoch + 1} のマルチスピーカーサンプル音声生成完了")
 
         except Exception as e:
             print(f"❌ エポック {epoch + 1} の音声生成中にエラーが発生しました: {e}")
@@ -477,7 +496,7 @@ class SynthesisCallback(tf.keras.callbacks.Callback):
             print("=" * 50)
 
 
-def save_training_state(epoch, text_encoder, model):
+def save_training_state(epoch, text_encoder, speaker_encoder, model):
     """Save training state including epoch number and text encoder."""
     try:
         os.makedirs(CHECKPOINT_DIR, exist_ok=True)
@@ -495,6 +514,14 @@ def save_training_state(epoch, text_encoder, model):
             json.dump(vocab, f, ensure_ascii=False, indent=2)
         print(f"  ✅ 語彙を保存: {vocab_path}")
 
+        # Save speaker encoder config
+        if speaker_encoder is not None:
+            speaker_config = speaker_encoder.get_config()
+            speaker_config_path = os.path.join(CHECKPOINT_DIR, "speaker_config.json")
+            with open(speaker_config_path, "w", encoding='utf-8') as f:
+                json.dump(speaker_config, f, ensure_ascii=False, indent=2)
+            print(f"  ✅ スピーカー設定を保存: {speaker_config_path}")
+
         # Save training state with timestamp
         training_state = {
             "epoch": epoch,
@@ -502,9 +529,10 @@ def save_training_state(epoch, text_encoder, model):
             "max_tokens": text_encoder._max_tokens,
             "output_sequence_length": text_encoder._output_sequence_length,
             "standardize": text_encoder._standardize,
+            "num_speakers": speaker_encoder.num_tokens if speaker_encoder else 0,
             "saved_at": datetime.now().isoformat(),
             "tensorflow_version": tf.__version__,
-            "checkpoint_version": "2.0"
+            "checkpoint_version": "3.0"  # Updated for multi-speaker
         }
         
         # Create backup of previous state
@@ -527,12 +555,12 @@ def save_training_state(epoch, text_encoder, model):
 
 
 def load_training_state():
-    """Load training state and return epoch number, text encoder, and model if available."""
+    """Load training state and return epoch number, text encoder, speaker encoder, and model if available."""
     print("🔍 保存された状態を確認中...")
     
     if not os.path.exists(TRAINING_STATE_PATH):
         print("ℹ️  保存された状態が見つかりません。最初から開始します。")
-        return 0, None, None
+        return 0, None, None, None
 
     try:
         # Load training state
@@ -554,13 +582,13 @@ def load_training_state():
         # Check if model file exists
         if not os.path.exists(MODEL_CHECKPOINT_PATH):
             print(f"❌ モデルファイルが見つかりません: {MODEL_CHECKPOINT_PATH}")
-            return 0, None, None
+            return 0, None, None, None
 
         # Load vocabulary
         vocab_path = os.path.join(CHECKPOINT_DIR, "vocabulary.json")
         if not os.path.exists(vocab_path):
             print(f"❌ 語彙ファイルが見つかりません: {vocab_path}")
-            return 0, None, None
+            return 0, None, None, None
             
         print(f"📖 語彙を読み込み中: {vocab_path}")
         with open(vocab_path, "r", encoding='utf-8') as f:
@@ -576,6 +604,16 @@ def load_training_state():
         text_encoder.set_vocabulary(vocab)
         print(f"  ✅ 語彙サイズ: {len(vocab)}")
 
+        # Recreate speaker encoder
+        speaker_encoder = None
+        num_speakers = training_state.get("num_speakers", 0)
+        if num_speakers > 0:
+            print("🎭 スピーカーエンコーダーを再構築中...")
+            speaker_encoder = create_speaker_encoder(num_speakers)
+            print(f"  ✅ スピーカー数: {num_speakers}")
+        else:
+            print("⚠️  スピーカー情報が見つかりません。新規作成が必要です。")
+
         # Load model
         print(f"🤖 モデルを読み込み中: {MODEL_CHECKPOINT_PATH}")
         model = tf.keras.models.load_model(MODEL_CHECKPOINT_PATH)
@@ -585,7 +623,7 @@ def load_training_state():
         print(f"🎯 エポック {epoch} から再開します")
         print("=" * 50)
         
-        return epoch, text_encoder, model
+        return epoch, text_encoder, speaker_encoder, model
 
     except Exception as e:
         print(f"❌ チェックポイント読み込み中にエラーが発生しました: {e}")
@@ -603,18 +641,18 @@ def load_training_state():
             except Exception as backup_error:
                 print(f"❌ バックアップからの復元も失敗しました: {backup_error}")
         
-        return 0, None, None
+        return 0, None, None, None
 
 
 def main():
-    """Main function to run the LJSpeech learning script."""
-    print("=== LJSpeech 音声合成スクリプト ===")
+    """Main function to run the M-AILABS multi-speaker learning script."""
+    print("=== M-AILABS マルチスピーカー音声合成スクリプト ===")
     print(f"🕐 開始時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 50)
     
     try:
         # Check for existing checkpoint
-        start_epoch, text_encoder, model = load_training_state()
+        start_epoch, text_encoder, speaker_encoder, model = load_training_state()
 
         if start_epoch > 0:
             print(f"🔄 チェックポイントが見つかりました。エポック {start_epoch + 1} から再開します")
@@ -623,8 +661,10 @@ def main():
 
         # Load dataset
         print("\n=== データセット読み込み ===")
-        dataset = load_ljspeech_dataset(split="train", batch_size=1)
+        dataset, num_speakers = load_mailabs_dataset(batch_size=1)
         os.makedirs("outputs", exist_ok=True)
+        
+        print(f"🎭 検出されたスピーカー数: {num_speakers}")
 
         # Print dataset size before preparation
         print("📊 データセットサイズを確認中...")
@@ -640,21 +680,32 @@ def main():
         if text_encoder is None:
             print("🔤 新しいテキストエンコーダーを作成中...")
             text_encoder = create_text_encoder(vocab_size=1000)
-            # フィルタリングする前のデータセットで語彙を構築
+            # Build vocabulary from dataset
             print("📚 語彙を構築中...")
-            example_texts = dataset.unbatch().map(lambda text, audio: text).take(5000)
+            example_texts = dataset.unbatch().map(lambda x: x['text']).take(5000)
             text_encoder.adapt(example_texts)
         else:
             print("♻️  保存されたテキストエンコーダーを使用")
             
         print(f"📖 語彙サイズ: {text_encoder.vocabulary_size():,}")
 
+        # Speaker processing setup
+        print("\n=== スピーカー処理 ===")
+        if speaker_encoder is None:
+            print("🎭 新しいスピーカーエンコーダーを作成中...")
+            speaker_encoder = create_speaker_encoder(num_speakers)
+        else:
+            print("♻️  保存されたスピーカーエンコーダーを使用")
+            
+        print(f"🎭 スピーカーエンコーダー設定完了: {num_speakers} スピーカー")
+
         # Build model
         print("\n=== モデル構築 ===")
         if model is None:
-            print("🤖 新しいモデルを構築中...")
-            model = build_text_to_spectrogram_model(
+            print("🤖 新しいマルチスピーカーモデルを構築中...")
+            model = build_multispeaker_text_to_spectrogram_model(
                 vocab_size=text_encoder.vocabulary_size(),
+                num_speakers=num_speakers,
                 mel_bins=80,
                 max_sequence_length=MAX_FRAMES,
             )
@@ -671,50 +722,48 @@ def main():
         N_FFT = 1024
         HOP_LENGTH = 256
 
-        def filter_short_audio(text, audio):
-            """
-            音声の長さがn_fftより短いサンプルを除外するフィルタ関数。
-            """
-            return tf.shape(audio)[0] > N_FFT
+        def filter_short_audio(data):
+            """Filter out samples with audio shorter than n_fft."""
+            return tf.shape(data['audio'])[0] > N_FFT
 
         def py_extract_mel_spectrogram_wrapper(audio):
-            # この関数はtf.py_function内で呼ばれる
+            """Wrapper for mel-spectrogram extraction in tf.py_function."""
             return extract_mel_spectrogram(audio, n_fft=N_FFT, hop_length=HOP_LENGTH)
 
-        def prepare_for_training(text, audio):
-            """
-            Prepare data for text-to-spectrogram training.
-            Input: text vector
-            Output: mel-spectrogram
-            """
-            audio_processed = preprocess_audio(audio)
+        def prepare_for_training(data):
+            """Prepare data for multi-speaker text-to-spectrogram training."""
+            audio_processed = preprocess_audio(data['audio'])
             mel_spec = tf.py_function(
                 func=py_extract_mel_spectrogram_wrapper,
                 inp=[audio_processed],
                 Tout=tf.float32,
             )
             mel_spec.set_shape((None, 80))  # Set shape for Keras
-            text_vec = text_encoder(text)
-            # メルスペクトログラムをMAX_FRAMESフレームにパディング/切り詰め
-            mel_spec = mel_spec[:MAX_FRAMES]  # 切り詰め
+            
+            text_vec = text_encoder(data['text'])
+            speaker_vec = tf.one_hot(data['speaker_id'], depth=num_speakers)
+            
+            # Pad/truncate mel-spectrogram to MAX_FRAMES
+            mel_spec = mel_spec[:MAX_FRAMES]  # Truncate
             mel_spec = tf.pad(
                 mel_spec, [[0, MAX_FRAMES - tf.shape(mel_spec)[0]], [0, 0]]
-            )  # パディング
+            )  # Pad
             mel_spec.set_shape((MAX_FRAMES, 80))
-            return text_vec, mel_spec
+            
+            return (text_vec, speaker_vec), mel_spec
 
         print("⚙️  データセットパイプラインを構築中...")
         train_dataset = (
             dataset.unbatch()
-            .filter(filter_short_audio)  # 短すぎる音声を除外
+            .filter(filter_short_audio)  # Filter short audio
             .map(prepare_for_training, num_parallel_calls=tf.data.AUTOTUNE)
             .cache()
             .shuffle(buffer_size=1024)
             .padded_batch(
-                batch_size=32,
+                batch_size=16,  # Smaller batch size for multi-speaker model
                 padded_shapes=(
-                    tf.TensorShape([None]),  # Shape for text_vec
-                    tf.TensorShape([None, 80]),  # Shape for mel_spec
+                    (tf.TensorShape([None]), tf.TensorShape([None])),  # (text_vec, speaker_vec)
+                    tf.TensorShape([None, 80]),  # mel_spec
                 ),
             )
             .prefetch(tf.data.AUTOTUNE)
@@ -729,12 +778,15 @@ def main():
 
         print("\n=== モデルトレーニング開始 ===")
 
-        # エポックごとに音声を出力するためのコールバックを作成
-        synthesis_callback = SynthesisCallback(
-            text_encoder=text_encoder, n_fft=N_FFT, hop_length=HOP_LENGTH
+        # Create callbacks
+        synthesis_callback = MultiSpeakerSynthesisCallback(
+            text_encoder=text_encoder, 
+            speaker_encoder=speaker_encoder,
+            num_speakers=num_speakers,
+            n_fft=N_FFT, 
+            hop_length=HOP_LENGTH
         )
 
-        # Create checkpoint callback
         checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
             filepath=MODEL_CHECKPOINT_PATH,
             save_best_only=False,
@@ -744,9 +796,10 @@ def main():
 
         # Create custom callback to save training state
         class TrainingStateCallback(tf.keras.callbacks.Callback):
-            def __init__(self, text_encoder):
+            def __init__(self, text_encoder, speaker_encoder):
                 super().__init__()
                 self.text_encoder = text_encoder
+                self.speaker_encoder = speaker_encoder
 
             def on_epoch_end(self, epoch, logs=None):
                 """Save training state at the end of each epoch."""
@@ -757,7 +810,7 @@ def main():
                     return
                 
                 try:
-                    save_training_state(epoch + 1, self.text_encoder, self.model)  # Save next epoch number
+                    save_training_state(epoch + 1, self.text_encoder, self.speaker_encoder, self.model)
                 except Exception as e:
                     print(f"❌ 状態保存中にエラーが発生しましたが、トレーニングを継続します: {e}")
 
@@ -768,22 +821,23 @@ def main():
                     print("\n⚠️  中断が要求されました。現在のエポックを完了後に停止します。")
                     self.model.stop_training = True
 
-        training_state_callback = TrainingStateCallback(text_encoder)
+        training_state_callback = TrainingStateCallback(text_encoder, speaker_encoder)
 
         # Update global variables before training
-        global current_model, current_text_encoder, current_epoch
+        global current_model, current_text_encoder, current_speaker_encoder, current_epoch
         current_model = model
         current_text_encoder = text_encoder
+        current_speaker_encoder = speaker_encoder
         current_epoch = start_epoch
 
-        print(f"🎯 エポック {start_epoch + 1} から {3} まで学習します")
+        print(f"🎯 エポック {start_epoch + 1} から {5} まで学習します")
         print("💡 Ctrl+C で安全に中断できます")
         print("=" * 50)
         
         # model.fitにcallbacks引数を追加
         history = model.fit(
             train_dataset,
-            epochs=3,
+            epochs=5,
             initial_epoch=start_epoch,
             callbacks=[
                 synthesis_callback,
@@ -798,7 +852,7 @@ def main():
             print("\n⚠️  トレーニングが中断されました")
             print("💾 最終状態を保存中...")
             try:
-                save_training_state(current_epoch, text_encoder, model)
+                save_training_state(current_epoch, text_encoder, speaker_encoder, model)
                 print("✅ 中断時の状態保存が完了しました")
             except Exception as e:
                 print(f"❌ 中断時の状態保存に失敗しました: {e}")
@@ -808,55 +862,67 @@ def main():
 
         # --- Save the Trained Model ---
         print("\n=== 最終モデル保存 ===")
-        model_save_path = "outputs/ljspeech_synthesis_model.keras"
+        model_save_path = "outputs/mailabs_multispeaker_synthesis_model.keras"
         model.save(model_save_path)
         print(f"💾 最終モデルを保存: {model_save_path}")
 
         # Save final training state
-        save_training_state(3, text_encoder, model)  # Final epoch
+        save_training_state(5, text_encoder, speaker_encoder, model)  # Final epoch
 
-        # --- Perform Final Inference (Text-to-Speech) ---
-        print("\n=== 最終推論実行 (テキストから音声) ===")
+        # --- Perform Final Inference (Multi-Speaker Text-to-Speech) ---
+        print("\n=== 最終推論実行 (マルチスピーカー音声合成) ===")
 
-        # 推論に使用するテキスト
-        inference_text = (
-            "Hello, this is a final test of the new speech synthesis model."
-        )
-        print(f"🎤 合成用テキスト: '{inference_text}'")
+        inference_texts = [
+            "Hello, this is a test of multi-speaker synthesis.",
+            "The weather is beautiful today.",
+            "Thank you for using our speech synthesis system."
+        ]
 
-        # テキストをベクトル化
-        text_vec = text_encoder([inference_text])
+        test_speaker_ids = [0, min(1, num_speakers-1), min(2, num_speakers-1)]  # Test with available speakers
 
-        # モデルでメルスペクトログラムを予測
-        predicted_mel_spec = model.predict(text_vec)
+        for text_idx, inference_text in enumerate(inference_texts):
+            for speaker_id in test_speaker_ids:
+                if speaker_id >= num_speakers:
+                    continue
+                    
+                print(f"🎤 合成中 - スピーカー {speaker_id}: '{inference_text}'")
 
-        # バッチ次元を削除し、numpy配列に変換
-        predicted_mel_spec_np = predicted_mel_spec[0]
+                try:
+                    # Prepare inputs
+                    text_vec = text_encoder([inference_text])
+                    speaker_vec = tf.one_hot([speaker_id], depth=num_speakers)
 
-        # スペクトログラムをデシベルからパワーに変換
-        predicted_mel_spec_db_t = predicted_mel_spec_np.T
-        power_spec = librosa.db_to_power(predicted_mel_spec_db_t)
+                    # Generate mel-spectrogram
+                    predicted_mel_spec = model.predict([text_vec, speaker_vec], verbose=0)
+                    predicted_mel_spec_np = predicted_mel_spec[0]
 
-        # Griffin-Limアルゴリズムで音声を復元
-        print("🎵 Griffin-Limアルゴリズムで音声を合成中...")
-        generated_audio = librosa.feature.inverse.mel_to_audio(
-            power_spec, sr=22050, n_fft=N_FFT, hop_length=HOP_LENGTH
-        )
+                    # Convert to audio using Griffin-Lim
+                    predicted_mel_spec_db_t = predicted_mel_spec_np.T
+                    power_spec = librosa.db_to_power(predicted_mel_spec_db_t)
+                    generated_audio = librosa.feature.inverse.mel_to_audio(
+                        power_spec, sr=22050, n_fft=N_FFT, hop_length=HOP_LENGTH
+                    )
 
-        # 生成された音声を保存
-        output_audio_path = "outputs/synthesized_audio_final.wav"
-        sf.write(output_audio_path, generated_audio, 22050)
-        print(f"🎵 最終合成音声を保存: {output_audio_path}")
+                    # Save generated audio
+                    output_audio_path = f"outputs/final_synthesis_speaker_{speaker_id}_text_{text_idx}.wav"
+                    sf.write(output_audio_path, generated_audio, 22050)
+                    print(f"🎵 音声保存: {output_audio_path}")
 
-        # 生成されたスペクトログラムと音声を可視化
-        visualize_audio_and_spectrogram(
-            tf.convert_to_tensor(generated_audio),
-            inference_text,
-            save_path="outputs/synthesis_visualization_final.png",
-        )
+                    # Visualize for first example only
+                    if text_idx == 0 and speaker_id == 0:
+                        visualize_audio_and_spectrogram(
+                            tf.convert_to_tensor(generated_audio),
+                            inference_text,
+                            speaker_id,
+                            save_path="outputs/synthesis_visualization_final.png",
+                        )
+
+                except Exception as e:
+                    print(f"❌ スピーカー {speaker_id} の音声合成エラー: {e}")
 
         print(f"\n🕐 完了時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print("\n✅ スクリプトが正常に完了しました!")
+        print("\n✅ M-AILABS マルチスピーカー音声合成が完了しました!")
+        print(f"🕐 終了時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     except KeyboardInterrupt:
         print("\n\n⚠️  ユーザーによって中断されました")
@@ -870,7 +936,7 @@ def main():
         try:
             if 'current_model' in globals() and current_model is not None:
                 print("🆘 エラー発生時の緊急状態保存を試行中...")
-                save_training_state(current_epoch, current_text_encoder, current_model)
+                save_training_state(current_epoch, current_text_encoder, current_speaker_encoder, current_model)
                 print("✅ 緊急状態保存が完了しました")
         except Exception as save_error:
             print(f"❌ 緊急状態保存に失敗しました: {save_error}")
