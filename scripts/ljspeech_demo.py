@@ -53,7 +53,8 @@ except Exception as e:
 class TTSModel(Enum):
     FASTSPEECH2 = "fastspeech2"
     TACOTRON2 = "tacotron2"  # Future implementation
-    TRANSFORMER_TTS = "transformer_tts"  # Future implementation
+    TRANSFORMER_TTS = "transformer_tts"  # Now implemented
+    VITS = "vits"  # Now implemented
 
 # Set the maximum number of frames for mel-spectrogram (for ~5 seconds audio)
 MAX_FRAMES = 430  # (5 * 22050 / 256 ≈ 430)
@@ -188,11 +189,10 @@ def load_ljspeech_dataset(
 ) -> tf.data.Dataset:
     """
     Load the LJSpeech dataset from TensorFlow Datasets.
+    Optimized for efficient loading when limiting samples.
     """
     print(f"Loading LJSpeech dataset with split: {split}")
-    if limit_samples:
-        print(f"Limiting to first {limit_samples} samples")
-
+    
     try:
         import tensorflow_datasets as tfds
     except ImportError as e:
@@ -200,21 +200,27 @@ def load_ljspeech_dataset(
         print("Please install tensorflow_datasets: pip install tensorflow-datasets")
         raise
 
+    # Optimize split for limited samples to avoid processing entire dataset
+    if limit_samples:
+        print(f"🚀 効率的モード: 最初の{limit_samples}サンプルのみロード")
+        optimized_split = f"{split}[:{limit_samples}]"
+        print(f"📊 使用split: {optimized_split}")
+    else:
+        optimized_split = split
+
     dataset, info = tfds.load(
         "ljspeech",
-        split=split,
+        split=optimized_split,
         with_info=True,
         as_supervised=True,
         data_dir="./datasets",
     )
 
     print(f"Dataset info: {info}")
-    print(f"Number of examples: {info.splits[split].num_examples}")
-    
-    # Limit to first N samples if specified
     if limit_samples:
-        dataset = dataset.take(limit_samples)
-        print(f"Using only first {limit_samples} samples for training")
+        print(f"✅ 効率的ロード完了: {limit_samples}サンプル")
+    else:
+        print(f"Number of examples: {info.splits[split].num_examples}")
 
     return dataset.batch(batch_size)
 
@@ -270,6 +276,12 @@ class TTSModelTrainer(tf.keras.Model):
         # Select appropriate loss function based on model type
         if model_type == TTSModel.FASTSPEECH2:
             self.loss_fn = FastSpeech2Loss()
+        elif model_type == TTSModel.TRANSFORMER_TTS:
+            from simple_transformer_tts import SimpleTransformerTTSLoss
+            self.loss_fn = SimpleTransformerTTSLoss()
+        elif model_type == TTSModel.VITS:
+            from simple_vits import SimpleVITSLoss
+            self.loss_fn = SimpleVITSLoss()
         else:
             self.loss_fn = BasicTTSLoss()
         
@@ -413,7 +425,19 @@ def build_text_to_spectrogram_model(
     if model_type == TTSModel.FASTSPEECH2:
         return build_fastspeech2_model(vocab_size, mel_bins, max_sequence_length)
     elif model_type == TTSModel.TRANSFORMER_TTS:
-        return build_simple_transformer_model(vocab_size, mel_bins, max_sequence_length)
+        # Import the simple transformer TTS model
+        from simple_transformer_tts import build_simple_transformer_tts_model, create_simple_transformer_config
+        config = create_simple_transformer_config()
+        config['vocab_size'] = vocab_size
+        config['n_mels'] = mel_bins
+        return build_simple_transformer_tts_model(vocab_size, mel_bins, config)
+    elif model_type == TTSModel.VITS:
+        # Import the Simple VITS model
+        from simple_vits import build_simple_vits_model, create_simple_vits_config
+        config = create_simple_vits_config()
+        config['vocab_size'] = vocab_size
+        config['n_mels'] = mel_bins
+        return build_simple_vits_model(vocab_size, mel_bins, config)
     elif model_type == TTSModel.TACOTRON2:
         # Placeholder for future Tacotron 2 implementation
         raise NotImplementedError("Tacotron 2 モデルは将来の実装予定です")
@@ -427,12 +451,11 @@ def get_model_config(model_type: TTSModel) -> Dict[str, Any]:
         from fastspeech2_model import create_fastspeech2_config
         return create_fastspeech2_config()
     elif model_type == TTSModel.TRANSFORMER_TTS:
-        return {
-            'attention_dim': 256,
-            'num_layers': 4,
-            'num_heads': 8,
-            'dropout_rate': 0.1
-        }
+        from simple_transformer_tts import create_simple_transformer_config
+        return create_simple_transformer_config()
+    elif model_type == TTSModel.VITS:
+        from simple_vits import create_simple_vits_config
+        return create_simple_vits_config()
     else:
         return {}
 
@@ -568,7 +591,7 @@ class SynthesisCallback(tf.keras.callbacks.Callback):
             
             # モデルタイプに応じて適切な出力を取得
             if isinstance(model_output, dict):
-                if self.model_type == TTSModel.FASTSPEECH2:
+                if self.model_type in [TTSModel.FASTSPEECH2, TTSModel.TRANSFORMER_TTS, TTSModel.VITS]:
                     predicted_mel_spec = model_output['mel_output_refined']
                 else:
                     # 他のモデルタイプの場合、利用可能な出力キーから選択
