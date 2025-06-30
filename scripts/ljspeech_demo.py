@@ -209,6 +209,21 @@ class SynthesisCallback(tf.keras.callbacks.Callback):
         # 音声合成に使用するテスト用のテキスト
         self.inference_text = "This is a test of the model at the end of each epoch."
         os.makedirs("outputs/epoch_samples", exist_ok=True)
+        
+        # 時間予測用の変数
+        self.training_start_time = None
+        self.epoch_start_time = None
+        self.epoch_times = []  # 各エポックの実行時間を記録
+        self.total_epochs = None
+
+    def on_train_begin(self, logs=None):
+        """トレーニング開始時に開始時刻を記録し、総エポック数を設定"""
+        self.training_start_time = time.time()
+        # パラメータから総エポック数を取得
+        self.total_epochs = self.params.get('epochs', 3)
+        start_time_str = datetime.fromtimestamp(self.training_start_time).strftime('%Y-%m-%d %H:%M:%S')
+        print(f"\n🚀 学習開始時刻: {start_time_str}")
+        print(f"📊 総エポック数: {self.total_epochs}")
 
     def on_epoch_begin(self, epoch, logs=None):
         """Update global variables at the start of each epoch."""
@@ -216,11 +231,52 @@ class SynthesisCallback(tf.keras.callbacks.Callback):
         current_epoch = epoch
         current_model = self.model
         current_text_encoder = self.text_encoder
-        print(f"\n🚀 エポック {epoch + 1} を開始しています...")
+        
+        # エポック開始時刻を記録
+        self.epoch_start_time = time.time()
+        epoch_start_str = datetime.fromtimestamp(self.epoch_start_time).strftime('%H:%M:%S')
+        print(f"\n🚀 エポック {epoch + 1}/{self.total_epochs} を開始しています... (開始時刻: {epoch_start_str})")
 
     def on_epoch_end(self, epoch, logs=None):
-        """Generate audio sample and save state at the end of each epoch."""
+        """Generate audio sample, save state, and predict completion time at the end of each epoch."""
         global training_interrupted
+        
+        # エポック終了時刻を記録
+        epoch_end_time = time.time()
+        epoch_duration = epoch_end_time - self.epoch_start_time
+        self.epoch_times.append(epoch_duration)
+        
+        # 時間予測の計算
+        completed_epochs = epoch + 1
+        remaining_epochs = self.total_epochs - completed_epochs
+        
+        # 平均エポック時間を計算
+        avg_epoch_time = sum(self.epoch_times) / len(self.epoch_times)
+        
+        # 残り時間を計算
+        estimated_remaining_time = remaining_epochs * avg_epoch_time
+        estimated_completion_time = epoch_end_time + estimated_remaining_time
+        
+        # 時間情報を表示
+        epoch_duration_min = epoch_duration / 60
+        avg_epoch_time_min = avg_epoch_time / 60
+        remaining_time_min = estimated_remaining_time / 60
+        
+        completion_time_str = datetime.fromtimestamp(estimated_completion_time).strftime('%Y-%m-%d %H:%M:%S')
+        
+        print(f"\n⏱️  === エポック {epoch + 1}/{self.total_epochs} 時間情報 ===")
+        print(f"📈 今回のエポック実行時間: {epoch_duration_min:.1f}分")
+        print(f"📊 平均エポック実行時間: {avg_epoch_time_min:.1f}分")
+        
+        if remaining_epochs > 0:
+            print(f"⏳ 残りエポック数: {remaining_epochs}")
+            print(f"🕐 推定残り時間: {remaining_time_min:.1f}分")
+            print(f"🏁 推定完了時刻: {completion_time_str}")
+        else:
+            total_training_time = (epoch_end_time - self.training_start_time) / 60
+            print(f"🎉 全学習完了！総学習時間: {total_training_time:.1f}分")
+        
+        print("=" * 50)
         
         if training_interrupted:
             print("\n⚠️  中断が要求されました。音声生成をスキップします。")
@@ -250,29 +306,30 @@ class SynthesisCallback(tf.keras.callbacks.Callback):
                 hop_length=self.hop_length,
             )
 
-            # 生成された音声をエポック番号付きで保存
-            output_audio_path = (
-                f"outputs/epoch_samples/synthesized_epoch_{epoch + 1:02d}.wav"
-            )
+            # 生成された音声を保存
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_audio_path = f"outputs/epoch_samples/epoch_{epoch + 1}_{timestamp}.wav"
             sf.write(output_audio_path, generated_audio, self.sample_rate)
-            print(f"🎵 エポック {epoch + 1} の音声を保存: {output_audio_path}")
-            
-        except Exception as e:
-            print(f"❌ エポック {epoch + 1} の音声生成中にエラーが発生: {e}")
-            # Continue training even if synthesis fails
+            print(f"🎵 エポック {epoch + 1} の音声サンプルを保存: {output_audio_path}")
 
-    def on_train_begin(self, logs=None):
-        """Called at the beginning of training."""
-        print("🎯 トレーニングを開始します...")
-        print(f"📝 テスト用テキスト: '{self.inference_text}'")
+        except Exception as e:
+            print(f"❌ エポック {epoch + 1} の音声生成中にエラーが発生しました: {e}")
+            import traceback
+            traceback.print_exc()
 
     def on_train_end(self, logs=None):
-        """Called at the end of training."""
-        global training_interrupted
-        if training_interrupted:
-            print("\n⚠️  トレーニングが中断されました")
-        else:
-            print("\n✅ トレーニングが正常に完了しました")
+        """トレーニング終了時の最終情報を表示"""
+        if self.training_start_time is not None:
+            total_training_time = (time.time() - self.training_start_time) / 60
+            end_time_str = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            print(f"\n🎉 === 学習完了情報 ===")
+            print(f"🏁 学習終了時刻: {end_time_str}")
+            print(f"⏱️  総学習時間: {total_training_time:.1f}分")
+            print(f"📊 実行されたエポック数: {len(self.epoch_times)}")
+            if self.epoch_times:
+                avg_time = sum(self.epoch_times) / len(self.epoch_times) / 60
+                print(f"📈 平均エポック時間: {avg_time:.1f}分")
+            print("=" * 50)
 
 
 def save_training_state(epoch, text_encoder, model):
