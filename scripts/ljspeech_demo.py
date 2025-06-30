@@ -71,12 +71,14 @@ signal.signal(signal.SIGINT, signal_handler)  # Ctrl+C
 signal.signal(signal.SIGTERM, signal_handler)  # Termination signal
 
 def load_ljspeech_dataset(
-    split: str = "train", batch_size: int = 32
+    split: str = "train", batch_size: int = 32, limit_samples: int = None
 ) -> tf.data.Dataset:
     """
     Load the LJSpeech dataset from TensorFlow Datasets.
     """
     print(f"Loading LJSpeech dataset with split: {split}")
+    if limit_samples:
+        print(f"Limiting to first {limit_samples} samples")
 
     try:
         import tensorflow_datasets as tfds
@@ -90,11 +92,16 @@ def load_ljspeech_dataset(
         split=split,
         with_info=True,
         as_supervised=True,
-        data_dir="/opt/datasets",
+        data_dir="./datasets",
     )
 
     print(f"Dataset info: {info}")
     print(f"Number of examples: {info.splits[split].num_examples}")
+    
+    # Limit to first N samples if specified
+    if limit_samples:
+        dataset = dataset.take(limit_samples)
+        print(f"Using only first {limit_samples} samples for training")
 
     return dataset.batch(batch_size)
 
@@ -128,7 +135,7 @@ def extract_mel_spectrogram(
     return tf.convert_to_tensor(mel_spec_db, dtype=tf.float32)
 
 
-def create_text_encoder(vocab_size: int = 1000) -> tf.keras.layers.TextVectorization:
+def create_text_encoder(vocab_size: int = 10000) -> tf.keras.layers.TextVectorization:
     """
     Create a text encoder for processing transcriptions.
     """
@@ -148,11 +155,11 @@ def build_text_to_spectrogram_model(
     text_input = tf.keras.layers.Input(shape=(None,), name="text_input")
 
     # Text Embedding and Encoding
-    text_features = tf.keras.layers.Embedding(vocab_size, 2, mask_zero=True)(
+    text_features = tf.keras.layers.Embedding(vocab_size, 256, mask_zero=True)(
         text_input
     )
-    text_features = tf.keras.layers.LSTM(4, return_sequences=True)(text_features)
-    text_features = tf.keras.layers.LSTM(4, return_sequences=True)(text_features)
+    text_features = tf.keras.layers.LSTM(512, return_sequences=True)(text_features)
+    text_features = tf.keras.layers.LSTM(512, return_sequences=True)(text_features)
 
     # Output layer to predict mel-spectrogram
     mel_output = tf.keras.layers.TimeDistributed(
@@ -196,18 +203,18 @@ def visualize_audio_and_spectrogram(
     if save_path:
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
         print(f"Plot saved to {save_path}")
-    plt.show()
+    plt.close()  # プロットを表示せずに閉じる
 
 
 class SynthesisCallback(tf.keras.callbacks.Callback):
-    def __init__(self, text_encoder, n_fft, hop_length, sample_rate=22050):
+    def __init__(self, text_encoder, n_fft, hop_length, sample_rate=22050, inference_text=None):
         super().__init__()
         self.text_encoder = text_encoder
         self.n_fft = n_fft
         self.hop_length = hop_length
         self.sample_rate = sample_rate
-        # 音声合成に使用するテスト用のテキスト
-        self.inference_text = "This is a test of the model at the end of each epoch."
+        # 音声合成に使用するテスト用のテキスト（最初のデータセットのテキストを使用）
+        self.inference_text = inference_text if inference_text else "This is a test of the model at the end of each epoch."
         os.makedirs("outputs/epoch_samples", exist_ok=True)
         
         # 時間予測用の変数
@@ -220,7 +227,7 @@ class SynthesisCallback(tf.keras.callbacks.Callback):
         """トレーニング開始時に開始時刻を記録し、総エポック数を設定"""
         self.training_start_time = time.time()
         # パラメータから総エポック数を取得
-        self.total_epochs = self.params.get('epochs', 3)
+        self.total_epochs = self.params.get('epochs', 500)
         start_time_str = datetime.fromtimestamp(self.training_start_time).strftime('%Y-%m-%d %H:%M:%S')
         print(f"\n🚀 学習開始時刻: {start_time_str}")
         print(f"📊 総エポック数: {self.total_epochs}")
@@ -476,10 +483,18 @@ def main():
         else:
             print("🆕 新規トレーニングを開始します")
 
-        # Load dataset
+        # Load dataset (限定版：最初の10サンプルのみ)
         print("\n=== データセット読み込み ===")
-        dataset = load_ljspeech_dataset(split="train", batch_size=1)
+        dataset = load_ljspeech_dataset(split="train", batch_size=1, limit_samples=10)
         os.makedirs("outputs", exist_ok=True)
+        
+        # 最初のデータのテキストを取得
+        print("📝 最初のデータのテキストを取得中...")
+        first_text = None
+        for text, audio in dataset.take(1):
+            first_text = text[0].numpy().decode('utf-8')
+            print(f"🎯 使用するテキスト: '{first_text}'")
+            break
 
         # Print dataset size before preparation
         print("📊 データセットサイズを確認中...")
@@ -494,10 +509,11 @@ def main():
         print("\n=== テキスト処理 ===")
         if text_encoder is None:
             print("🔤 新しいテキストエンコーダーを作成中...")
-            text_encoder = create_text_encoder(vocab_size=1000)
+            text_encoder = create_text_encoder(vocab_size=10000)
             # フィルタリングする前のデータセットで語彙を構築
             print("📚 語彙を構築中...")
-            example_texts = dataset.unbatch().map(lambda text, audio: text).take(5000)
+            # 10サンプルしかないため、すべてを使用
+            example_texts = dataset.unbatch().map(lambda text, audio: text)
             text_encoder.adapt(example_texts)
         else:
             print("♻️  保存されたテキストエンコーダーを使用")
@@ -586,7 +602,8 @@ def main():
 
         # エポックごとに音声を出力するためのコールバックを作成
         synthesis_callback = SynthesisCallback(
-            text_encoder=text_encoder, n_fft=N_FFT, hop_length=HOP_LENGTH
+            text_encoder=text_encoder, n_fft=N_FFT, hop_length=HOP_LENGTH, 
+            inference_text=first_text
         )
 
         # Create checkpoint callback
@@ -631,14 +648,14 @@ def main():
         current_text_encoder = text_encoder
         current_epoch = start_epoch
 
-        print(f"🎯 エポック {start_epoch + 1} から {3} まで学習します")
+        print(f"🎯 エポック {start_epoch + 1} から {500} まで学習します")
         print("💡 Ctrl+C で安全に中断できます")
         print("=" * 50)
         
         # model.fitにcallbacks引数を追加
         history = model.fit(
             train_dataset,
-            epochs=3,
+            epochs=500,
             initial_epoch=start_epoch,
             callbacks=[
                 synthesis_callback,
@@ -668,15 +685,13 @@ def main():
         print(f"💾 最終モデルを保存: {model_save_path}")
 
         # Save final training state
-        save_training_state(3, text_encoder, model)  # Final epoch
+        save_training_state(500, text_encoder, model)  # Final epoch
 
         # --- Perform Final Inference (Text-to-Speech) ---
         print("\n=== 最終推論実行 (テキストから音声) ===")
 
-        # 推論に使用するテキスト
-        inference_text = (
-            "Hello, this is a final test of the new speech synthesis model."
-        )
+        # 推論に使用するテキスト（最初のデータと同じテキストを使用）
+        inference_text = first_text if first_text else "Hello, this is a final test of the new speech synthesis model."
         print(f"🎤 合成用テキスト: '{inference_text}'")
 
         # テキストをベクトル化
