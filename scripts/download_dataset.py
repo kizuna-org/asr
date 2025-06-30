@@ -8,6 +8,7 @@ import requests
 import tarfile
 import argparse
 import sys
+import time
 
 
 def download_mailabs_dataset(output_dir="/opt/datasets/mailabs"):
@@ -86,14 +87,56 @@ def download_mailabs_dataset(output_dir="/opt/datasets/mailabs"):
         
         # Only download if not already complete
         if downloaded_size < total_size:
+            start_time = time.time()
+            last_update_time = start_time
+            update_interval = 1.0  # Update every 1 second
+            
             with open(dataset_path, mode) as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     if chunk:
                         f.write(chunk)
                         downloaded_size += len(chunk)
-                        if total_size > 0:
-                            progress = (downloaded_size / total_size) * 100
-                            print(f"\rProgress: {progress:.1f}% ({downloaded_size:,}/{total_size:,} bytes)", end="", flush=True)
+                        
+                        current_time = time.time()
+                        # Update progress display every interval or on last chunk
+                        if current_time - last_update_time >= update_interval or downloaded_size >= total_size:
+                            last_update_time = current_time
+                            
+                            if total_size > 0:
+                                progress = (downloaded_size / total_size) * 100
+                                elapsed_time = current_time - start_time
+                                
+                                # Calculate download speed
+                                if elapsed_time > 0:
+                                    bytes_downloaded_since_start = downloaded_size - initial_pos
+                                    speed_bps = bytes_downloaded_since_start / elapsed_time
+                                    
+                                    # Format speed appropriately
+                                    if speed_bps >= 1024 * 1024:
+                                        speed_str = f"{speed_bps / (1024 * 1024):.1f} MB/s"
+                                    elif speed_bps >= 1024:
+                                        speed_str = f"{speed_bps / 1024:.1f} KB/s"
+                                    else:
+                                        speed_str = f"{speed_bps:.0f} B/s"
+                                    
+                                    # Calculate ETA
+                                    remaining_bytes = total_size - downloaded_size
+                                    if speed_bps > 0 and remaining_bytes > 0:
+                                        eta_seconds = remaining_bytes / speed_bps
+                                        eta_hours = int(eta_seconds // 3600)
+                                        eta_minutes = int((eta_seconds % 3600) // 60)
+                                        eta_secs = int(eta_seconds % 60)
+                                        
+                                        if eta_hours > 0:
+                                            eta_str = f"{eta_hours:02d}:{eta_minutes:02d}:{eta_secs:02d}"
+                                        else:
+                                            eta_str = f"{eta_minutes:02d}:{eta_secs:02d}"
+                                    else:
+                                        eta_str = "--:--"
+                                    
+                                    print(f"\rProgress: {progress:.1f}% ({downloaded_size:,}/{total_size:,} bytes) | {speed_str} | ETA: {eta_str}", end="", flush=True)
+                                else:
+                                    print(f"\rProgress: {progress:.1f}% ({downloaded_size:,}/{total_size:,} bytes) | Calculating...", end="", flush=True)
         
         print(f"\n📦 Download completed: {dataset_path}")
         
