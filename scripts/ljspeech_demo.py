@@ -1,10 +1,25 @@
 #!/usr/bin/env python3
 """
-LJSpeech Dataset Learning Script (Speech Synthesis Version with Epoch Callback)
-This script demonstrates how to load, work with, and train a Text-to-Speech model on the LJSpeech dataset.
-This version has been modified to generate audio from text and includes a callback to output
-a sample audio file at the end of each training epoch.
+LJSpeech Dataset Learning Script (Speech Synthesis Version with Model Selection)
+This script demonstrates how to load, work with, and train Text-to-Speech models on the LJSpeech dataset.
+Supports multiple TTS model architectures including FastSpeech 2.
 Enhanced with robust checkpoint and resume functionality.
+
+Model Selection Features:
+- FastSpeech 2: Advanced non-autoregressive TTS model with variance prediction
+- Transformer TTS: Simple transformer-based TTS model for comparison
+- Model-specific loss functions and training configurations
+- Automatic checkpoint compatibility checking
+
+Usage Examples:
+  # Train with FastSpeech 2 (default)
+  python ljspeech_demo.py --mode mini --epochs 100 --model fastspeech2
+  
+  # Train with simple Transformer TTS
+  python ljspeech_demo.py --mode mini --epochs 100 --model transformer_tts
+  
+  # Full dataset training with FastSpeech 2
+  python ljspeech_demo.py --mode full --epochs 2000 --model fastspeech2
 """
 
 import tensorflow as tf
@@ -19,6 +34,8 @@ import signal
 import sys
 import time
 from datetime import datetime
+from enum import Enum
+from typing import Dict, Any, Optional
 
 # Set memory growth to avoid GPU memory issues
 try:
@@ -32,15 +49,41 @@ try:
 except Exception as e:
     print(f"Warning: Could not configure GPU memory growth: {e}")
 
+# Model selection enumeration
+class TTSModel(Enum):
+    FASTSPEECH2 = "fastspeech2"
+    TACOTRON2 = "tacotron2"  # Future implementation
+    TRANSFORMER_TTS = "transformer_tts"  # Future implementation
+
 # Set the maximum number of frames for mel-spectrogram (for ~5 seconds audio)
 MAX_FRAMES = 430  # (5 * 22050 / 256 ≈ 430)
 
-# Checkpoint paths
-CHECKPOINT_DIR = "outputs/checkpoints"
-MODEL_CHECKPOINT_PATH = os.path.join(CHECKPOINT_DIR, "model.keras")
-TEXT_ENCODER_PATH = os.path.join(CHECKPOINT_DIR, "text_encoder")
-TRAINING_STATE_PATH = os.path.join(CHECKPOINT_DIR, "training_state.json")
-DATASET_CACHE_PATH = os.path.join(CHECKPOINT_DIR, "dataset_processed.cache")
+# Base paths - will be updated based on model type
+BASE_OUTPUT_DIR = "outputs"
+CHECKPOINT_DIR = None
+MODEL_CHECKPOINT_PATH = None
+TEXT_ENCODER_PATH = None
+TRAINING_STATE_PATH = None
+DATASET_CACHE_PATH = None
+
+def setup_model_paths(model_type: TTSModel):
+    """Setup model-specific paths based on the selected model type."""
+    global CHECKPOINT_DIR, MODEL_CHECKPOINT_PATH, TEXT_ENCODER_PATH, TRAINING_STATE_PATH, DATASET_CACHE_PATH
+    
+    # Create model-specific directory
+    model_output_dir = os.path.join(BASE_OUTPUT_DIR, model_type.value)
+    CHECKPOINT_DIR = os.path.join(model_output_dir, "checkpoints")
+    MODEL_CHECKPOINT_PATH = os.path.join(CHECKPOINT_DIR, "model.keras")
+    TEXT_ENCODER_PATH = os.path.join(CHECKPOINT_DIR, "text_encoder")
+    TRAINING_STATE_PATH = os.path.join(CHECKPOINT_DIR, "training_state.json")
+    DATASET_CACHE_PATH = os.path.join(CHECKPOINT_DIR, "dataset_processed.cache")
+    
+    # Create directories if they don't exist
+    os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+    os.makedirs(os.path.join(model_output_dir, "epoch_samples"), exist_ok=True)
+    
+    print(f"📁 モデル固有のディレクトリを設定: {model_output_dir}")
+    print(f"📁 チェックポイントディレクトリ: {CHECKPOINT_DIR}")
 
 # Global variables for graceful shutdown
 training_interrupted = False
@@ -58,7 +101,7 @@ def signal_handler(signum, frame):
     if current_model is not None and current_text_encoder is not None:
         print("現在の状態を保存中...")
         try:
-            save_training_state(current_epoch, current_text_encoder, current_model)
+            save_training_state(current_epoch, current_text_encoder, current_model, TTSModel.FASTSPEECH2)
             print("✅ チェックポイントが正常に保存されました")
         except Exception as e:
             print(f"❌ チェックポイント保存中にエラーが発生しました: {e}")
@@ -69,6 +112,76 @@ def signal_handler(signum, frame):
 # Register signal handlers
 signal.signal(signal.SIGINT, signal_handler)  # Ctrl+C
 signal.signal(signal.SIGTERM, signal_handler)  # Termination signal
+
+
+class FastSpeech2Loss(tf.keras.losses.Loss):
+    """Custom loss function for FastSpeech 2 model."""
+    
+    def __init__(self, mel_loss_weight=1.0, duration_loss_weight=1.0, 
+                 pitch_loss_weight=1.0, energy_loss_weight=1.0, **kwargs):
+        super().__init__(**kwargs)
+        self.mel_loss_weight = mel_loss_weight
+        self.duration_loss_weight = duration_loss_weight
+        self.pitch_loss_weight = pitch_loss_weight
+        self.energy_loss_weight = energy_loss_weight
+        
+        self.mse = tf.keras.losses.MeanSquaredError()
+        self.mae = tf.keras.losses.MeanAbsoluteError()
+    
+    def call(self, y_true, y_pred):
+        """
+        Compute loss for FastSpeech 2 model.
+        
+        y_true: mel-spectrogram (batch_size, time_steps, n_mels)
+        y_pred: dict containing model outputs
+        """
+        # Mel-spectrogram loss (both before and after postnet)
+        mel_loss = self.mse(y_true, y_pred['mel_output'])
+        mel_postnet_loss = self.mse(y_true, y_pred['mel_output_refined'])
+        total_mel_loss = mel_loss + mel_postnet_loss
+        
+        # For duration, pitch, and energy, we use simplified target (zeros for now)
+        # In a real implementation, these would be extracted from the data
+        batch_size = tf.shape(y_true)[0]
+        seq_length = tf.shape(y_pred['duration_pred'])[1]
+        
+        # Dummy targets (in real implementation, these would be provided)
+        duration_target = tf.ones((batch_size, seq_length, 1), dtype=tf.float32)
+        pitch_target = tf.zeros((batch_size, seq_length, 1), dtype=tf.float32)
+        energy_target = tf.zeros((batch_size, seq_length, 1), dtype=tf.float32)
+        
+        duration_loss = self.mae(duration_target, y_pred['duration_pred'])
+        pitch_loss = self.mse(pitch_target, y_pred['pitch_pred'])
+        energy_loss = self.mse(energy_target, y_pred['energy_pred'])
+        
+        total_loss = (self.mel_loss_weight * total_mel_loss +
+                     self.duration_loss_weight * duration_loss +
+                     self.pitch_loss_weight * pitch_loss +
+                     self.energy_loss_weight * energy_loss)
+        
+        return total_loss
+
+
+class BasicTTSLoss(tf.keras.losses.Loss):
+    """Basic loss function for simple TTS models."""
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.mse = tf.keras.losses.MeanSquaredError()
+    
+    def call(self, y_true, y_pred):
+        """
+        Compute basic MSE loss for TTS model.
+        
+        y_true: mel-spectrogram (batch_size, time_steps, n_mels)
+        y_pred: predicted mel-spectrogram or dict containing model outputs
+        """
+        if isinstance(y_pred, dict):
+            # If the model returns a dictionary, use the main output
+            main_output_key = 'mel_output_refined' if 'mel_output_refined' in y_pred else 'mel_output'
+            y_pred = y_pred.get(main_output_key, list(y_pred.values())[0])
+        
+        return self.mse(y_true, y_pred)
 
 def load_ljspeech_dataset(
     split: str = "train", batch_size: int = 32, limit_samples: int = None
@@ -146,31 +259,182 @@ def create_text_encoder(vocab_size: int = 10000) -> tf.keras.layers.TextVectoriz
     )
 
 
-def build_text_to_spectrogram_model(
+class TTSModelTrainer(tf.keras.Model):
+    """Universal wrapper class for TTS model training with custom train_step."""
+    
+    def __init__(self, tts_model, model_type: TTSModel = TTSModel.FASTSPEECH2, **kwargs):
+        super().__init__(**kwargs)
+        self.tts_model = tts_model
+        self.model_type = model_type
+        
+        # Select appropriate loss function based on model type
+        if model_type == TTSModel.FASTSPEECH2:
+            self.loss_fn = FastSpeech2Loss()
+        else:
+            self.loss_fn = BasicTTSLoss()
+        
+    def call(self, inputs, training=None):
+        return self.tts_model(inputs, training=training)
+    
+    def train_step(self, data):
+        x, y = data
+        
+        with tf.GradientTape() as tape:
+            # Forward pass
+            model_outputs = self.tts_model(x, training=True)
+            
+            # Compute loss
+            loss = self.loss_fn(y, model_outputs)
+        
+        # Compute gradients and update weights
+        gradients = tape.gradient(loss, self.tts_model.trainable_variables)
+        self.optimizer.apply_gradients(zip(gradients, self.tts_model.trainable_variables))
+        
+        # Get main output for metrics
+        if isinstance(model_outputs, dict):
+            main_output = model_outputs.get('mel_output_refined', 
+                                          model_outputs.get('mel_output', 
+                                                          list(model_outputs.values())[0]))
+        else:
+            main_output = model_outputs
+            
+        # Update metrics
+        self.compiled_metrics.update_state(y, main_output)
+        
+        # Return loss and metrics
+        return {"loss": loss, **{m.name: m.result() for m in self.metrics}}
+
+
+# Legacy alias for backward compatibility
+FastSpeech2Trainer = TTSModelTrainer
+
+
+def build_fastspeech2_model(
     vocab_size: int, mel_bins: int = 80, max_sequence_length: int = MAX_FRAMES
 ) -> tf.keras.Model:
     """
-    Build a simple Text-to-Spectrogram model for speech synthesis.
+    Build FastSpeech 2 model for speech synthesis.
     """
-    text_input = tf.keras.layers.Input(shape=(None,), name="text_input")
-
-    # Text Embedding and Encoding
-    text_features = tf.keras.layers.Embedding(vocab_size, 256, mask_zero=True)(
-        text_input
+    # Import FastSpeech 2 model
+    from fastspeech2_model import FastSpeech2, create_fastspeech2_config
+    
+    # Create configuration for FastSpeech 2
+    config = create_fastspeech2_config()
+    config['vocab_size'] = vocab_size
+    config['num_mels'] = mel_bins
+    
+    # Create FastSpeech 2 model
+    fastspeech2_model = FastSpeech2(config)
+    
+    # Build the model by calling it with dummy input
+    dummy_input = tf.constant([[1, 2, 3, 4, 5]], dtype=tf.int32)
+    _ = fastspeech2_model(dummy_input)
+    
+    # Wrap with trainer class
+    model = TTSModelTrainer(fastspeech2_model, TTSModel.FASTSPEECH2)
+    
+    # Compile the model
+    model.compile(
+        optimizer='adam',
+        metrics=['mae']
     )
-    text_features = tf.keras.layers.LSTM(512, return_sequences=True)(text_features)
-    text_features = tf.keras.layers.LSTM(512, return_sequences=True)(text_features)
-
-    # Output layer to predict mel-spectrogram
-    mel_output = tf.keras.layers.TimeDistributed(
-        tf.keras.layers.Dense(mel_bins, activation="linear")
-    )(text_features)
-
-    model = tf.keras.Model(inputs=text_input, outputs=mel_output)
-
-    # Use Mean Squared Error to measure the difference between predicted and actual spectrograms
-    model.compile(optimizer="adam", loss="mean_squared_error", metrics=["mae"])
+    
     return model
+
+
+def build_simple_transformer_model(
+    vocab_size: int, mel_bins: int = 80, max_sequence_length: int = MAX_FRAMES
+) -> tf.keras.Model:
+    """
+    Build a simple Transformer-based TTS model for comparison.
+    This is a basic implementation for demonstration purposes.
+    """
+    # Input layer
+    text_input = tf.keras.layers.Input(shape=(max_sequence_length,), name='text_input')
+    
+    # Embedding layer
+    embedding = tf.keras.layers.Embedding(vocab_size, 256)(text_input)
+    
+    # Positional encoding (simplified)
+    pos_encoding = tf.keras.layers.Dense(256, activation='linear')(embedding)
+    x = embedding + pos_encoding
+    
+    # Transformer blocks (simplified)
+    for _ in range(4):
+        # Multi-head attention
+        attention = tf.keras.layers.MultiHeadAttention(
+            num_heads=8, key_dim=32, dropout=0.1
+        )(x, x)
+        x = tf.keras.layers.LayerNormalization()(x + attention)
+        
+        # Feed forward
+        ffn = tf.keras.layers.Dense(1024, activation='relu')(x)
+        ffn = tf.keras.layers.Dense(256)(ffn)
+        x = tf.keras.layers.LayerNormalization()(x + ffn)
+    
+    # Output projection to mel-spectrogram
+    mel_output = tf.keras.layers.Dense(mel_bins, activation='linear', name='mel_output')(x)
+    
+    # Create model
+    simple_model = tf.keras.Model(inputs=text_input, outputs=mel_output)
+    
+    # Wrap with trainer class
+    model = TTSModelTrainer(simple_model, TTSModel.TRANSFORMER_TTS)
+    
+    # Compile the model
+    model.compile(
+        optimizer='adam',
+        metrics=['mae']
+    )
+    
+    return model
+
+
+def build_text_to_spectrogram_model(
+    vocab_size: int, 
+    mel_bins: int = 80, 
+    max_sequence_length: int = MAX_FRAMES,
+    model_type: TTSModel = TTSModel.FASTSPEECH2
+) -> tf.keras.Model:
+    """
+    Build TTS model based on the specified model type.
+    
+    Args:
+        vocab_size: Size of the vocabulary
+        mel_bins: Number of mel-spectrogram bins
+        max_sequence_length: Maximum sequence length
+        model_type: Type of TTS model to build
+        
+    Returns:
+        Compiled TTS model ready for training
+    """
+    print(f"🏗️  構築中のモデル: {model_type.value}")
+    
+    if model_type == TTSModel.FASTSPEECH2:
+        return build_fastspeech2_model(vocab_size, mel_bins, max_sequence_length)
+    elif model_type == TTSModel.TRANSFORMER_TTS:
+        return build_simple_transformer_model(vocab_size, mel_bins, max_sequence_length)
+    elif model_type == TTSModel.TACOTRON2:
+        # Placeholder for future Tacotron 2 implementation
+        raise NotImplementedError("Tacotron 2 モデルは将来の実装予定です")
+    else:
+        raise ValueError(f"サポートされていないモデルタイプ: {model_type}")
+
+
+def get_model_config(model_type: TTSModel) -> Dict[str, Any]:
+    """Get model-specific configuration."""
+    if model_type == TTSModel.FASTSPEECH2:
+        from fastspeech2_model import create_fastspeech2_config
+        return create_fastspeech2_config()
+    elif model_type == TTSModel.TRANSFORMER_TTS:
+        return {
+            'attention_dim': 256,
+            'num_layers': 4,
+            'num_heads': 8,
+            'dropout_rate': 0.1
+        }
+    else:
+        return {}
 
 
 def visualize_audio_and_spectrogram(
@@ -207,15 +471,19 @@ def visualize_audio_and_spectrogram(
 
 
 class SynthesisCallback(tf.keras.callbacks.Callback):
-    def __init__(self, text_encoder, n_fft, hop_length, sample_rate=22050, inference_text=None):
+    def __init__(self, text_encoder, n_fft, hop_length, sample_rate=22050, inference_text=None, model_type=TTSModel.FASTSPEECH2):
         super().__init__()
         self.text_encoder = text_encoder
         self.n_fft = n_fft
         self.hop_length = hop_length
         self.sample_rate = sample_rate
+        self.model_type = model_type
         # 音声合成に使用するテスト用のテキスト（最初のデータセットのテキストを使用）
         self.inference_text = inference_text if inference_text else "This is a test of the model at the end of each epoch."
-        os.makedirs("outputs/epoch_samples", exist_ok=True)
+        
+        # モデル固有のディレクトリを設定
+        self.epoch_samples_dir = os.path.join(BASE_OUTPUT_DIR, model_type.value, "epoch_samples")
+        os.makedirs(self.epoch_samples_dir, exist_ok=True)
         
         # 時間予測用の変数
         self.training_start_time = None
@@ -296,7 +564,19 @@ class SynthesisCallback(tf.keras.callbacks.Callback):
             text_vec = self.text_encoder([self.inference_text])
 
             # モデルでメルスペクトログラムを予測
-            predicted_mel_spec = self.model.predict(text_vec)
+            model_output = self.model.predict(text_vec)
+            
+            # モデルタイプに応じて適切な出力を取得
+            if isinstance(model_output, dict):
+                if self.model_type == TTSModel.FASTSPEECH2:
+                    predicted_mel_spec = model_output['mel_output_refined']
+                else:
+                    # 他のモデルタイプの場合、利用可能な出力キーから選択
+                    predicted_mel_spec = model_output.get('mel_output_refined', 
+                                                        model_output.get('mel_output',
+                                                                        list(model_output.values())[0]))
+            else:
+                predicted_mel_spec = model_output
 
             # バッチ次元を削除し、numpy配列に変換
             predicted_mel_spec_np = predicted_mel_spec[0]
@@ -315,7 +595,7 @@ class SynthesisCallback(tf.keras.callbacks.Callback):
 
             # 生成された音声を保存
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_audio_path = f"outputs/epoch_samples/epoch_{epoch + 1}_{timestamp}.wav"
+            output_audio_path = f"{self.epoch_samples_dir}/epoch_{epoch + 1}_{timestamp}.wav"
             sf.write(output_audio_path, generated_audio, self.sample_rate)
             print(f"🎵 エポック {epoch + 1} の音声サンプルを保存: {output_audio_path}")
 
@@ -339,8 +619,8 @@ class SynthesisCallback(tf.keras.callbacks.Callback):
             print("=" * 50)
 
 
-def save_training_state(epoch, text_encoder, model):
-    """Save training state including epoch number and text encoder."""
+def save_training_state(epoch, text_encoder, model, model_type=TTSModel.FASTSPEECH2):
+    """Save training state including epoch number, text encoder, and model type."""
     try:
         os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
@@ -357,16 +637,17 @@ def save_training_state(epoch, text_encoder, model):
             json.dump(vocab, f, ensure_ascii=False, indent=2)
         print(f"  ✅ 語彙を保存: {vocab_path}")
 
-        # Save training state with timestamp
+        # Save training state with timestamp and model type
         training_state = {
             "epoch": epoch,
+            "model_type": model_type.value,
             "vocab_size": text_encoder.vocabulary_size(),
             "max_tokens": text_encoder._max_tokens,
             "output_sequence_length": text_encoder._output_sequence_length,
             "standardize": text_encoder._standardize,
             "saved_at": datetime.now().isoformat(),
             "tensorflow_version": tf.__version__,
-            "checkpoint_version": "2.0"
+            "checkpoint_version": "3.0"
         }
         
         # Create backup of previous state
@@ -389,12 +670,12 @@ def save_training_state(epoch, text_encoder, model):
 
 
 def load_training_state():
-    """Load training state and return epoch number, text encoder, and model if available."""
+    """Load training state and return epoch number, text encoder, model, and model type if available."""
     print("🔍 保存された状態を確認中...")
     
     if not os.path.exists(TRAINING_STATE_PATH):
         print("ℹ️  保存された状態が見つかりません。最初から開始します。")
-        return 0, None, None
+        return 0, None, None, TTSModel.FASTSPEECH2
 
     try:
         # Load training state
@@ -406,6 +687,15 @@ def load_training_state():
         checkpoint_version = training_state.get("checkpoint_version", "1.0")
         print(f"  📋 チェックポイントバージョン: {checkpoint_version}")
         
+        # Get model type from saved state (default to FastSpeech2 for older checkpoints)
+        model_type_str = training_state.get("model_type", "fastspeech2")
+        try:
+            model_type = TTSModel(model_type_str)
+            print(f"  🏗️  保存されたモデルタイプ: {model_type.value}")
+        except ValueError:
+            print(f"  ⚠️  不明なモデルタイプ '{model_type_str}'、デフォルトのFastSpeech2を使用")
+            model_type = TTSModel.FASTSPEECH2
+        
         if training_state.get("tensorflow_version"):
             print(f"  🔧 保存時のTensorFlowバージョン: {training_state['tensorflow_version']}")
             print(f"  🔧 現在のTensorFlowバージョン: {tf.__version__}")
@@ -416,13 +706,13 @@ def load_training_state():
         # Check if model file exists
         if not os.path.exists(MODEL_CHECKPOINT_PATH):
             print(f"❌ モデルファイルが見つかりません: {MODEL_CHECKPOINT_PATH}")
-            return 0, None, None
+            return 0, None, None, model_type
 
         # Load vocabulary
         vocab_path = os.path.join(CHECKPOINT_DIR, "vocabulary.json")
         if not os.path.exists(vocab_path):
             print(f"❌ 語彙ファイルが見つかりません: {vocab_path}")
-            return 0, None, None
+            return 0, None, None, model_type
             
         print(f"📖 語彙を読み込み中: {vocab_path}")
         with open(vocab_path, "r", encoding='utf-8') as f:
@@ -447,7 +737,7 @@ def load_training_state():
         print(f"🎯 エポック {epoch} から再開します")
         print("=" * 50)
         
-        return epoch, text_encoder, model
+        return epoch, text_encoder, model, model_type
 
     except Exception as e:
         print(f"❌ チェックポイント読み込み中にエラーが発生しました: {e}")
@@ -465,36 +755,88 @@ def load_training_state():
             except Exception as backup_error:
                 print(f"❌ バックアップからの復元も失敗しました: {backup_error}")
         
-        return 0, None, None
+        return 0, None, None, TTSModel.FASTSPEECH2
 
 
 def main():
     """Main function to run the LJSpeech learning script."""
-    print("=== LJSpeech 音声合成スクリプト ===")
+    import argparse
+    
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='LJSpeech TTS Training Script with Model Selection')
+    parser.add_argument('--mode', choices=['full', 'mini'], default='mini',
+                       help='Training mode: full (entire dataset) or mini (first 10 samples)')
+    parser.add_argument('--limit-samples', type=int, default=None,
+                       help='Limit number of samples for training (overrides mode)')
+    parser.add_argument('--epochs', type=int, default=2000,
+                       help='Number of epochs to train (default: 2000)')
+    parser.add_argument('--model', choices=['fastspeech2', 'transformer_tts'], default='fastspeech2',
+                       help='TTS model type to use (default: fastspeech2)')
+    args = parser.parse_args()
+    
+    # Convert model argument to enum
+    model_type = TTSModel(args.model)
+    
+    # Set training parameters based on mode
+    if args.limit_samples is not None:
+        limit_samples = args.limit_samples
+        mode_desc = f"カスタム({limit_samples}サンプル)"
+    elif args.mode == 'full':
+        limit_samples = None
+        mode_desc = "フルデータセット"
+    else:  # mini mode
+        limit_samples = 10
+        mode_desc = "ミニモード(10サンプル)"
+    
+    print("=== LJSpeech TTS 音声合成スクリプト ===")
+    print(f"🏗️  使用モデル: {model_type.value}")
+    print(f"📊 学習モード: {mode_desc}")
+    print(f"🔄 エポック数: {args.epochs}")
     print(f"🕐 開始時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 50)
     
     try:
+        # Setup model-specific paths
+        setup_model_paths(model_type)
+        
         # Check for existing checkpoint
-        start_epoch, text_encoder, model = load_training_state()
+        start_epoch, text_encoder, model, saved_model_type = load_training_state()
 
+        # Check if the saved model type matches the requested model type
         if start_epoch > 0:
-            print(f"🔄 チェックポイントが見つかりました。エポック {start_epoch + 1} から再開します")
+            if saved_model_type == model_type:
+                print(f"🔄 チェックポイントが見つかりました。エポック {start_epoch + 1} から再開します")
+                print(f"📋 保存されたモデルタイプ: {saved_model_type.value}")
+            else:
+                print(f"⚠️  保存されたモデルタイプ ({saved_model_type.value}) と要求されたモデルタイプ ({model_type.value}) が異なります")
+                print("🆕 新規トレーニングを開始します（既存のチェックポイントは無視されます）")
+                start_epoch, text_encoder, model = 0, None, None
         else:
             print("🆕 新規トレーニングを開始します")
 
-        # Load dataset (限定版：最初の10サンプルのみ)
+        # Load dataset
         print("\n=== データセット読み込み ===")
-        dataset = load_ljspeech_dataset(split="train", batch_size=1, limit_samples=10)
-        os.makedirs("outputs", exist_ok=True)
+        if limit_samples:
+            print(f"📊 データセット制限: 最初の{limit_samples}サンプル")
+        else:
+            print("📊 データセット: フルデータセット使用")
+        dataset = load_ljspeech_dataset(split="train", batch_size=1, limit_samples=limit_samples)
         
         # 最初のデータのテキストを取得
         print("📝 最初のデータのテキストを取得中...")
         first_text = None
         for text, audio in dataset.take(1):
             first_text = text[0].numpy().decode('utf-8')
-            print(f"🎯 使用するテキスト: '{first_text}'")
+            print(f"🎯 最初のサンプルテキスト: '{first_text}'")
             break
+        
+        # 推論用テキストの設定
+        if args.mode == 'mini':
+            inference_text = first_text
+            print(f"🎤 ミニモード: 推論テキストは最初のサンプルと同じ")
+        else:
+            inference_text = first_text if first_text else f"This is a test of the {model_type.value} model."
+            print(f"🎤 推論用テキスト: '{inference_text}'")
 
         # Print dataset size before preparation
         print("📊 データセットサイズを確認中...")
@@ -528,6 +870,7 @@ def main():
                 vocab_size=text_encoder.vocabulary_size(),
                 mel_bins=80,
                 max_sequence_length=MAX_FRAMES,
+                model_type=model_type
             )
         else:
             print("♻️  保存されたモデルを使用")
@@ -603,7 +946,7 @@ def main():
         # エポックごとに音声を出力するためのコールバックを作成
         synthesis_callback = SynthesisCallback(
             text_encoder=text_encoder, n_fft=N_FFT, hop_length=HOP_LENGTH, 
-            inference_text=first_text
+            inference_text=inference_text, model_type=model_type
         )
 
         # Create checkpoint callback
@@ -616,9 +959,10 @@ def main():
 
         # Create custom callback to save training state
         class TrainingStateCallback(tf.keras.callbacks.Callback):
-            def __init__(self, text_encoder):
+            def __init__(self, text_encoder, model_type):
                 super().__init__()
                 self.text_encoder = text_encoder
+                self.model_type = model_type
 
             def on_epoch_end(self, epoch, logs=None):
                 """Save training state at the end of each epoch."""
@@ -629,7 +973,7 @@ def main():
                     return
                 
                 try:
-                    save_training_state(epoch + 1, self.text_encoder, self.model)  # Save next epoch number
+                    save_training_state(epoch + 1, self.text_encoder, self.model, self.model_type)  # Save next epoch number
                 except Exception as e:
                     print(f"❌ 状態保存中にエラーが発生しましたが、トレーニングを継続します: {e}")
 
@@ -640,7 +984,7 @@ def main():
                     print("\n⚠️  中断が要求されました。現在のエポックを完了後に停止します。")
                     self.model.stop_training = True
 
-        training_state_callback = TrainingStateCallback(text_encoder)
+        training_state_callback = TrainingStateCallback(text_encoder, model_type)
 
         # Update global variables before training
         global current_model, current_text_encoder, current_epoch
@@ -648,14 +992,14 @@ def main():
         current_text_encoder = text_encoder
         current_epoch = start_epoch
 
-        print(f"🎯 エポック {start_epoch + 1} から {500} まで学習します")
+        print(f"🎯 エポック {start_epoch + 1} から {args.epochs} まで学習します")
         print("💡 Ctrl+C で安全に中断できます")
         print("=" * 50)
         
         # model.fitにcallbacks引数を追加
         history = model.fit(
             train_dataset,
-            epochs=500,
+            epochs=args.epochs,
             initial_epoch=start_epoch,
             callbacks=[
                 synthesis_callback,
@@ -670,7 +1014,7 @@ def main():
             print("\n⚠️  トレーニングが中断されました")
             print("💾 最終状態を保存中...")
             try:
-                save_training_state(current_epoch, text_encoder, model)
+                save_training_state(current_epoch, text_encoder, model, model_type)
                 print("✅ 中断時の状態保存が完了しました")
             except Exception as e:
                 print(f"❌ 中断時の状態保存に失敗しました: {e}")
@@ -680,25 +1024,36 @@ def main():
 
         # --- Save the Trained Model ---
         print("\n=== 最終モデル保存 ===")
-        model_save_path = "outputs/ljspeech_synthesis_model.keras"
+        model_save_path = os.path.join(BASE_OUTPUT_DIR, model_type.value, "ljspeech_synthesis_model.keras")
         model.save(model_save_path)
         print(f"💾 最終モデルを保存: {model_save_path}")
 
         # Save final training state
-        save_training_state(500, text_encoder, model)  # Final epoch
+        save_training_state(args.epochs, text_encoder, model, model_type)  # Final epoch
 
         # --- Perform Final Inference (Text-to-Speech) ---
         print("\n=== 最終推論実行 (テキストから音声) ===")
 
-        # 推論に使用するテキスト（最初のデータと同じテキストを使用）
-        inference_text = first_text if first_text else "Hello, this is a final test of the new speech synthesis model."
-        print(f"🎤 合成用テキスト: '{inference_text}'")
+        # 推論に使用するテキスト
+        print(f"🎤 最終合成用テキスト: '{inference_text}'")
 
         # テキストをベクトル化
         text_vec = text_encoder([inference_text])
 
         # モデルでメルスペクトログラムを予測
-        predicted_mel_spec = model.predict(text_vec)
+        model_output = model.predict(text_vec)
+        
+        # モデルタイプに応じて適切な出力を取得
+        if isinstance(model_output, dict):
+            if model_type == TTSModel.FASTSPEECH2:
+                predicted_mel_spec = model_output['mel_output_refined']
+            else:
+                # 他のモデルタイプの場合、利用可能な出力キーから選択
+                predicted_mel_spec = model_output.get('mel_output_refined', 
+                                                    model_output.get('mel_output',
+                                                                    list(model_output.values())[0]))
+        else:
+            predicted_mel_spec = model_output
 
         # バッチ次元を削除し、numpy配列に変換
         predicted_mel_spec_np = predicted_mel_spec[0]
@@ -714,7 +1069,7 @@ def main():
         )
 
         # 生成された音声を保存
-        output_audio_path = "outputs/synthesized_audio_final.wav"
+        output_audio_path = os.path.join(BASE_OUTPUT_DIR, model_type.value, "synthesized_audio_final.wav")
         sf.write(output_audio_path, generated_audio, 22050)
         print(f"🎵 最終合成音声を保存: {output_audio_path}")
 
@@ -722,7 +1077,7 @@ def main():
         visualize_audio_and_spectrogram(
             tf.convert_to_tensor(generated_audio),
             inference_text,
-            save_path="outputs/synthesis_visualization_final.png",
+            save_path=os.path.join(BASE_OUTPUT_DIR, model_type.value, "synthesis_visualization_final.png"),
         )
 
         print(f"\n🕐 完了時刻: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -740,7 +1095,7 @@ def main():
         try:
             if 'current_model' in globals() and current_model is not None:
                 print("🆘 エラー発生時の緊急状態保存を試行中...")
-                save_training_state(current_epoch, current_text_encoder, current_model)
+                save_training_state(current_epoch, current_text_encoder, current_model, model_type)
                 print("✅ 緊急状態保存が完了しました")
         except Exception as save_error:
             print(f"❌ 緊急状態保存に失敗しました: {save_error}")
