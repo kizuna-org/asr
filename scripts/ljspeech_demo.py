@@ -505,6 +505,227 @@ def visualize_audio_and_spectrogram(
     plt.close()  # プロットを表示せずに閉じる
 
 
+class TrainingPlotCallback(tf.keras.callbacks.Callback):
+    """
+    学習過程（epoch、loss、MAE）をリアルタイムでグラフ化するコールバック
+    """
+    
+    def __init__(self, model_output_dir=None, model_type=TTSModel.FASTSPEECH2):
+        super().__init__()
+        self.model_type = model_type
+        
+        # グラフ保存ディレクトリの設定
+        if model_output_dir:
+            self.plot_dir = os.path.join(model_output_dir, "training_plots")
+        else:
+            self.plot_dir = os.path.join(BASE_OUTPUT_DIR, model_type.value, "training_plots")
+        
+        os.makedirs(self.plot_dir, exist_ok=True)
+        
+        # 学習履歴を保存するリスト
+        self.epochs = []
+        self.train_losses = []
+        self.train_maes = []
+        self.val_losses = []
+        self.val_maes = []
+        
+        # グラフのスタイル設定
+        plt.style.use('default')
+        
+        print(f"📊 学習過程グラフ化機能を初期化しました")
+        print(f"📁 グラフ保存ディレクトリ: {self.plot_dir}")
+    
+    def on_epoch_end(self, epoch, logs=None):
+        """エポック終了時に学習曲線を更新"""
+        if logs is None:
+            logs = {}
+        
+        # エポック番号を記録（1から始まる）
+        current_epoch = epoch + 1
+        self.epochs.append(current_epoch)
+        
+        # 損失とMAEを記録
+        train_loss = logs.get('loss', 0)
+        train_mae = logs.get('mae', logs.get('mean_absolute_error', 0))
+        val_loss = logs.get('val_loss', None)
+        val_mae = logs.get('val_mae', logs.get('val_mean_absolute_error', None))
+        
+        self.train_losses.append(train_loss)
+        self.train_maes.append(train_mae)
+        
+        if val_loss is not None:
+            self.val_losses.append(val_loss)
+        if val_mae is not None:
+            self.val_maes.append(val_mae)
+        
+        # グラフを生成・保存
+        self._create_training_plots(current_epoch)
+        
+        print(f"📊 エポック {current_epoch}: Loss={train_loss:.4f}, MAE={train_mae:.4f}")
+    
+    def _create_training_plots(self, current_epoch):
+        """学習曲線グラフを作成・保存"""
+        try:
+            # フィギュアサイズを設定
+            fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 10))
+            fig.suptitle(f'{self.model_type.value.upper()} Training Progress - Epoch {current_epoch}', 
+                        fontsize=16, fontweight='bold')
+            
+            # 1. Loss曲線
+            ax1.plot(self.epochs, self.train_losses, 'b-', label='Training Loss', linewidth=2)
+            if self.val_losses:
+                ax1.plot(self.epochs, self.val_losses, 'r-', label='Validation Loss', linewidth=2)
+            ax1.set_xlabel('Epoch')
+            ax1.set_ylabel('Loss')
+            ax1.set_title('Training and Validation Loss')
+            ax1.legend()
+            ax1.grid(True, alpha=0.3)
+            if len(self.epochs) > 1:
+                ax1.set_xlim(1, max(self.epochs))
+            
+            # 2. MAE曲線
+            ax2.plot(self.epochs, self.train_maes, 'g-', label='Training MAE', linewidth=2)
+            if self.val_maes:
+                ax2.plot(self.epochs, self.val_maes, 'orange', label='Validation MAE', linewidth=2)
+            ax2.set_xlabel('Epoch')
+            ax2.set_ylabel('Mean Absolute Error')
+            ax2.set_title('Training and Validation MAE')
+            ax2.legend()
+            ax2.grid(True, alpha=0.3)
+            if len(self.epochs) > 1:
+                ax2.set_xlim(1, max(self.epochs))
+            
+            # 3. Loss最新20エポックの詳細
+            recent_epochs = self.epochs[-20:] if len(self.epochs) > 20 else self.epochs
+            recent_train_losses = self.train_losses[-20:] if len(self.train_losses) > 20 else self.train_losses
+            recent_val_losses = self.val_losses[-20:] if len(self.val_losses) > 20 else self.val_losses
+            
+            ax3.plot(recent_epochs, recent_train_losses, 'b-', label='Training Loss', linewidth=2, marker='o')
+            if recent_val_losses:
+                ax3.plot(recent_epochs, recent_val_losses, 'r-', label='Validation Loss', linewidth=2, marker='s')
+            ax3.set_xlabel('Epoch')
+            ax3.set_ylabel('Loss')
+            ax3.set_title('Recent Loss (Last 20 Epochs)')
+            ax3.legend()
+            ax3.grid(True, alpha=0.3)
+            
+            # 4. 学習統計情報
+            ax4.axis('off')
+            stats_text = f"""Training Statistics (Epoch {current_epoch})
+             
+Current Metrics:
+• Training Loss: {self.train_losses[-1]:.6f}
+• Training MAE: {self.train_maes[-1]:.6f}"""
+            
+            if self.val_losses:
+                stats_text += f"\n• Validation Loss: {self.val_losses[-1]:.6f}"
+            if self.val_maes:
+                stats_text += f"\n• Validation MAE: {self.val_maes[-1]:.6f}"
+            
+            if len(self.train_losses) > 1:
+                best_train_loss = min(self.train_losses)
+                best_train_loss_epoch = self.epochs[self.train_losses.index(best_train_loss)]
+                stats_text += f"""
+
+Best Performance:
+• Best Training Loss: {best_train_loss:.6f} (Epoch {best_train_loss_epoch})"""
+                
+                if len(self.train_maes) > 1:
+                    best_train_mae = min(self.train_maes)
+                    best_train_mae_epoch = self.epochs[self.train_maes.index(best_train_mae)]
+                    stats_text += f"\n• Best Training MAE: {best_train_mae:.6f} (Epoch {best_train_mae_epoch})"
+            
+            ax4.text(0.1, 0.9, stats_text, transform=ax4.transAxes, fontsize=11,
+                    verticalalignment='top', fontfamily='monospace',
+                    bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
+            
+            # レイアウト調整
+            plt.tight_layout()
+            
+            # グラフを保存
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            plot_filename = f"training_progress_epoch_{current_epoch:04d}_{timestamp}.png"
+            plot_path = os.path.join(self.plot_dir, plot_filename)
+            
+            plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+            plt.close()  # メモリリークを防ぐため
+            
+            # 最新のグラフを固定名でも保存（常に最新状態を確認できるように）
+            latest_plot_path = os.path.join(self.plot_dir, "latest_training_progress.png")
+            fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 10))
+            fig.suptitle(f'{self.model_type.value.upper()} Training Progress - Epoch {current_epoch}', 
+                        fontsize=16, fontweight='bold')
+            
+            # 同じグラフを再作成
+            ax1.plot(self.epochs, self.train_losses, 'b-', label='Training Loss', linewidth=2)
+            if self.val_losses:
+                ax1.plot(self.epochs, self.val_losses, 'r-', label='Validation Loss', linewidth=2)
+            ax1.set_xlabel('Epoch')
+            ax1.set_ylabel('Loss')
+            ax1.set_title('Training and Validation Loss')
+            ax1.legend()
+            ax1.grid(True, alpha=0.3)
+            if len(self.epochs) > 1:
+                ax1.set_xlim(1, max(self.epochs))
+            
+            ax2.plot(self.epochs, self.train_maes, 'g-', label='Training MAE', linewidth=2)
+            if self.val_maes:
+                ax2.plot(self.epochs, self.val_maes, 'orange', label='Validation MAE', linewidth=2)
+            ax2.set_xlabel('Epoch')
+            ax2.set_ylabel('Mean Absolute Error')
+            ax2.set_title('Training and Validation MAE')
+            ax2.legend()
+            ax2.grid(True, alpha=0.3)
+            if len(self.epochs) > 1:
+                ax2.set_xlim(1, max(self.epochs))
+            
+            ax3.plot(recent_epochs, recent_train_losses, 'b-', label='Training Loss', linewidth=2, marker='o')
+            if recent_val_losses:
+                ax3.plot(recent_epochs, recent_val_losses, 'r-', label='Validation Loss', linewidth=2, marker='s')
+            ax3.set_xlabel('Epoch')
+            ax3.set_ylabel('Loss')
+            ax3.set_title('Recent Loss (Last 20 Epochs)')
+            ax3.legend()
+            ax3.grid(True, alpha=0.3)
+            
+            ax4.axis('off')
+            ax4.text(0.1, 0.9, stats_text, transform=ax4.transAxes, fontsize=11,
+                    verticalalignment='top', fontfamily='monospace',
+                    bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
+            
+            plt.tight_layout()
+            plt.savefig(latest_plot_path, dpi=300, bbox_inches='tight')
+            plt.close()
+            
+            print(f"  📊 学習曲線グラフを保存: {plot_filename}")
+            
+        except Exception as e:
+            print(f"❌ グラフ作成中にエラーが発生しました: {e}")
+            import traceback
+            traceback.print_exc()
+    
+    def save_training_history(self):
+        """学習履歴をJSONファイルとして保存"""
+        try:
+            history_data = {
+                'epochs': self.epochs,
+                'train_losses': self.train_losses,
+                'train_maes': self.train_maes,
+                'val_losses': self.val_losses,
+                'val_maes': self.val_maes,
+                'model_type': self.model_type.value,
+                'saved_at': datetime.now().isoformat()
+            }
+            
+            history_path = os.path.join(self.plot_dir, "training_history.json")
+            with open(history_path, 'w', encoding='utf-8') as f:
+                json.dump(history_data, f, ensure_ascii=False, indent=2)
+            
+            print(f"💾 学習履歴を保存: {history_path}")
+            
+        except Exception as e:
+            print(f"❌ 学習履歴保存中にエラーが発生しました: {e}")
+
 class SynthesisCallback(tf.keras.callbacks.Callback):
     def __init__(self, text_encoder, n_fft, hop_length, sample_rate=22050, inference_text=None, model_type=TTSModel.FASTSPEECH2, model_output_dir=None):
         super().__init__()
@@ -1026,6 +1247,7 @@ def main():
         print("\n=== モデルトレーニング開始 ===")
 
         # エポックごとに音声を出力するためのコールバックを作成
+        training_plot_callback = TrainingPlotCallback(model_output_dir=model_output_dir, model_type=model_type)
         synthesis_callback = SynthesisCallback(
             text_encoder=text_encoder, n_fft=N_FFT, hop_length=HOP_LENGTH, 
             inference_text=inference_text, model_type=model_type, model_output_dir=model_output_dir
@@ -1041,12 +1263,13 @@ def main():
 
         # Create custom callback to save training state
         class TrainingStateCallback(tf.keras.callbacks.Callback):
-            def __init__(self, text_encoder, model_type, limit_samples, mode):
+            def __init__(self, text_encoder, model_type, limit_samples, mode, plot_callback):
                 super().__init__()
                 self.text_encoder = text_encoder
                 self.model_type = model_type
                 self.limit_samples = limit_samples
                 self.mode = mode
+                self.plot_callback = plot_callback
 
             def on_epoch_end(self, epoch, logs=None):
                 """Save training state at the end of each epoch."""
@@ -1067,8 +1290,12 @@ def main():
                 if training_interrupted:
                     print("\n⚠️  中断が要求されました。現在のエポックを完了後に停止します。")
                     self.model.stop_training = True
+            
+            def on_train_end(self, logs=None):
+                """学習終了時に学習履歴を保存"""
+                self.plot_callback.save_training_history()
 
-        training_state_callback = TrainingStateCallback(text_encoder, model_type, limit_samples, args.mode)
+        training_state_callback = TrainingStateCallback(text_encoder, model_type, limit_samples, args.mode, training_plot_callback)
 
         # Update global variables before training
         global current_model, current_text_encoder, current_epoch
@@ -1086,6 +1313,7 @@ def main():
             epochs=args.epochs,
             initial_epoch=start_epoch,
             callbacks=[
+                training_plot_callback,
                 synthesis_callback,
                 checkpoint_callback,
                 training_state_callback,
