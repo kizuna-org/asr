@@ -42,16 +42,6 @@ services:
     networks:
       - ci-network
 
-  # --- Squid プロキシサーバー ---
-  squid:
-    image: ubuntu/squid:latest
-    container_name: squid
-    volumes:
-      - ./squid/squid.conf:/etc/squid/squid.conf
-    networks:
-      - ci-network
-    restart: unless-stopped
-
   # --- frpクライアント設定（squid経由で外部frpsサーバーに接続）---
   frpc:
     image: snowdreamtech/frpc:latest
@@ -63,12 +53,16 @@ services:
     depends_on:
       - jenkins
       - gitea
-      - squid
+      - cloudflared
     restart: unless-stopped
 
-# --- ここからが変更点 ---
-# jenkins_home の定義を削除
-# --- ここまでが変更点 ---
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: frpc-cloudflared
+    command: access tcp --hostname frps-connect.shiron.dev --url http://cloudflared:7000
+    restart: unless-stopped
+    networks:
+      - ci-network
 
 networks:
   ci-network:
