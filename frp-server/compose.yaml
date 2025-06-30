@@ -1,4 +1,4 @@
-# frp-server/compose.yaml - frpサーバー専用設定（Cloudflare Dashboard管理）
+# frp-server/compose.yaml - frpサーバー + Cloudflare Tunnel設定
 
 services:
   frps:
@@ -10,6 +10,17 @@ services:
     restart: unless-stopped
     networks:
       - frp-network
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: cloudflared
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${CLOUDFLARE_TUNNEL_TOKEN}
+    restart: unless-stopped
+    networks:
+      - frp-network
+    depends_on:
+      - frps
 
 networks:
   frp-network:

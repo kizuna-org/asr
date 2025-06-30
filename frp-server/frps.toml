@@ -16,8 +16,8 @@ auth.method = "token"
 auth.token = "jenkins_frp_secret_token"
 
 # ログ設定
-log.level = "info"
+log.level = "debug"
 log.maxDays = 7
 
 # サブドメイン設定
-subDomainHost = "shiron.dev"
+# subDomainHost = "shiron.dev"

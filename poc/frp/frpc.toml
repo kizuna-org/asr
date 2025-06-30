@@ -1,16 +1,21 @@
-# frpc.toml - frp client configuration (外部frpsサーバー接続)
+# frpc.toml - frp client configuration (HTTPS経由接続)
 
-# サーバー設定（外部frpsサーバー）
-serverAddr = "frps.shiron.dev"
-serverPort = 7000
-
+# サーバー設定（HTTPS経由）
+serverAddr = "frps-connect.shiron.dev"
+serverPort = 443
 # 認証設定
 auth.method = "token"
 auth.token = "jenkins_frp_secret_token"
 
+loginFailExit = false
+
 # ログ設定
-log.level = "info"
+log.level = "debug"
 log.maxDays = 7
+
+[transport]
+tls.enable = true
+# protocol = "websocket"
 
 # Jenkins HTTP プロキシ設定
 [[proxies]]
@@ -18,38 +23,42 @@ name = "jenkins-http"
 type = "http"
 localIP = "jenkins"
 localPort = 8080
-customDomains = ["jenkins.shiron.dev"]
+customDomains = ["kizuna-jenkins.shiron.dev"]
 
+# ↓ このヘルスチェックは直前の "jenkins-http" プロキシに適用されます
 [proxies.healthCheck]
 type = "http"
 path = "/login"
 intervalSeconds = 10
 
-# Gitea HTTP プロキシ設定
-[[proxies]]
-name = "gitea-http"
-type = "http"
-localIP = "gitea"
-localPort = 3000
-customDomains = ["gitea.shiron.dev"]
-
-[proxies.healthCheck]
-type = "http"
-path = "/"
-intervalSeconds = 10
+# Gitea HTTP プロキシ設定 (将来有効にする場合)
+# [[proxies]]
+# name = "gitea-http"
+# type = "http"
+# localIP = "gitea"
+# localPort = 3000
+# customDomains = ["gitea.shiron.dev"]
+#
+# ↓ Giteaのヘルスチェックは、Giteaのプロキシ設定を有効にする際に、
+#   このブロックの直下に記述します。
+#
+# [proxies.healthCheck]
+# type = "http"
+# path = "/"
+# intervalSeconds = 10
 
 # Jenkins TCP プロキシ設定（エージェント接続用）
-[[proxies]]
-name = "jenkins-tcp"
-type = "tcp"
-localIP = "jenkins"
-localPort = 50000
-remotePort = 50000
+# [[proxies]]
+# name = "jenkins-tcp"
+# type = "tcp"
+# localIP = "jenkins"
+# localPort = 50000
+# remotePort = 50000
 
 # Gitea SSH プロキシ設定
-[[proxies]]
-name = "gitea-ssh"
-type = "tcp"
-localIP = "gitea"
-localPort = 22
-remotePort = 2222
+# [[proxies]]
+# name = "gitea-ssh"
+# type = "tcp"
+# localIP = "gitea"
+# localPort = 22
+# remotePort = 2222
