@@ -67,12 +67,20 @@ TEXT_ENCODER_PATH = None
 TRAINING_STATE_PATH = None
 DATASET_CACHE_PATH = None
 
-def setup_model_paths(model_type: TTSModel):
-    """Setup model-specific paths based on the selected model type."""
+def setup_model_paths(model_type: TTSModel, limit_samples: int = None, mode: str = "mini"):
+    """Setup model-specific paths based on the selected model type, sample count, and mode."""
     global CHECKPOINT_DIR, MODEL_CHECKPOINT_PATH, TEXT_ENCODER_PATH, TRAINING_STATE_PATH, DATASET_CACHE_PATH
     
-    # Create model-specific directory
-    model_output_dir = os.path.join(BASE_OUTPUT_DIR, model_type.value)
+    # Create sample-specific directory name
+    if limit_samples is not None:
+        sample_dir = f"samples_{limit_samples}"
+    elif mode == 'full':
+        sample_dir = "full_dataset"
+    else:  # mini mode
+        sample_dir = "samples_10"
+    
+    # Create hierarchical directory: outputs/model_type/sample_dir
+    model_output_dir = os.path.join(BASE_OUTPUT_DIR, model_type.value, sample_dir)
     CHECKPOINT_DIR = os.path.join(model_output_dir, "checkpoints")
     MODEL_CHECKPOINT_PATH = os.path.join(CHECKPOINT_DIR, "model.keras")
     TEXT_ENCODER_PATH = os.path.join(CHECKPOINT_DIR, "text_encoder")
@@ -85,6 +93,9 @@ def setup_model_paths(model_type: TTSModel):
     
     print(f"📁 モデル固有のディレクトリを設定: {model_output_dir}")
     print(f"📁 チェックポイントディレクトリ: {CHECKPOINT_DIR}")
+    print(f"📁 サンプル設定: {sample_dir}")
+
+    return model_output_dir
 
 # Global variables for graceful shutdown
 training_interrupted = False
@@ -102,7 +113,8 @@ def signal_handler(signum, frame):
     if current_model is not None and current_text_encoder is not None:
         print("現在の状態を保存中...")
         try:
-            save_training_state(current_epoch, current_text_encoder, current_model, TTSModel.FASTSPEECH2)
+            # Use default values for signal handler save
+            save_training_state(current_epoch, current_text_encoder, current_model, TTSModel.FASTSPEECH2, 10, "mini")
             print("✅ チェックポイントが正常に保存されました")
         except Exception as e:
             print(f"❌ チェックポイント保存中にエラーが発生しました: {e}")
@@ -284,7 +296,7 @@ class TTSModelTrainer(tf.keras.Model):
             self.loss_fn = SimpleVITSLoss()
         else:
             self.loss_fn = BasicTTSLoss()
-        
+    
     def call(self, inputs, training=None):
         return self.tts_model(inputs, training=training)
     
@@ -494,7 +506,7 @@ def visualize_audio_and_spectrogram(
 
 
 class SynthesisCallback(tf.keras.callbacks.Callback):
-    def __init__(self, text_encoder, n_fft, hop_length, sample_rate=22050, inference_text=None, model_type=TTSModel.FASTSPEECH2):
+    def __init__(self, text_encoder, n_fft, hop_length, sample_rate=22050, inference_text=None, model_type=TTSModel.FASTSPEECH2, model_output_dir=None):
         super().__init__()
         self.text_encoder = text_encoder
         self.n_fft = n_fft
@@ -504,8 +516,13 @@ class SynthesisCallback(tf.keras.callbacks.Callback):
         # 音声合成に使用するテスト用のテキスト（最初のデータセットのテキストを使用）
         self.inference_text = inference_text if inference_text else "This is a test of the model at the end of each epoch."
         
-        # モデル固有のディレクトリを設定
-        self.epoch_samples_dir = os.path.join(BASE_OUTPUT_DIR, model_type.value, "epoch_samples")
+        # モデル固有のディレクトリを設定（model_output_dirが提供されている場合はそれを使用）
+        if model_output_dir:
+            self.epoch_samples_dir = os.path.join(model_output_dir, "epoch_samples")
+        else:
+            # 旧方式の互換性維持
+            self.epoch_samples_dir = os.path.join(BASE_OUTPUT_DIR, model_type.value, "epoch_samples")
+        
         os.makedirs(self.epoch_samples_dir, exist_ok=True)
         
         # 時間予測用の変数
@@ -642,16 +659,17 @@ class SynthesisCallback(tf.keras.callbacks.Callback):
             print("=" * 50)
 
 
-def save_training_state(epoch, text_encoder, model, model_type=TTSModel.FASTSPEECH2):
-    """Save training state including epoch number, text encoder, and model type."""
+def save_training_state(epoch, text_encoder, model, model_type=TTSModel.FASTSPEECH2, limit_samples=None, mode="mini"):
+    """Save training state including epoch number, text encoder, model type, and training configuration."""
     try:
         os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
         print(f"💾 エポック {epoch} の状態を保存中...")
         
-        # Save model
-        model.save(MODEL_CHECKPOINT_PATH)
-        print(f"  ✅ モデルを保存: {MODEL_CHECKPOINT_PATH}")
+        # Save model weights instead of full model to avoid serialization issues
+        model_weights_path = os.path.join(CHECKPOINT_DIR, "model.weights.h5")
+        model.save_weights(model_weights_path)
+        print(f"  ✅ モデル重みを保存: {model_weights_path}")
 
         # Save text encoder vocabulary
         vocab = text_encoder.get_vocabulary()
@@ -660,7 +678,15 @@ def save_training_state(epoch, text_encoder, model, model_type=TTSModel.FASTSPEE
             json.dump(vocab, f, ensure_ascii=False, indent=2)
         print(f"  ✅ 語彙を保存: {vocab_path}")
 
-        # Save training state with timestamp and model type
+        # Determine sample directory name
+        if limit_samples is not None:
+            sample_dir = f"samples_{limit_samples}"
+        elif mode == 'full':
+            sample_dir = "full_dataset"
+        else:  # mini mode
+            sample_dir = "samples_10"
+
+        # Save training state with timestamp, model type, and training configuration
         training_state = {
             "epoch": epoch,
             "model_type": model_type.value,
@@ -668,9 +694,12 @@ def save_training_state(epoch, text_encoder, model, model_type=TTSModel.FASTSPEE
             "max_tokens": text_encoder._max_tokens,
             "output_sequence_length": text_encoder._output_sequence_length,
             "standardize": text_encoder._standardize,
+            "limit_samples": limit_samples,
+            "mode": mode,
+            "sample_dir": sample_dir,
             "saved_at": datetime.now().isoformat(),
             "tensorflow_version": tf.__version__,
-            "checkpoint_version": "3.0"
+            "checkpoint_version": "3.2"
         }
         
         # Create backup of previous state
@@ -693,12 +722,12 @@ def save_training_state(epoch, text_encoder, model, model_type=TTSModel.FASTSPEE
 
 
 def load_training_state():
-    """Load training state and return epoch number, text encoder, model, and model type if available."""
+    """Load training state and return epoch number, text encoder, model, model type, and training config if available."""
     print("🔍 保存された状態を確認中...")
     
     if not os.path.exists(TRAINING_STATE_PATH):
         print("ℹ️  保存された状態が見つかりません。最初から開始します。")
-        return 0, None, None, TTSModel.FASTSPEECH2
+        return 0, None, None, TTSModel.FASTSPEECH2, None
 
     try:
         # Load training state
@@ -719,6 +748,13 @@ def load_training_state():
             print(f"  ⚠️  不明なモデルタイプ '{model_type_str}'、デフォルトのFastSpeech2を使用")
             model_type = TTSModel.FASTSPEECH2
         
+        # Extract training configuration
+        training_config = {
+            'limit_samples': training_state.get('limit_samples'),
+            'mode': training_state.get('mode', 'mini'),
+            'sample_dir': training_state.get('sample_dir', 'samples_10')
+        }
+        
         if training_state.get("tensorflow_version"):
             print(f"  🔧 保存時のTensorFlowバージョン: {training_state['tensorflow_version']}")
             print(f"  🔧 現在のTensorFlowバージョン: {tf.__version__}")
@@ -726,16 +762,17 @@ def load_training_state():
         saved_at = training_state.get("saved_at", "不明")
         print(f"  ⏰ 保存時刻: {saved_at}")
 
-        # Check if model file exists
-        if not os.path.exists(MODEL_CHECKPOINT_PATH):
-            print(f"❌ モデルファイルが見つかりません: {MODEL_CHECKPOINT_PATH}")
-            return 0, None, None, model_type
+        # Check if model weights file exists
+        model_weights_path = os.path.join(CHECKPOINT_DIR, "model.weights.h5")
+        if not os.path.exists(model_weights_path):
+            print(f"❌ モデル重みファイルが見つかりません: {model_weights_path}")
+            return 0, None, None, model_type, training_config
 
         # Load vocabulary
         vocab_path = os.path.join(CHECKPOINT_DIR, "vocabulary.json")
         if not os.path.exists(vocab_path):
             print(f"❌ 語彙ファイルが見つかりません: {vocab_path}")
-            return 0, None, None, model_type
+            return 0, None, None, model_type, training_config
             
         print(f"📖 語彙を読み込み中: {vocab_path}")
         with open(vocab_path, "r", encoding='utf-8') as f:
@@ -751,16 +788,25 @@ def load_training_state():
         text_encoder.set_vocabulary(vocab)
         print(f"  ✅ 語彙サイズ: {len(vocab)}")
 
-        # Load model
-        print(f"🤖 モデルを読み込み中: {MODEL_CHECKPOINT_PATH}")
-        model = tf.keras.models.load_model(MODEL_CHECKPOINT_PATH)
-        print(f"  ✅ モデル読み込み完了")
+        # Create new model with same architecture
+        print(f"🤖 モデルを再構築中...")
+        model = build_text_to_spectrogram_model(
+            vocab_size=training_state["vocab_size"],
+            mel_bins=80,
+            max_sequence_length=training_state["output_sequence_length"],
+            model_type=model_type
+        )
+        
+        # Load weights
+        print(f"⚖️  モデル重みを読み込み中: {model_weights_path}")
+        model.load_weights(model_weights_path)
+        print(f"  ✅ モデル重み読み込み完了")
 
         epoch = training_state["epoch"]
         print(f"🎯 エポック {epoch} から再開します")
         print("=" * 50)
         
-        return epoch, text_encoder, model, model_type
+        return epoch, text_encoder, model, model_type, training_config
 
     except Exception as e:
         print(f"❌ チェックポイント読み込み中にエラーが発生しました: {e}")
@@ -778,7 +824,7 @@ def load_training_state():
             except Exception as backup_error:
                 print(f"❌ バックアップからの復元も失敗しました: {backup_error}")
         
-        return 0, None, None, TTSModel.FASTSPEECH2
+        return 0, None, None, TTSModel.FASTSPEECH2, None
 
 
 def main():
@@ -820,19 +866,32 @@ def main():
     
     try:
         # Setup model-specific paths
-        setup_model_paths(model_type)
+        model_output_dir = setup_model_paths(model_type, limit_samples, args.mode)
         
         # Check for existing checkpoint
-        start_epoch, text_encoder, model, saved_model_type = load_training_state()
+        start_epoch, text_encoder, model, saved_model_type, training_config = load_training_state()
 
-        # Check if the saved model type matches the requested model type
-        if start_epoch > 0:
-            if saved_model_type == model_type:
+        # Check if the saved model type matches the requested model type and training configuration
+        if start_epoch > 0 and training_config:
+            config_matches = True
+            if saved_model_type != model_type:
+                config_matches = False
+                print(f"⚠️  保存されたモデルタイプ ({saved_model_type.value}) と要求されたモデルタイプ ({model_type.value}) が異なります")
+            
+            # Check if training configuration matches
+            saved_limit_samples = training_config.get('limit_samples')
+            saved_mode = training_config.get('mode', 'mini')
+            
+            if saved_limit_samples != limit_samples or saved_mode != args.mode:
+                config_matches = False
+                print(f"⚠️  保存された設定 (samples: {saved_limit_samples}, mode: {saved_mode}) と要求された設定 (samples: {limit_samples}, mode: {args.mode}) が異なります")
+            
+            if config_matches:
                 print(f"🔄 チェックポイントが見つかりました。エポック {start_epoch + 1} から再開します")
                 print(f"📋 保存されたモデルタイプ: {saved_model_type.value}")
+                print(f"📋 保存された設定: samples={saved_limit_samples}, mode={saved_mode}")
             else:
-                print(f"⚠️  保存されたモデルタイプ ({saved_model_type.value}) と要求されたモデルタイプ ({model_type.value}) が異なります")
-                print("🆕 新規トレーニングを開始します（既存のチェックポイントは無視されます）")
+                print("🆕 設定が異なるため、新規トレーニングを開始します（既存のチェックポイントは無視されます）")
                 start_epoch, text_encoder, model = 0, None, None
         else:
             print("🆕 新規トレーニングを開始します")
@@ -969,23 +1028,25 @@ def main():
         # エポックごとに音声を出力するためのコールバックを作成
         synthesis_callback = SynthesisCallback(
             text_encoder=text_encoder, n_fft=N_FFT, hop_length=HOP_LENGTH, 
-            inference_text=inference_text, model_type=model_type
+            inference_text=inference_text, model_type=model_type, model_output_dir=model_output_dir
         )
 
-        # Create checkpoint callback
+        # Create checkpoint callback (save weights only)
         checkpoint_callback = tf.keras.callbacks.ModelCheckpoint(
-            filepath=MODEL_CHECKPOINT_PATH,
+            filepath=os.path.join(CHECKPOINT_DIR, "model.weights.h5"),
             save_best_only=False,
-            save_weights_only=False,
+            save_weights_only=True,
             save_freq="epoch",
         )
 
         # Create custom callback to save training state
         class TrainingStateCallback(tf.keras.callbacks.Callback):
-            def __init__(self, text_encoder, model_type):
+            def __init__(self, text_encoder, model_type, limit_samples, mode):
                 super().__init__()
                 self.text_encoder = text_encoder
                 self.model_type = model_type
+                self.limit_samples = limit_samples
+                self.mode = mode
 
             def on_epoch_end(self, epoch, logs=None):
                 """Save training state at the end of each epoch."""
@@ -996,7 +1057,7 @@ def main():
                     return
                 
                 try:
-                    save_training_state(epoch + 1, self.text_encoder, self.model, self.model_type)  # Save next epoch number
+                    save_training_state(epoch + 1, self.text_encoder, self.model, self.model_type, self.limit_samples, self.mode)  # Save next epoch number
                 except Exception as e:
                     print(f"❌ 状態保存中にエラーが発生しましたが、トレーニングを継続します: {e}")
 
@@ -1007,7 +1068,7 @@ def main():
                     print("\n⚠️  中断が要求されました。現在のエポックを完了後に停止します。")
                     self.model.stop_training = True
 
-        training_state_callback = TrainingStateCallback(text_encoder, model_type)
+        training_state_callback = TrainingStateCallback(text_encoder, model_type, limit_samples, args.mode)
 
         # Update global variables before training
         global current_model, current_text_encoder, current_epoch
@@ -1037,7 +1098,7 @@ def main():
             print("\n⚠️  トレーニングが中断されました")
             print("💾 最終状態を保存中...")
             try:
-                save_training_state(current_epoch, text_encoder, model, model_type)
+                save_training_state(current_epoch, text_encoder, model, model_type, limit_samples, args.mode)
                 print("✅ 中断時の状態保存が完了しました")
             except Exception as e:
                 print(f"❌ 中断時の状態保存に失敗しました: {e}")
@@ -1047,12 +1108,12 @@ def main():
 
         # --- Save the Trained Model ---
         print("\n=== 最終モデル保存 ===")
-        model_save_path = os.path.join(BASE_OUTPUT_DIR, model_type.value, "ljspeech_synthesis_model.keras")
-        model.save(model_save_path)
-        print(f"💾 最終モデルを保存: {model_save_path}")
+        model_save_path = os.path.join(BASE_OUTPUT_DIR, model_type.value, "ljspeech_synthesis_model.weights.h5")
+        model.save_weights(model_save_path)
+        print(f"💾 最終モデル重みを保存: {model_save_path}")
 
         # Save final training state
-        save_training_state(args.epochs, text_encoder, model, model_type)  # Final epoch
+        save_training_state(args.epochs, text_encoder, model, model_type, limit_samples, args.mode)  # Final epoch
 
         # --- Perform Final Inference (Text-to-Speech) ---
         print("\n=== 最終推論実行 (テキストから音声) ===")
@@ -1118,7 +1179,10 @@ def main():
         try:
             if 'current_model' in globals() and current_model is not None:
                 print("🆘 エラー発生時の緊急状態保存を試行中...")
-                save_training_state(current_epoch, current_text_encoder, current_model, model_type)
+                # Use default values for emergency save if variables are not available
+                emergency_limit_samples = locals().get('limit_samples', 10)
+                emergency_mode = locals().get('args', type('', (), {'mode': 'mini'})).mode
+                save_training_state(current_epoch, current_text_encoder, current_model, model_type, emergency_limit_samples, emergency_mode)
                 print("✅ 緊急状態保存が完了しました")
         except Exception as save_error:
             print(f"❌ 緊急状態保存に失敗しました: {save_error}")

@@ -65,6 +65,18 @@ class SimpleTransformerTTS(tf.keras.Model):
             tf.keras.layers.Conv1D(self.n_mels, 5, padding='same')
         ])
     
+    def get_config(self):
+        """Return the config of the model for serialization."""
+        base_config = super().get_config()
+        return {**base_config, 'config': self.config}
+    
+    @classmethod
+    def from_config(cls, config):
+        """Create a model from its config."""
+        # Extract the model-specific config
+        model_config = config.pop('config', {})
+        return cls(model_config, **config)
+    
     def call(self, inputs: tf.Tensor, training: Optional[bool] = None, **kwargs) -> Dict[str, tf.Tensor]:
         # Text embedding
         x = self.text_embedding(inputs)
@@ -107,22 +119,44 @@ def create_simple_transformer_config() -> Dict[str, Any]:
 
 def build_simple_transformer_tts_model(vocab_size: int = 10000, 
                                       n_mels: int = 80,
-                                      config: Optional[Dict[str, Any]] = None) -> SimpleTransformerTTS:
-    """Build and return a Simple Transformer TTS model."""
+                                      config: Optional[Dict[str, Any]] = None) -> 'TTSModelTrainer':
+    """Build and return a Simple Transformer TTS model wrapped in TTSModelTrainer."""
+    # Import here to avoid circular imports
+    from ljspeech_demo import TTSModelTrainer, TTSModel
+    
     if config is None:
         config = create_simple_transformer_config()
     
     config['vocab_size'] = vocab_size
     config['n_mels'] = n_mels
     
-    model = SimpleTransformerTTS(config)
+    # Create the base model
+    simple_model = SimpleTransformerTTS(config)
     
     # Build the model by calling it with dummy data
     dummy_text = tf.zeros((1, 10), dtype=tf.int32)
+    _ = simple_model(dummy_text, training=False)
+    
+    # Wrap with trainer class
+    model = TTSModelTrainer(simple_model, TTSModel.TRANSFORMER_TTS)
+    
+    # Build the wrapper model too
     _ = model(dummy_text, training=False)
     
+    # Compile the model
+    model.compile(
+        optimizer='adam',
+        metrics=['mae']
+    )
+    
     print(f"✅ Simple Transformer TTS model created successfully")
-    print(f"Model parameters: {model.count_params():,}")
+    
+    # Try to get parameter count with error handling
+    try:
+        param_count = model.count_params()
+        print(f"Model parameters: {param_count:,}")
+    except ValueError as e:
+        print(f"Model parameters: Could not count parameters - {e}")
     
     return model
 
