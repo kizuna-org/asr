@@ -42,7 +42,19 @@ services:
     networks:
       - ci-network
 
-  # --- frpクライアント設定（外部frpsサーバーに接続）---
+  # --- Squid プロキシサーバー ---
+  squid:
+    image: ubuntu/squid:latest
+    container_name: squid
+    ports:
+      - "3128:3128"
+    volumes:
+      - ./squid/squid.conf:/etc/squid/squid.conf
+    networks:
+      - ci-network
+    restart: unless-stopped
+
+  # --- frpクライアント設定（squid経由で外部frpsサーバーに接続）---
   frpc:
     image: snowdreamtech/frpc:latest
     container_name: frpc
@@ -53,6 +65,7 @@ services:
     depends_on:
       - jenkins
       - gitea
+      - squid
     restart: unless-stopped
 
 # --- ここからが変更点 ---

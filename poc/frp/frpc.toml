@@ -17,6 +17,9 @@ log.maxDays = 7
 tls.enable = true
 # protocol = "websocket"
 
+# Squid プロキシ経由での接続設定
+proxyURL = "http://squid:3128"
+
 # Jenkins HTTP プロキシ設定
 [[proxies]]
 name = "jenkins-http"
