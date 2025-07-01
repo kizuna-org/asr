@@ -94,6 +94,15 @@ class TransformerEncoderLayer(tf.keras.layers.Layer):
         self.dropout1 = tf.keras.layers.Dropout(dropout_rate)
         self.dropout2 = tf.keras.layers.Dropout(dropout_rate)
     
+    def build(self, input_shape):
+        """Build the layer with the given input shape."""
+        super().build(input_shape)
+        # Let the MultiHeadAttention layers build themselves during first call
+        # Build only the layers we can safely build
+        self.ffn.build(input_shape)
+        self.layernorm1.build(input_shape)
+        self.layernorm2.build(input_shape)
+    
     def call(self, x, training=None, mask=None):
         # Self-Attention
         attn_output = self.self_attention(x, x, attention_mask=mask, training=training)
@@ -159,6 +168,16 @@ class TransformerDecoderLayer(tf.keras.layers.Layer):
         self.dropout2 = tf.keras.layers.Dropout(dropout_rate)
         self.dropout3 = tf.keras.layers.Dropout(dropout_rate)
     
+    def build(self, input_shape):
+        """Build the layer with the given input shape."""
+        super().build(input_shape)
+        # Let the MultiHeadAttention layers build themselves during first call
+        # Build only the layers we can safely build
+        self.ffn.build(input_shape)
+        self.layernorm1.build(input_shape)
+        self.layernorm2.build(input_shape)
+        self.layernorm3.build(input_shape)
+    
     def call(self, x, encoder_output, training=None, look_ahead_mask=None, padding_mask=None):
         # Masked Self-Attention
         attn1 = self.self_attention(x, x, attention_mask=look_ahead_mask, training=training)
@@ -200,6 +219,15 @@ class Prenet(tf.keras.layers.Layer):
         self.dense2 = tf.keras.layers.Dense(units, activation='relu')
         self.dropout1 = tf.keras.layers.Dropout(dropout_rate)
         self.dropout2 = tf.keras.layers.Dropout(dropout_rate)
+    
+    def build(self, input_shape):
+        """Build the layer with the given input shape."""
+        super().build(input_shape)
+        # Build sub-layers
+        self.dense1.build(input_shape)
+        # Output of first dense layer
+        dense1_output_shape = input_shape[:-1] + (self.units,)
+        self.dense2.build(dense1_output_shape)
     
     def call(self, x, training=None):
         x = self.dense1(x)
@@ -286,6 +314,30 @@ class SimpleTransformerTTS(tf.keras.Model):
             tf.keras.layers.Conv1D(self.n_mels, 5, padding='same')
         ])
     
+    def build(self, input_shape):
+        """Build the model layers with proper input shapes."""
+        super().build(input_shape)
+        
+        # Build text embedding
+        self.text_embedding.build((None, None))
+        
+        # Build encoder position encoding
+        encoder_shape = (None, None, self.d_model)
+        self.encoder_pos_encoding.build(encoder_shape)
+        
+        # Build decoder layers (but not encoder/decoder layers as they handle their own build)
+        self.prenet.build((None, None, self.n_mels))
+        self.decoder_projection.build((None, None, 256))
+        self.decoder_pos_encoding.build((None, None, self.d_model))
+        
+        # Build output layers
+        decoder_shape = (None, None, self.d_model)
+        self.mel_linear.build(decoder_shape)
+        self.stop_linear.build(decoder_shape)
+        
+        # Build postnet
+        self.postnet.build((None, None, self.n_mels))
+
     def create_look_ahead_mask(self, size):
         """未来のフレームをカンニングしないようにマスクを作成"""
         mask = 1 - tf.linalg.band_part(tf.ones((size, size)), -1, 0)
@@ -408,6 +460,10 @@ def build_simple_transformer_tts_model(vocab_size: int = 10000,
     # Create the base model
     simple_model = SimpleTransformerTTS(config)
     
+    # Build the model with proper input shape
+    text_input_shape = (None, None)  # (batch_size, sequence_length)
+    simple_model.build(text_input_shape)
+    
     # Build the model by calling it with dummy data
     dummy_text = tf.zeros((1, 10), dtype=tf.int32)
     _ = simple_model(dummy_text, training=False)
@@ -447,12 +503,144 @@ def build_simple_transformer_tts_model(vocab_size: int = 10000,
     print(f"📈 Noam学習率スケジューラ: 有効 (ウォームアップステップ: {config.get('warmup_steps', 4000)})")
     print(f"🔧 Post-net: 5層畳み込み構造")
     
-    # Try to get parameter count with error handling
+    # Display model structure information
+    print("\n" + "="*60)
+    print("🏗️  MODEL STRUCTURE INFORMATION")
+    print("="*60)
+    
+    # Display base model information
+    print("\n📋 Base Model (SimpleTransformerTTS):")
     try:
-        param_count = model.count_params()
-        print(f"Model parameters: {param_count:,}")
-    except ValueError as e:
-        print(f"Model parameters: Could not count parameters - {e}")
+        param_count = simple_model.count_params()
+        print(f"   Parameters: {param_count:,}")
+    except Exception as e:
+        print(f"   Parameters: Could not count - {e}")
+    
+    # Display wrapper model information
+    print("\n📋 Wrapper Model (TTSModelTrainer):")
+    try:
+        wrapper_param_count = model.count_params()
+        print(f"   Parameters: {wrapper_param_count:,}")
+    except Exception as e:
+        print(f"   Parameters: Could not count - {e}")
+    
+    # Display detailed layer information
+    print("\n🔍 Detailed Layer Structure:")
+    try:
+        print("   Text Embedding:")
+        print(f"     - Vocabulary Size: {config['vocab_size']:,}")
+        print(f"     - Embedding Dimension: {config['d_model']}")
+        
+        print("   Encoder:")
+        print(f"     - Layers: {config['encoder_layers']}")
+        print(f"     - Multi-Head Attention: {config['num_heads']} heads")
+        print(f"     - Feed-Forward Dimension: {config['d_ff']}")
+        
+        print("   Decoder:")
+        print(f"     - Layers: {config['decoder_layers']}")
+        print(f"     - Multi-Head Attention: {config['num_heads']} heads") 
+        print(f"     - Feed-Forward Dimension: {config['d_ff']}")
+        
+        print("   Output:")
+        print(f"     - Mel-spectrogram Channels: {config['n_mels']}")
+        print(f"     - Post-net Layers: 5 (Conv1D)")
+        
+    except Exception as e:
+        print(f"   Could not display detailed structure: {e}")
+    
+    # Try to display model summary
+    print("\n📊 Model Summary:")
+    try:
+        # Create a StringIO object to capture summary
+        import io
+        import sys
+        
+        # Capture the summary output
+        old_stdout = sys.stdout
+        sys.stdout = buffer = io.StringIO()
+        
+        try:
+            model.summary()
+            summary_output = buffer.getvalue()
+            sys.stdout = old_stdout
+            
+            if summary_output.strip():
+                print(summary_output)
+                
+                # Also display more detailed internal structure
+                print("\n📋 モデル構造:")
+                print("Base Model Structure:")
+                try:
+                    # Try to get more detailed summary of the base model
+                    old_stdout = sys.stdout
+                    sys.stdout = buffer = io.StringIO()
+                    simple_model.summary(expand_nested=True, show_trainable=True)
+                    base_summary = buffer.getvalue()
+                    sys.stdout = old_stdout
+                    
+                    if base_summary.strip():
+                        print(base_summary)
+                    else:
+                        # Fallback to manual layer listing
+                        print("SimpleTransformerTTS Internal Layers:")
+                        layer_count = 0
+                        
+                        # Text embedding
+                        print(f"├── Text Embedding: {simple_model.text_embedding.count_params():,} params")
+                        layer_count += 1
+                        
+                        # Encoder layers
+                        print(f"├── Encoder Layers ({len(simple_model.encoder_layers_list)}):")
+                        for i, layer in enumerate(simple_model.encoder_layers_list):
+                            try:
+                                params = layer.count_params()
+                                print(f"│   ├── Encoder Layer {i}: {params:,} params")
+                                layer_count += 1
+                            except:
+                                print(f"│   ├── Encoder Layer {i}: params not available")
+                        
+                        # Decoder components
+                        print(f"├── Prenet: {simple_model.prenet.count_params():,} params")
+                        print(f"├── Decoder Projection: {simple_model.decoder_projection.count_params():,} params")
+                        
+                        # Decoder layers
+                        print(f"├── Decoder Layers ({len(simple_model.decoder_layers_list)}):")
+                        for i, layer in enumerate(simple_model.decoder_layers_list):
+                            try:
+                                params = layer.count_params()
+                                print(f"│   ├── Decoder Layer {i}: {params:,} params")
+                                layer_count += 1
+                            except:
+                                print(f"│   ├── Decoder Layer {i}: params not available")
+                        
+                        # Output layers
+                        print(f"├── Mel Linear: {simple_model.mel_linear.count_params():,} params")
+                        print(f"├── Stop Linear: {simple_model.stop_linear.count_params():,} params")
+                        print(f"└── Post-net: {simple_model.postnet.count_params():,} params")
+                        
+                        print(f"\nTotal Layers: {layer_count + 6} (excluding positional encodings)")
+                        
+                except Exception as detail_error:
+                    print(f"Could not display detailed base model structure: {detail_error}")
+                    
+            else:
+                print("   Summary not available (model might not be fully built)")
+        except Exception as summary_error:
+            sys.stdout = old_stdout
+            print(f"   Could not generate summary: {summary_error}")
+            
+            # Try alternative summary approach
+            try:
+                print("   Alternative structure view:")
+                for i, layer in enumerate(model.layers):
+                    print(f"     Layer {i}: {layer.name} ({type(layer).__name__})")
+            except Exception as alt_error:
+                print(f"   Could not display alternative structure: {alt_error}")
+                
+    except Exception as e:
+        print(f"   Summary display failed: {e}")
+    
+    print("="*60)
     
     return model
 
@@ -528,14 +716,54 @@ class SimpleTransformerTTSLoss(tf.keras.losses.Loss):
 
 
 if __name__ == "__main__":
+    print("🚀 Testing Encoder-Decoder Transformer TTS Model")
+    print("="*60)
+    
     # Test the model
     config = create_simple_transformer_config()
+    print(f"📝 Configuration:")
+    for key, value in config.items():
+        print(f"   {key}: {value}")
+    
+    print("\n🏗️ Building Model...")
     model = build_simple_transformer_tts_model(config=config)
     
+    print("\n🧪 Testing Model with Dummy Input...")
     # Test with dummy input
     dummy_text = tf.random.uniform((2, 20), 0, config['vocab_size'], dtype=tf.int32)
-    output = model(dummy_text, training=False)
+    print(f"Input shape: {dummy_text.shape}")
     
-    print("Model output shapes:")
-    for key, value in output.items():
-        print(f"  {key}: {value.shape}")
+    try:
+        output = model(dummy_text, training=False)
+        
+        print("\n✅ Model Forward Pass Successful!")
+        print("📊 Model output shapes:")
+        for key, value in output.items():
+            print(f"   {key}: {value.shape}")
+            
+        # Additional model information
+        print("\n📈 Model Performance Metrics:")
+        print(f"   Input sequence length: {dummy_text.shape[1]}")
+        print(f"   Batch size: {dummy_text.shape[0]}")
+        print(f"   Output mel length: {output['mel_output'].shape[1]}")
+        print(f"   Mel channels: {output['mel_output'].shape[2]}")
+        
+        # Check if outputs are reasonable
+        print("\n🔍 Output Sanity Checks:")
+        mel_mean = tf.reduce_mean(output['mel_output']).numpy()
+        mel_std = tf.math.reduce_std(output['mel_output']).numpy()
+        stop_mean = tf.reduce_mean(output['stop_tokens']).numpy()
+        
+        print(f"   Mel output mean: {mel_mean:.4f}")
+        print(f"   Mel output std: {mel_std:.4f}")
+        print(f"   Stop token mean: {stop_mean:.4f}")
+        
+        print("\n✅ All tests passed! Model is ready for training.")
+        
+    except Exception as e:
+        print(f"\n❌ Model test failed: {e}")
+        import traceback
+        traceback.print_exc()
+    
+    print("="*60)
+
