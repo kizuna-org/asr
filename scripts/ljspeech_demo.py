@@ -561,7 +561,14 @@ class TrainingPlotCallback(tf.keras.callbacks.Callback):
         
         # 損失とMAEを記録
         train_loss = logs.get('loss', 0)
-        train_mae = logs.get('mae', logs.get('mean_absolute_error', 0))
+        
+        # TRANSFORMER_TTSモデルではMAEメトリクスが利用できない場合があるため、安全に処理
+        if self.model_type == TTSModel.TRANSFORMER_TTS:
+            # TRANSFORMER_TTSでは損失のみを使用
+            train_mae = 0.0  # デフォルト値
+        else:
+            train_mae = logs.get('mae', logs.get('mean_absolute_error', 0))
+        
         val_loss = logs.get('val_loss', None)
         val_mae = logs.get('val_mae', logs.get('val_mean_absolute_error', None))
         
@@ -576,7 +583,11 @@ class TrainingPlotCallback(tf.keras.callbacks.Callback):
         # グラフを生成・保存
         self._create_training_plots(current_epoch)
         
-        print(f"📊 エポック {current_epoch}: Loss={train_loss:.4f}, MAE={train_mae:.4f}")
+        # TRANSFORMER_TTSでは損失のみを表示
+        if self.model_type == TTSModel.TRANSFORMER_TTS:
+            print(f"📊 エポック {current_epoch}: Loss={train_loss:.4f} (MAE: TRANSFORMER_TTSではスキップ)")
+        else:
+            print(f"📊 エポック {current_epoch}: Loss={train_loss:.4f}, MAE={train_mae:.4f}")
     
     def _create_training_plots(self, current_epoch):
         """学習曲線グラフを作成・保存"""
@@ -1249,15 +1260,16 @@ def main():
                     tf.TensorShape([None, 80]),  # Shape for mel_spec
                 ),
             )
+            # .repeat()をコメントアウトして有限データセットで学習
+            # limit_samplesが設定されている場合は、データセットの自然な終了を許可
             .prefetch(tf.data.AUTOTUNE)
         )
 
-        # Print dataset size after preparation
-        print("📊 前処理後のデータセットサイズを確認中...")
-        num_after = 0
-        for _ in train_dataset.unbatch():
-            num_after += 1
-        print(f"📈 前処理後のサンプル数: {num_after:,}")
+        # Skip dataset size calculation as it's now infinite due to .repeat()
+        print("📊 データセットは無限リピートモードに設定されました")
+        # 前処理後のサンプル数の計算をスキップ（.repeat()により無限ループになるため）
+        # num_after = limit_samples if limit_samples else 1000  # 推定値
+        # print(f"📈 推定サンプル数: {num_after:,}")
 
         print("\n=== モデルトレーニング開始 ===")
 
@@ -1322,18 +1334,43 @@ def main():
         print("💡 Ctrl+C で安全に中断できます")
         print("=" * 50)
         
-        # model.fitにcallbacks引数を追加
-        history = model.fit(
-            train_dataset,
-            epochs=args.epochs,
-            initial_epoch=start_epoch,
-            callbacks=[
+        # Calculate steps per epoch based on dataset size and batch size
+        if limit_samples:
+            # サンプル数制限がある場合の推定（有限データセット）
+            estimated_samples = limit_samples
+            steps_per_epoch = max(1, estimated_samples // 32)  # バッチサイズで割る
+            print(f"📊 有限データセット: {limit_samples}サンプル")
+            print(f"📊 1エポックあたりのステップ数: {steps_per_epoch}")
+            
+            # 有限データセットの場合は steps_per_epoch を指定しない（自然終了を許可）
+            use_steps_per_epoch = None
+        else:
+            # フルデータセットの場合はsteps_per_epochを指定
+            estimated_samples = 100 * 32
+            steps_per_epoch = max(1, estimated_samples // 32)
+            use_steps_per_epoch = steps_per_epoch
+            print(f"📊 無限データセット: steps_per_epoch={steps_per_epoch}")
+        
+        # model.fitを実行（有限データセットの場合はsteps_per_epochを指定しない）
+        fit_kwargs = {
+            'x': train_dataset,
+            'epochs': args.epochs,
+            'initial_epoch': start_epoch,
+            'callbacks': [
                 training_plot_callback,
                 synthesis_callback,
                 checkpoint_callback,
                 training_state_callback,
-            ],
-        )
+            ]
+        }
+        
+        # 有限データセット（limit_samples指定）の場合はsteps_per_epochを設定しない
+        if use_steps_per_epoch is not None:
+            fit_kwargs['steps_per_epoch'] = use_steps_per_epoch
+            
+        print(f"🏃‍♂️ 学習開始 - {'有限データセット' if use_steps_per_epoch is None else f'steps_per_epoch={use_steps_per_epoch}'}")
+        
+        history = model.fit(**fit_kwargs)
 
         # Check if training was interrupted
         global training_interrupted

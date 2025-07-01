@@ -487,10 +487,11 @@ def build_simple_transformer_tts_model(vocab_size: int = 10000,
         epsilon=1e-9
     )
     
-    # Compile the model
+    # Compile the model (without metrics to avoid build issues)
     model.compile(
         optimizer=optimizer,
-        metrics=['mae']
+        # メトリクスを削除してビルドエラーを回避
+        # TRANSFORMER_TTSでは複雑な出力形状のためメトリクス計算をスキップ
     )
     
     print(f"✅ Encoder-Decoder Transformer TTS model created successfully")
