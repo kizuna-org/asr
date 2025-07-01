@@ -562,12 +562,13 @@ class TrainingPlotCallback(tf.keras.callbacks.Callback):
         # 損失とMAEを記録
         train_loss = logs.get('loss', 0)
         
-        # TRANSFORMER_TTSモデルではMAEメトリクスが利用できない場合があるため、安全に処理
-        if self.model_type == TTSModel.TRANSFORMER_TTS:
-            # TRANSFORMER_TTSでは損失のみを使用
-            train_mae = 0.0  # デフォルト値
-        else:
-            train_mae = logs.get('mae', logs.get('mean_absolute_error', 0))
+        # すべてのモデルタイプでMAEを取得を試行
+        train_mae = logs.get('mae', logs.get('mean_absolute_error', 0.0))
+        
+        # TRANSFORMER_TTSでもMAEが利用可能かチェック
+        if self.model_type == TTSModel.TRANSFORMER_TTS and train_mae == 0.0:
+            # MAEが0の場合、より詳細に探す
+            train_mae = logs.get('simple_transformer_mae', 0.0)
         
         val_loss = logs.get('val_loss', None)
         val_mae = logs.get('val_mae', logs.get('val_mean_absolute_error', None))
@@ -583,11 +584,8 @@ class TrainingPlotCallback(tf.keras.callbacks.Callback):
         # グラフを生成・保存
         self._create_training_plots(current_epoch)
         
-        # TRANSFORMER_TTSでは損失のみを表示
-        if self.model_type == TTSModel.TRANSFORMER_TTS:
-            print(f"📊 エポック {current_epoch}: Loss={train_loss:.4f} (MAE: TRANSFORMER_TTSではスキップ)")
-        else:
-            print(f"📊 エポック {current_epoch}: Loss={train_loss:.4f}, MAE={train_mae:.4f}")
+        # すべてのモデルでLossとMAEを表示
+        print(f"📊 エポック {current_epoch}: Loss={train_loss:.4f}, MAE={train_mae:.4f}")
     
     def _create_training_plots(self, current_epoch):
         """学習曲線グラフを作成・保存"""
@@ -1260,13 +1258,12 @@ def main():
                     tf.TensorShape([None, 80]),  # Shape for mel_spec
                 ),
             )
-            # .repeat()をコメントアウトして有限データセットで学習
-            # limit_samplesが設定されている場合は、データセットの自然な終了を許可
+            # **絶対に**Repeatを追加しないこと
             .prefetch(tf.data.AUTOTUNE)
         )
 
         # Skip dataset size calculation as it's now infinite due to .repeat()
-        print("📊 データセットは無限リピートモードに設定されました")
+        # print("📊 データセットは無限リピートモードに設定されました")
         # 前処理後のサンプル数の計算をスキップ（.repeat()により無限ループになるため）
         # num_after = limit_samples if limit_samples else 1000  # 推定値
         # print(f"📈 推定サンプル数: {num_after:,}")

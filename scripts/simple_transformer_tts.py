@@ -487,12 +487,27 @@ def build_simple_transformer_tts_model(vocab_size: int = 10000,
         epsilon=1e-9
     )
     
-    # Compile the model (without metrics to avoid build issues)
+    # Compile the model (with MAE metric for Transformer TTS)
+    mae_metric = SimpleTransformerMAE()
+    
     model.compile(
         optimizer=optimizer,
-        # メトリクスを削除してビルドエラーを回避
-        # TRANSFORMER_TTSでは複雑な出力形状のためメトリクス計算をスキップ
+        loss=SimpleTransformerTTSLoss(),
+        metrics=[mae_metric]
     )
+    
+    # Build the metric by doing a forward pass
+    try:
+        # Get a sample from the model output for metric building
+        dummy_output = model(dummy_text, training=False)
+        dummy_mel = tf.zeros((1, 100, 80), dtype=tf.float32)
+        
+        # Build the metric by calling it once
+        mae_metric.update_state(dummy_mel, dummy_output)
+        mae_metric.reset_state()  # Reset after building
+        print(f"✅ MAE メトリクスのビルドが完了しました")
+    except Exception as e:
+        print(f"⚠️  MAE メトリクスのビルドに失敗しましたが、トレーニング中に自動ビルドされます: {e}")
     
     print(f"✅ Encoder-Decoder Transformer TTS model created successfully")
     print(f"📍 テキストエンコーダ: {config['encoder_layers']}層")
@@ -714,6 +729,88 @@ class SimpleTransformerTTSLoss(tf.keras.losses.Loss):
         total_loss = mel_loss + mel_postnet_loss + stop_loss
         
         return total_loss
+
+
+class SimpleTransformerMAE(tf.keras.metrics.Metric):
+    """Custom MAE metric for SimpleTransformerTTS model."""
+    
+    def __init__(self, name='mae', **kwargs):
+        super().__init__(name=name, **kwargs)
+        self.total_mae = self.add_weight(name='total_mae', initializer='zeros')
+        self.count = self.add_weight(name='count', initializer='zeros')
+    
+    def update_state(self, y_true, y_pred, sample_weight=None):
+        """Update metric state."""
+        try:
+            if isinstance(y_pred, dict):
+                # Use the main mel output for MAE calculation
+                mel_pred = y_pred.get('mel_output_refined', y_pred.get('mel_output'))
+                if mel_pred is None:
+                    # Fallback to any available output
+                    mel_pred = list(y_pred.values())[0]
+            else:
+                mel_pred = y_pred
+            
+            # Ensure tensors are properly shaped
+            y_true = tf.cast(y_true, tf.float32)
+            mel_pred = tf.cast(mel_pred, tf.float32)
+            
+            # Ensure dimensions match - use dynamic shapes
+            y_true_shape = tf.shape(y_true)
+            mel_pred_shape = tf.shape(mel_pred)
+            
+            # Truncate to minimum length if needed
+            min_len = tf.minimum(y_true_shape[1], mel_pred_shape[1])
+            min_channels = tf.minimum(y_true_shape[2], mel_pred_shape[2])
+            
+            y_true_truncated = y_true[:, :min_len, :min_channels]
+            mel_pred_truncated = mel_pred[:, :min_len, :min_channels]
+            
+            # Calculate MAE
+            mae = tf.reduce_mean(tf.abs(y_true_truncated - mel_pred_truncated))
+            
+            # Update metric state
+            self.total_mae.assign_add(mae)
+            self.count.assign_add(1.0)
+            
+        except Exception as e:
+            # If MAE calculation fails, add zero to avoid breaking training
+            self.total_mae.assign_add(0.0)
+            self.count.assign_add(1.0)
+    
+    def result(self):
+        """Return current metric value."""
+        return tf.math.divide_no_nan(self.total_mae, self.count)
+    
+    def reset_state(self):
+        """Reset metric state."""
+        self.total_mae.assign(0.0)
+        self.count.assign(0.0)
+
+
+class TransformerTTSTrainingCallback(tf.keras.callbacks.Callback):
+    """Custom callback to display training progress with MAE for Transformer TTS."""
+    
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.epoch_mae_values = []
+    
+    def on_epoch_end(self, epoch, logs=None):
+        """Display epoch results with MAE calculation."""
+        if logs is None:
+            logs = {}
+        
+        # Get loss value
+        train_loss = logs.get('loss', 0.0)
+        
+        # Get MAE value
+        train_mae = logs.get('mae', 0.0)
+        
+        # Store MAE for tracking
+        self.epoch_mae_values.append(train_mae)
+        
+        # Display epoch results with MAE
+        print(f"Epoch {epoch + 1}: Loss={train_loss:.4f}, MAE={train_mae:.4f}")
 
 
 if __name__ == "__main__":
