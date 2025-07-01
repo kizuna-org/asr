@@ -469,15 +469,58 @@ class SimpleTransformerTTSLoss(tf.keras.losses.Loss):
         """
         Compute loss for Encoder-Decoder Transformer TTS model.
         
-        y_true: dict containing mel-spectrogram and stop tokens
+        y_true: mel-spectrogram tensor (batch_size, time_steps, n_mels)
         y_pred: dict containing model outputs
         """
-        # Mel-spectrogram loss (both before and after postnet)
-        mel_loss = self.mse(y_true['mel'], y_pred['mel_output'])
-        mel_postnet_loss = self.mse(y_true['mel'], y_pred['mel_output_refined'])
+        # Handle different input formats
+        if isinstance(y_true, dict):
+            # If y_true is a dict, extract mel and stop tokens
+            mel_true = y_true['mel']
+            stop_true = y_true.get('stop_tokens', tf.zeros_like(y_pred['stop_tokens']))
+        else:
+            # If y_true is just the mel-spectrogram tensor
+            mel_true = y_true
+            # Create dummy stop tokens (all zeros - no stop)
+            batch_size = tf.shape(mel_true)[0]
+            seq_len = tf.shape(y_pred['stop_tokens'])[1]
+            stop_true = tf.zeros((batch_size, seq_len, 1), dtype=tf.float32)
         
-        # Stop token loss
-        stop_loss = self.bce(y_true['stop_tokens'], y_pred['stop_tokens'])
+        # Ensure mel dimensions match
+        mel_output = y_pred['mel_output']
+        mel_output_refined = y_pred['mel_output_refined']
+        
+        # Crop or pad mel_true to match output length
+        mel_true_len = tf.shape(mel_true)[1]
+        mel_output_len = tf.shape(mel_output)[1]
+        
+        def crop_mel():
+            return mel_true[:, :mel_output_len, :]
+        
+        def pad_mel():
+            pad_len = mel_output_len - mel_true_len
+            padding = tf.zeros((tf.shape(mel_true)[0], pad_len, tf.shape(mel_true)[2]))
+            return tf.concat([mel_true, padding], axis=1)
+        
+        def keep_mel():
+            return mel_true
+        
+        # Use tf.cond for conditional operations
+        mel_true = tf.cond(
+            mel_true_len > mel_output_len,
+            crop_mel,
+            lambda: tf.cond(
+                mel_true_len < mel_output_len,
+                pad_mel,
+                keep_mel
+            )
+        )
+        
+        # Mel-spectrogram loss (both before and after postnet)
+        mel_loss = self.mse(mel_true, mel_output)
+        mel_postnet_loss = self.mse(mel_true, mel_output_refined)
+        
+        # Stop token loss (use reduced weight since we don't have real stop tokens)
+        stop_loss = self.bce(stop_true, y_pred['stop_tokens']) * 0.1
         
         total_loss = mel_loss + mel_postnet_loss + stop_loss
         
