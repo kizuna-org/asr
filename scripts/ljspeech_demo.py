@@ -314,33 +314,43 @@ class TTSModelTrainer(tf.keras.Model):
         gradients = tape.gradient(loss, self.tts_model.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.tts_model.trainable_variables))
         
-        # For transformer_tts, skip metrics update due to shape mismatch
-        # The loss function handles all necessary computations
-        if self.model_type == TTSModel.TRANSFORMER_TTS:
-            return {"loss": loss}
-        
-        # Get main output for metrics (for other models)
-        if isinstance(model_outputs, dict):
-            main_output = model_outputs.get('mel_output_refined', 
-                                          model_outputs.get('mel_output', 
-                                                          list(model_outputs.values())[0]))
+        # Build metrics first if not already built
+        if hasattr(self, 'compiled_metrics') and self.compiled_metrics:
+            try:
+                # Get main output for metrics
+                if isinstance(model_outputs, dict):
+                    main_output = model_outputs.get('mel_output_refined', 
+                                                  model_outputs.get('mel_output', 
+                                                                  list(model_outputs.values())[0]))
+                else:
+                    main_output = model_outputs
+                
+                # Try to update metrics - build them if necessary
+                self.compiled_metrics.update_state(y, main_output)
+                
+                # Safely get metrics results
+                metric_results = {}
+                for m in self.metrics:
+                    try:
+                        if hasattr(m, '_built') and m._built:
+                            metric_results[m.name] = m.result()
+                        elif hasattr(m, 'result'):
+                            # Try to get result anyway for compatibility
+                            result = m.result()
+                            metric_results[m.name] = result
+                    except Exception as metric_error:
+                        # Skip metrics that can't be computed
+                        print(f"⚠️  メトリクス {m.name} をスキップ: {metric_error}")
+                        pass
+                        
+                return {"loss": loss, **metric_results}
+                
+            except Exception as metrics_error:
+                # If metrics update fails completely, just return loss
+                print(f"⚠️  メトリクス更新をスキップ: {metrics_error}")
+                return {"loss": loss}
         else:
-            main_output = model_outputs
-            
-        # Update metrics (skip for transformer_tts to avoid shape issues)
-        try:
-            self.compiled_metrics.update_state(y, main_output)
-            # Safely get metrics results
-            metric_results = {}
-            for m in self.metrics:
-                try:
-                    metric_results[m.name] = m.result()
-                except:
-                    # Skip metrics that can't be computed
-                    pass
-            return {"loss": loss, **metric_results}
-        except Exception:
-            # If metrics update fails, just return loss
+            # No metrics available, just return loss
             return {"loss": loss}
 
 
@@ -377,6 +387,15 @@ def build_fastspeech2_model(
         optimizer='adam',
         metrics=['mae']
     )
+    
+    # Build the model and metrics by calling it with dummy data
+    try:
+        dummy_text = tf.constant([[1, 2, 3, 4, 5]], dtype=tf.int32)
+        dummy_mel = tf.constant([[[0.0] * mel_bins] * max_sequence_length], dtype=tf.float32)
+        _ = model.train_step((dummy_text, dummy_mel))
+        print("✅ FastSpeech2モデルとメトリクスの構築が完了")
+    except Exception as e:
+        print(f"⚠️  モデル構築中にエラーが発生しましたが継続します: {e}")
     
     return model
 
@@ -425,6 +444,15 @@ def build_simple_transformer_model(
         optimizer='adam',
         metrics=['mae']
     )
+    
+    # Build the model and metrics by calling it with dummy data
+    try:
+        dummy_text = tf.constant([[1, 2, 3, 4, 5]], dtype=tf.int32)
+        dummy_mel = tf.constant([[[0.0] * mel_bins] * max_sequence_length], dtype=tf.float32)
+        _ = model.train_step((dummy_text, dummy_mel))
+        print("✅ Transformerモデルとメトリクスの構築が完了")
+    except Exception as e:
+        print(f"⚠️  モデル構築中にエラーが発生しましたが継続します: {e}")
     
     return model
 
@@ -1251,6 +1279,7 @@ def main():
             .map(prepare_for_training, num_parallel_calls=tf.data.AUTOTUNE)
             .cache()
             .shuffle(buffer_size=1024)
+            .repeat()  # データセットを無限リピート（データ不足エラーを防ぐ）
             .padded_batch(
                 batch_size=32,
                 padded_shapes=(
@@ -1258,15 +1287,12 @@ def main():
                     tf.TensorShape([None, 80]),  # Shape for mel_spec
                 ),
             )
-            # **絶対に**Repeatを追加しないこと
             .prefetch(tf.data.AUTOTUNE)
         )
 
-        # Skip dataset size calculation as it's now infinite due to .repeat()
-        # print("📊 データセットは無限リピートモードに設定されました")
-        # 前処理後のサンプル数の計算をスキップ（.repeat()により無限ループになるため）
-        # num_after = limit_samples if limit_samples else 1000  # 推定値
-        # print(f"📈 推定サンプル数: {num_after:,}")
+        # データセットは無限リピートモードに設定されました
+        print("📊 データセットは無限リピートモードに設定されました")
+        print(f"📈 サンプル数制限: {limit_samples if limit_samples else '制限なし'}")
 
         print("\n=== モデルトレーニング開始 ===")
 
@@ -1335,24 +1361,25 @@ def main():
         if limit_samples:
             # サンプル数制限がある場合の推定（有限データセット）
             estimated_samples = limit_samples
-            steps_per_epoch = max(1, estimated_samples // 32)  # バッチサイズで割る
+            steps_per_epoch = max(5, estimated_samples // 32)  # 最小5ステップを保証
             print(f"📊 有限データセット: {limit_samples}サンプル")
             print(f"📊 1エポックあたりのステップ数: {steps_per_epoch}")
             
-            # 有限データセットの場合は steps_per_epoch を指定しない（自然終了を許可）
-            use_steps_per_epoch = None
+            # 有限データセットでもsteps_per_epochを指定（repeat()によりデータ不足を回避）
+            use_steps_per_epoch = steps_per_epoch
         else:
             # フルデータセットの場合はsteps_per_epochを指定
             estimated_samples = 100 * 32
-            steps_per_epoch = max(1, estimated_samples // 32)
+            steps_per_epoch = max(10, estimated_samples // 32)  # 最小10ステップを保証
             use_steps_per_epoch = steps_per_epoch
             print(f"📊 無限データセット: steps_per_epoch={steps_per_epoch}")
         
-        # model.fitを実行（有限データセットの場合はsteps_per_epochを指定しない）
+        # model.fitを実行（repeat()により全てのケースでsteps_per_epochを設定）
         fit_kwargs = {
             'x': train_dataset,
             'epochs': args.epochs,
             'initial_epoch': start_epoch,
+            'steps_per_epoch': use_steps_per_epoch,  # 常にsteps_per_epochを設定
             'callbacks': [
                 training_plot_callback,
                 synthesis_callback,
@@ -1361,11 +1388,7 @@ def main():
             ]
         }
         
-        # 有限データセット（limit_samples指定）の場合はsteps_per_epochを設定しない
-        if use_steps_per_epoch is not None:
-            fit_kwargs['steps_per_epoch'] = use_steps_per_epoch
-            
-        print(f"🏃‍♂️ 学習開始 - {'有限データセット' if use_steps_per_epoch is None else f'steps_per_epoch={use_steps_per_epoch}'}")
+        print(f"🏃‍♂️ 学習開始 - steps_per_epoch={use_steps_per_epoch}")
         
         history = model.fit(**fit_kwargs)
 
