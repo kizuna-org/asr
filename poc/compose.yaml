@@ -53,16 +53,7 @@ services:
     depends_on:
       - jenkins
       - gitea
-      - cloudflared
     restart: unless-stopped
-
-  cloudflared:
-    image: cloudflare/cloudflared:latest
-    container_name: frpc-cloudflared
-    command: access tcp --hostname frps-connect.shiron.dev --url http://cloudflared:7000
-    restart: unless-stopped
-    networks:
-      - ci-network
 
 networks:
   ci-network:

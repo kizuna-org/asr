@@ -1,7 +1,7 @@
 # frpc.toml - frp client configuration (HTTPS経由接続)
 
 # サーバー設定（HTTPS経由）
-serverAddr = "cloudflared"
+serverAddr = "frps-connect.shiron.dev"
 serverPort = 7000
 # 認証設定
 auth.method = "token"
