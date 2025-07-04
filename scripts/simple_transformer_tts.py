@@ -672,6 +672,11 @@ class SimpleTransformerTTSLoss(tf.keras.losses.Loss):
         super().__init__(**kwargs)
         self.mse = tf.keras.losses.MeanSquaredError()
         self.bce = tf.keras.losses.BinaryCrossentropy()
+        
+        # Metrics to track individual loss components
+        self.mel_loss_metric = tf.keras.metrics.Mean(name='mel_loss')
+        self.mel_postnet_loss_metric = tf.keras.metrics.Mean(name='mel_postnet_loss')
+        self.stop_loss_metric = tf.keras.metrics.Mean(name='stop_loss')
     
     def call(self, y_true, y_pred):
         """
@@ -735,9 +740,28 @@ class SimpleTransformerTTSLoss(tf.keras.losses.Loss):
         # Stop token loss (use reduced weight since we don't have real stop tokens)
         stop_loss = self.bce(stop_true, y_pred['stop_tokens']) * 0.1
         
+        # Update individual loss metrics
+        self.mel_loss_metric.update_state(mel_loss)
+        self.mel_postnet_loss_metric.update_state(mel_postnet_loss)
+        self.stop_loss_metric.update_state(stop_loss)
+        
         total_loss = mel_loss + mel_postnet_loss + stop_loss
         
         return total_loss
+    
+    def reset_metrics(self):
+        """Reset all loss component metrics."""
+        self.mel_loss_metric.reset_state()
+        self.mel_postnet_loss_metric.reset_state()
+        self.stop_loss_metric.reset_state()
+    
+    def get_metrics(self):
+        """Get current metric values as a dictionary."""
+        return {
+            'mel_loss': self.mel_loss_metric.result(),
+            'mel_postnet_loss': self.mel_postnet_loss_metric.result(),
+            'stop_loss': self.stop_loss_metric.result()
+        }
 
 
 class SimpleTransformerMAE(tf.keras.metrics.Metric):

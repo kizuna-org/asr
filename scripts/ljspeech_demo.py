@@ -314,6 +314,14 @@ class TTSModelTrainer(tf.keras.Model):
         gradients = tape.gradient(loss, self.tts_model.trainable_variables)
         self.optimizer.apply_gradients(zip(gradients, self.tts_model.trainable_variables))
         
+        # Get individual loss components if available (for SimpleTransformerTTSLoss)
+        loss_components = {}
+        if hasattr(self.loss_fn, 'get_metrics'):
+            try:
+                loss_components = self.loss_fn.get_metrics()
+            except Exception as e:
+                pass  # If getting loss components fails, continue without them
+        
         # Build metrics first if not already built
         if hasattr(self, 'compiled_metrics') and self.compiled_metrics:
             try:
@@ -343,15 +351,16 @@ class TTSModelTrainer(tf.keras.Model):
                         print(f"⚠️  メトリクス {m.name} をスキップ: {metric_error}")
                         pass
                         
-                return {"loss": loss, **metric_results}
+                # Combine all results: loss, individual loss components, and metrics
+                return {"loss": loss, **loss_components, **metric_results}
                 
             except Exception as metrics_error:
-                # If metrics update fails completely, just return loss
+                # If metrics update fails completely, just return loss and loss components
                 print(f"⚠️  メトリクス更新をスキップ: {metrics_error}")
-                return {"loss": loss}
+                return {"loss": loss, **loss_components}
         else:
-            # No metrics available, just return loss
-            return {"loss": loss}
+            # No metrics available, just return loss and loss components
+            return {"loss": loss, **loss_components}
 
 
 # Legacy alias for backward compatibility
@@ -572,6 +581,11 @@ class TrainingPlotCallback(tf.keras.callbacks.Callback):
         self.val_losses = []
         self.val_maes = []
         
+        # Individual loss components for Transformer TTS
+        self.mel_losses = []
+        self.mel_postnet_losses = []
+        self.stop_losses = []
+        
         # グラフのスタイル設定
         plt.style.use('default')
         
@@ -601,6 +615,11 @@ class TrainingPlotCallback(tf.keras.callbacks.Callback):
         val_loss = logs.get('val_loss', None)
         val_mae = logs.get('val_mae', logs.get('val_mean_absolute_error', None))
         
+        # Record individual loss components for Transformer TTS
+        mel_loss = logs.get('mel_loss', None)
+        mel_postnet_loss = logs.get('mel_postnet_loss', None)
+        stop_loss = logs.get('stop_loss', None)
+        
         self.train_losses.append(train_loss)
         self.train_maes.append(train_mae)
         
@@ -608,18 +627,42 @@ class TrainingPlotCallback(tf.keras.callbacks.Callback):
             self.val_losses.append(val_loss)
         if val_mae is not None:
             self.val_maes.append(val_mae)
+            
+        # Store individual loss components
+        if mel_loss is not None:
+            self.mel_losses.append(float(mel_loss))
+        if mel_postnet_loss is not None:
+            self.mel_postnet_losses.append(float(mel_postnet_loss))
+        if stop_loss is not None:
+            self.stop_losses.append(float(stop_loss))
         
         # グラフを生成・保存
         self._create_training_plots(current_epoch)
         
         # すべてのモデルでLossとMAEを表示
-        print(f"📊 エポック {current_epoch}: Loss={train_loss:.4f}, MAE={train_mae:.4f}")
+        loss_info = f"📊 エポック {current_epoch}: Loss={train_loss:.4f}, MAE={train_mae:.4f}"
+        
+        # Add individual loss components if available (for Transformer TTS)
+        if mel_loss is not None:
+            loss_info += f", Mel={mel_loss:.4f}"
+        if mel_postnet_loss is not None:
+            loss_info += f", PostNet={mel_postnet_loss:.4f}"
+        if stop_loss is not None:
+            loss_info += f", Stop={stop_loss:.4f}"
+            
+        print(loss_info)
     
     def _create_training_plots(self, current_epoch):
         """学習曲線グラフを作成・保存"""
         try:
-            # フィギュアサイズを設定
-            fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 10))
+            # フィギュアサイズを設定 - 個別損失成分がある場合は3x2のレイアウト
+            has_loss_components = len(self.mel_losses) > 0 or len(self.mel_postnet_losses) > 0 or len(self.stop_losses) > 0
+            
+            if has_loss_components:
+                fig, ((ax1, ax2), (ax3, ax4), (ax5, ax6)) = plt.subplots(3, 2, figsize=(15, 15))
+            else:
+                fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 10))
+                
             fig.suptitle(f'{self.model_type.value.upper()} Training Progress - Epoch {current_epoch}', 
                         fontsize=16, fontweight='bold')
             
@@ -673,6 +716,14 @@ Current Metrics:
                 stats_text += f"\n• Validation Loss: {self.val_losses[-1]:.6f}"
             if self.val_maes:
                 stats_text += f"\n• Validation MAE: {self.val_maes[-1]:.6f}"
+                
+            # Add individual loss components to stats
+            if self.mel_losses:
+                stats_text += f"\n• Mel Loss: {self.mel_losses[-1]:.6f}"
+            if self.mel_postnet_losses:
+                stats_text += f"\n• Mel PostNet Loss: {self.mel_postnet_losses[-1]:.6f}"
+            if self.stop_losses:
+                stats_text += f"\n• Stop Loss: {self.stop_losses[-1]:.6f}"
             
             if len(self.train_losses) > 1:
                 best_train_loss = min(self.train_losses)
@@ -691,6 +742,56 @@ Best Performance:
                     verticalalignment='top', fontfamily='monospace',
                     bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
             
+            # 5 & 6. Individual Loss Components (only if data is available)
+            if has_loss_components:
+                # 5. Individual Loss Components Over Time
+                ax5.set_title('Individual Loss Components')
+                ax5.set_xlabel('Epoch')
+                ax5.set_ylabel('Loss Value')
+                
+                if self.mel_losses:
+                    ax5.plot(self.epochs[:len(self.mel_losses)], self.mel_losses, 
+                            'red', label='Mel Loss', linewidth=2, marker='o', markersize=3)
+                if self.mel_postnet_losses:
+                    ax5.plot(self.epochs[:len(self.mel_postnet_losses)], self.mel_postnet_losses, 
+                            'blue', label='Mel PostNet Loss', linewidth=2, marker='s', markersize=3)
+                if self.stop_losses:
+                    ax5.plot(self.epochs[:len(self.stop_losses)], self.stop_losses, 
+                            'green', label='Stop Loss', linewidth=2, marker='^', markersize=3)
+                
+                ax5.legend()
+                ax5.grid(True, alpha=0.3)
+                if len(self.epochs) > 1:
+                    ax5.set_xlim(1, max(self.epochs))
+                
+                # 6. Recent Individual Loss Components (Last 20 Epochs)
+                ax6.set_title('Recent Individual Loss Components (Last 20 Epochs)')
+                ax6.set_xlabel('Epoch')
+                ax6.set_ylabel('Loss Value')
+                
+                recent_epochs_for_components = self.epochs[-20:] if len(self.epochs) > 20 else self.epochs
+                
+                if self.mel_losses:
+                    recent_mel_losses = self.mel_losses[-20:] if len(self.mel_losses) > 20 else self.mel_losses
+                    recent_epochs_mel = self.epochs[:len(recent_mel_losses)][-20:]
+                    ax6.plot(recent_epochs_mel, recent_mel_losses, 
+                            'red', label='Mel Loss', linewidth=2, marker='o', markersize=4)
+                
+                if self.mel_postnet_losses:
+                    recent_mel_postnet_losses = self.mel_postnet_losses[-20:] if len(self.mel_postnet_losses) > 20 else self.mel_postnet_losses
+                    recent_epochs_postnet = self.epochs[:len(recent_mel_postnet_losses)][-20:]
+                    ax6.plot(recent_epochs_postnet, recent_mel_postnet_losses, 
+                            'blue', label='Mel PostNet Loss', linewidth=2, marker='s', markersize=4)
+                
+                if self.stop_losses:
+                    recent_stop_losses = self.stop_losses[-20:] if len(self.stop_losses) > 20 else self.stop_losses
+                    recent_epochs_stop = self.epochs[:len(recent_stop_losses)][-20:]
+                    ax6.plot(recent_epochs_stop, recent_stop_losses, 
+                            'green', label='Stop Loss', linewidth=2, marker='^', markersize=4)
+                
+                ax6.legend()
+                ax6.grid(True, alpha=0.3)
+            
             # レイアウト調整
             plt.tight_layout()
             
@@ -704,8 +805,14 @@ Best Performance:
             
             # 最新のグラフを固定名でも保存（常に最新状態を確認できるように）
             latest_plot_path = os.path.join(self.plot_dir, "latest_training_progress.png")
-            fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 10))
-            fig.suptitle(f'{self.model_type.value.upper()} Training Progress - Epoch {current_epoch}', 
+            
+            # Use the same layout as the main plot
+            if has_loss_components:
+                fig_latest, ((ax1, ax2), (ax3, ax4), (ax5, ax6)) = plt.subplots(3, 2, figsize=(15, 15))
+            else:
+                fig_latest, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(15, 10))
+                
+            fig_latest.suptitle(f'{self.model_type.value.upper()} Training Progress - Epoch {current_epoch}', 
                         fontsize=16, fontweight='bold')
             
             # 同じグラフを再作成
@@ -745,6 +852,54 @@ Best Performance:
                     verticalalignment='top', fontfamily='monospace',
                     bbox=dict(boxstyle='round', facecolor='lightgray', alpha=0.8))
             
+            # Add the same individual loss component plots for latest graph
+            if has_loss_components:
+                # Individual Loss Components Over Time
+                ax5.set_title('Individual Loss Components')
+                ax5.set_xlabel('Epoch')
+                ax5.set_ylabel('Loss Value')
+                
+                if self.mel_losses:
+                    ax5.plot(self.epochs[:len(self.mel_losses)], self.mel_losses, 
+                            'red', label='Mel Loss', linewidth=2, marker='o', markersize=3)
+                if self.mel_postnet_losses:
+                    ax5.plot(self.epochs[:len(self.mel_postnet_losses)], self.mel_postnet_losses, 
+                            'blue', label='Mel PostNet Loss', linewidth=2, marker='s', markersize=3)
+                if self.stop_losses:
+                    ax5.plot(self.epochs[:len(self.stop_losses)], self.stop_losses, 
+                            'green', label='Stop Loss', linewidth=2, marker='^', markersize=3)
+                
+                ax5.legend()
+                ax5.grid(True, alpha=0.3)
+                if len(self.epochs) > 1:
+                    ax5.set_xlim(1, max(self.epochs))
+                
+                # Recent Individual Loss Components
+                ax6.set_title('Recent Individual Loss Components (Last 20 Epochs)')
+                ax6.set_xlabel('Epoch')
+                ax6.set_ylabel('Loss Value')
+                
+                if self.mel_losses:
+                    recent_mel_losses = self.mel_losses[-20:] if len(self.mel_losses) > 20 else self.mel_losses
+                    recent_epochs_mel = self.epochs[:len(recent_mel_losses)][-20:]
+                    ax6.plot(recent_epochs_mel, recent_mel_losses, 
+                            'red', label='Mel Loss', linewidth=2, marker='o', markersize=4)
+                
+                if self.mel_postnet_losses:
+                    recent_mel_postnet_losses = self.mel_postnet_losses[-20:] if len(self.mel_postnet_losses) > 20 else self.mel_postnet_losses
+                    recent_epochs_postnet = self.epochs[:len(recent_mel_postnet_losses)][-20:]
+                    ax6.plot(recent_epochs_postnet, recent_mel_postnet_losses, 
+                            'blue', label='Mel PostNet Loss', linewidth=2, marker='s', markersize=4)
+                
+                if self.stop_losses:
+                    recent_stop_losses = self.stop_losses[-20:] if len(self.stop_losses) > 20 else self.stop_losses
+                    recent_epochs_stop = self.epochs[:len(recent_stop_losses)][-20:]
+                    ax6.plot(recent_epochs_stop, recent_stop_losses, 
+                            'green', label='Stop Loss', linewidth=2, marker='^', markersize=4)
+                
+                ax6.legend()
+                ax6.grid(True, alpha=0.3)
+            
             plt.tight_layout()
             plt.savefig(latest_plot_path, dpi=300, bbox_inches='tight')
             plt.close()
@@ -765,6 +920,9 @@ Best Performance:
                 'train_maes': self.train_maes,
                 'val_losses': self.val_losses,
                 'val_maes': self.val_maes,
+                'mel_losses': self.mel_losses,
+                'mel_postnet_losses': self.mel_postnet_losses,
+                'stop_losses': self.stop_losses,
                 'model_type': self.model_type.value,
                 'saved_at': datetime.now().isoformat()
             }
@@ -1359,6 +1517,13 @@ def main():
                     save_training_state(epoch + 1, self.text_encoder, self.model, self.model_type, self.limit_samples, self.mode)  # Save next epoch number
                 except Exception as e:
                     print(f"❌ 状態保存中にエラーが発生しましたが、トレーニングを継続します: {e}")
+                
+                # Reset loss function metrics if available (for accurate per-epoch tracking)
+                if hasattr(self.model.loss_fn, 'reset_metrics'):
+                    try:
+                        self.model.loss_fn.reset_metrics()
+                    except Exception as e:
+                        pass  # Continue without metric reset if it fails
 
             def on_batch_end(self, batch, logs=None):
                 """Check for interruption during training."""
