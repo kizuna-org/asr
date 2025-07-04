@@ -1264,12 +1264,38 @@ def main():
             )
             mel_spec.set_shape((None, 80))  # Set shape for Keras
             text_vec = text_encoder(text)
-            # メルスペクトログラムをMAX_FRAMESフレームにパディング/切り詰め
-            mel_spec = mel_spec[:MAX_FRAMES]  # 切り詰め
-            mel_spec = tf.pad(
-                mel_spec, [[0, MAX_FRAMES - tf.shape(mel_spec)[0]], [0, 0]]
-            )  # パディング
-            mel_spec.set_shape((MAX_FRAMES, 80))
+            # メルスペクトログラムの長さを適切に処理（動的な長さを維持）
+            # 最小長さと最大長さを設定
+            min_frames = 50
+            max_frames = MAX_FRAMES
+            
+            # 短すぎるスペクトログラムをフィルタ
+            current_frames = tf.shape(mel_spec)[0]
+            
+            # TensorFlowでの条件分岐処理
+            def pad_short():
+                pad_len = tf.maximum(0, min_frames - current_frames)
+                return tf.pad(mel_spec, [[0, pad_len], [0, 0]])
+            
+            def crop_long():
+                return mel_spec[:max_frames]
+            
+            def keep_as_is():
+                return mel_spec
+            
+            # 長さに応じて処理を分岐
+            mel_spec = tf.cond(
+                current_frames < min_frames,
+                pad_short,
+                lambda: tf.cond(
+                    current_frames > max_frames,
+                    crop_long,
+                    keep_as_is
+                )
+            )
+            
+            # 動的な形状を設定（固定長は指定しない）
+            mel_spec.set_shape((None, 80))
             return text_vec, mel_spec
 
         print("⚙️  データセットパイプラインを構築中...")

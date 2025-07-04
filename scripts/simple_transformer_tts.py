@@ -400,13 +400,17 @@ class SimpleTransformerTTS(tf.keras.Model):
         # テキストエンコーダ
         encoder_output = self.encode(inputs, training=training)
         
-        # 簡略化のため、固定長のメル出力を生成
-        # 実際の実装では、自己回帰的に生成するか、teacher forcingを使用
+        # 動的にメル長さを決定（入力テキスト長さに基づく）
         batch_size = tf.shape(inputs)[0]
-        max_mel_length = 100  # 適切な長さに調整
+        text_length = tf.shape(inputs)[1]
+        
+        # テキスト長さに基づいてメル長さを推定（適応的な長さ）
+        # 一般的にメルスペクトログラムはテキストより長い
+        estimated_mel_length = tf.minimum(text_length * 4, 400)  # 4倍を基準とし、最大400フレーム
+        estimated_mel_length = tf.maximum(estimated_mel_length, 50)  # 最小50フレーム
         
         # ダミーのメル入力（実際はGTメルスペクトログラムまたは前のステップの出力）
-        dummy_mel = tf.zeros((batch_size, max_mel_length, self.n_mels))
+        dummy_mel = tf.zeros((batch_size, estimated_mel_length, self.n_mels))
         
         # デコーダ
         decoder_output = self.decode_step(dummy_mel, encoder_output, training=training)
@@ -693,30 +697,35 @@ class SimpleTransformerTTSLoss(tf.keras.losses.Loss):
         mel_output = y_pred['mel_output']
         mel_output_refined = y_pred['mel_output_refined']
         
-        # Crop or pad mel_true to match output length
+        # Crop or pad mel_true to match output length - simplified approach
         mel_true_len = tf.shape(mel_true)[1]
         mel_output_len = tf.shape(mel_output)[1]
         
-        def crop_mel():
-            return mel_true[:, :mel_output_len, :]
+        # Use simpler tensor operations instead of nested tf.cond
+        min_len = tf.minimum(mel_true_len, mel_output_len)
         
-        def pad_mel():
-            pad_len = mel_output_len - mel_true_len
-            padding = tf.zeros((tf.shape(mel_true)[0], pad_len, tf.shape(mel_true)[2]))
-            return tf.concat([mel_true, padding], axis=1)
+        # First, crop both to minimum length
+        mel_true_cropped = mel_true[:, :min_len, :]
         
-        def keep_mel():
-            return mel_true
+        # Then pad to match output length if needed
+        pad_len = tf.maximum(0, mel_output_len - min_len)
         
-        # Use tf.cond for conditional operations
+        def pad_if_needed():
+            if pad_len > 0:
+                batch_size = tf.shape(mel_true_cropped)[0]
+                n_mels = tf.shape(mel_true_cropped)[2]
+                padding = tf.zeros((batch_size, pad_len, n_mels), dtype=mel_true.dtype)
+                return tf.concat([mel_true_cropped, padding], axis=1)
+            else:
+                return mel_true_cropped
+        
         mel_true = tf.cond(
-            mel_true_len > mel_output_len,
-            crop_mel,
-            lambda: tf.cond(
-                mel_true_len < mel_output_len,
-                pad_mel,
-                keep_mel
-            )
+            pad_len > 0,
+            lambda: tf.concat([
+                mel_true_cropped, 
+                tf.zeros((tf.shape(mel_true_cropped)[0], pad_len, tf.shape(mel_true_cropped)[2]), dtype=mel_true.dtype)
+            ], axis=1),
+            lambda: mel_true_cropped
         )
         
         # Mel-spectrogram loss (both before and after postnet)

@@ -127,4 +127,4 @@ RUN echo '#!/bin/bash' > /opt/run_with_gpu_check.sh && \
 WORKDIR /opt
 
 # Default command to run with GPU check first
-CMD ["./run_with_gpu_check.sh", "--mode", "full", "--model", "transformer_tts"]
+CMD ["./run_with_gpu_check.sh", "--limit-samples", "10", "--epochs", "2000", "--model", "transformer_tts"]
