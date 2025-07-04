@@ -62,30 +62,14 @@ ENV PATH="/opt/venv/bin:$PATH"
 RUN pip install --no-cache-dir --upgrade pip
 
 # Install TensorFlow first with a compatible version
-ARG TENSORFLOW='2.16.1'
-RUN pip install --no-cache-dir "tensorflow==$TENSORFLOW"
-
-# Install tensorflow-datasets for LJSpeech dataset
-RUN pip install --no-cache-dir "tensorflow-datasets>=4.9.0"
-
-# Install tensorflow-probability with compatible version
-RUN pip install --no-cache-dir "tensorflow-probability<0.25"
-
-# Install additional dependencies for LJSpeech script
-RUN pip install --no-cache-dir "librosa>=0.10.0"
-RUN pip install --no-cache-dir "matplotlib>=3.5.0"
-RUN pip install --no-cache-dir "numpy>=1.21.0"
-
-# Install pydub
-RUN pip install --no-cache-dir "pydub>=0.25.1"
 
 ARG REF=main
 RUN git clone https://github.com/huggingface/transformers --depth=1 -b $REF
 # Install transformers without dev-tensorflow to avoid version conflicts
 RUN pip install --no-cache-dir -e ./transformers[testing]
 
-RUN pip uninstall -y torch flax
-RUN pip install -U "itsdangerous<2.1.0"
+COPY ./scripts/requirements.txt /opt/requirements.txt
+RUN pip install -r /opt/requirements.txt
 
 # When installing in editable mode, `transformers` is not recognized as a package.
 # this line must be added in order for python to be aware of transformers.
@@ -126,6 +110,10 @@ RUN mkdir -p /opt/outputs
 
 # Copy LJSpeech learning script
 COPY ./scripts/ljspeech_demo.py /opt/ljspeech_demo.py
+COPY ./scripts/fastspeech2_model.py /opt/fastspeech2_model.py
+COPY ./scripts/simple_transformer_tts.py /opt/simple_transformer_tts.py
+COPY ./scripts/transformer_tts_model.py /opt/transformer_tts_model.py
+COPY ./scripts/fastspeech2_model.py /opt/fastspeech2_model.py
 
 # Create a script to run GPU check and then the main application
 RUN echo '#!/bin/bash' > /opt/run_with_gpu_check.sh && \
@@ -139,4 +127,4 @@ RUN echo '#!/bin/bash' > /opt/run_with_gpu_check.sh && \
 WORKDIR /opt
 
 # Default command to run with GPU check first
-CMD ["./run_with_gpu_check.sh", "--mode", "train"]
+CMD ["./run_with_gpu_check.sh", "--mode", "full", "--model", "transformer_tts"]
