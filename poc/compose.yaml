@@ -53,7 +53,22 @@ services:
     depends_on:
       - jenkins
       - gitea
+      - squid
     restart: unless-stopped
+
+  squid:
+    image: ubuntu/squid:latest
+    container_name: squid
+    volumes:
+      - ./squid/squid.conf:/etc/squid/squid.conf:ro
+      - ./squid/cache:/var/spool/squid
+      - ./squid/log:/var/log/squid
+    networks:
+      - ci-network
 
 networks:
   ci-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24

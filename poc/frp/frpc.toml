@@ -2,7 +2,7 @@
 
 # サーバー設定（HTTPS経由）
 serverAddr = "frps-connect.shiron.dev"
-serverPort = 7000
+serverPort = 80
 # 認証設定
 auth.method = "token"
 auth.token = "jenkins_frp_secret_token"
@@ -14,7 +14,8 @@ log.level = "debug"
 log.maxDays = 7
 
 [transport]
-tls.enable = true
+tls.enable = false
+proxyURL = "http://squid:3128"
 
 # Jenkins HTTP プロキシ設定
 [[proxies]]
