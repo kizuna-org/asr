@@ -52,15 +52,8 @@ services:
   squid:
     image: squid
     container_name: squid
-    volumes:
-      - ./squid/cache:/var/spool/squid
-      - ./squid/log:/var/log/squid
     networks:
       - ci-network
 
 networks:
   ci-network:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 172.24.0.0/24
