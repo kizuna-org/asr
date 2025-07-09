@@ -6,7 +6,7 @@ services:
     container_name: frps
     volumes:
       - ./frps.toml:/etc/frp/frps.toml
-      - ./logs:/var/log/frp
+      - /etc/letsencrypt:/etc/letsencrypt:ro
     ports:
       - 80:7000
     restart: unless-stopped

@@ -52,6 +52,8 @@ services:
   squid:
     image: squid
     container_name: squid
+    volumes:
+      - ./squid/squid.conf:/etc/squid/squid.conf
     networks:
       - ci-network
 

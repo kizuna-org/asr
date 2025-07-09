@@ -21,3 +21,12 @@ log.maxDays = 7
 
 # サブドメイン設定
 # subDomainHost = "shiron.dev"
+
+[transport]
+tls.certFile = "/etc/letsencrypt/live/frps-connect.shiron.dev/fullchain.pem"
+tls.keyFile = "/etc/letsencrypt/live/frps-connect.shiron.dev/privkey.pem"
+
+
+# [webServer.tls]
+# certFile = "/etc/letsencrypt/live/frps-connect.shiron.dev/fullchain.pem"
+# keyFile = "/etc/letsencrypt/live/frps-connect.shiron.dev/privkey.pem"
