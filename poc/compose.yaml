@@ -4,9 +4,6 @@ services:
   jenkins:
     build:
       context: ./jenkins
-    ports:
-      - "8080:8080"
-      - "50000:50000"
     volumes:
       # --- ここからが変更点 ---
       # 名前付きボリュームからホストのディレクトリへのマウントに変更
@@ -36,9 +33,6 @@ services:
     volumes:
       - ./gitea-data:/data
       - ./gitea/app.ini:/data/gitea/conf/app.ini
-    ports:
-      - "3000:3000"
-      - "222:22"
     networks:
       - ci-network
 
