@@ -57,10 +57,9 @@ services:
     restart: unless-stopped
 
   squid:
-    image: ubuntu/squid:latest
+    image: squid
     container_name: squid
     volumes:
-      - ./squid/squid.conf:/etc/squid/squid.conf:ro
       - ./squid/cache:/var/spool/squid
       - ./squid/log:/var/log/squid
     networks:
@@ -71,4 +70,4 @@ networks:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.20.0.0/24
+        - subnet: 172.24.0.0/24
