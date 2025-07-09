@@ -6,9 +6,10 @@ services:
     volumes:
       # --- ここからが変更点 ---
       # 名前付きボリュームからホストのディレクトリへのマウントに変更
-      - ./jenkins_home:/var/jenkins_home
+      # - ./jenkins_home:/var/jenkins_home
       - ./jenkins/casc.yaml:/usr/share/jenkins/ref/casc.yaml
       # --- ここまでが変更点 ---
+      - jenkins_home:/var/jenkins_home
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - ci-network
@@ -30,7 +31,8 @@ services:
       - USER_UID=1000
       - USER_GID=1000
     volumes:
-      - ./gitea-data:/data
+      # - ./gitea-data:/data
+      - gitea-data:/data
       - ./gitea/app.ini:/data/gitea/conf/app.ini
     networks:
       - ci-network
@@ -46,16 +48,20 @@ services:
     depends_on:
       - jenkins
       - gitea
-      - squid
+      # - squid
     restart: unless-stopped
 
-  squid:
-    image: squid
-    container_name: squid
-    volumes:
-      - ./squid/squid.conf:/etc/squid/squid.conf
-    networks:
-      - ci-network
+  # squid:
+  #   image: squid
+  #   container_name: squid
+  #   volumes:
+  #     - ./squid/squid.conf:/etc/squid/squid.conf
+  #   networks:
+  #     - ci-network
 
 networks:
   ci-network:
+
+volumes:
+  jenkins_home:
+  gitea-data:
