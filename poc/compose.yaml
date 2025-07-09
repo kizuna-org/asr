@@ -6,16 +6,16 @@ services:
     volumes:
       # --- ここからが変更点 ---
       # 名前付きボリュームからホストのディレクトリへのマウントに変更
-      # - ./jenkins_home:/var/jenkins_home
+      - ./jenkins_home:/var/jenkins_home
       - ./jenkins/casc.yaml:/usr/share/jenkins/ref/casc.yaml
       # --- ここまでが変更点 ---
-      - jenkins_home:/var/jenkins_home
+      # - jenkins_home:/var/jenkins_home
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - ci-network
     # --- ここからが追記 ---
     # コンテナの実行ユーザーをホストのユーザーに合わせ、権限問題を回避する
-    user: "${UID}:${GID}"
+    user: "3318:513"
     # --- ここまでが追記 ---
     environment:
       - CASC_JENKINS_CONFIG=/usr/share/jenkins/ref/casc.yaml
@@ -28,12 +28,14 @@ services:
     image: gitea/gitea:latest
     container_name: gitea
     environment:
-      - USER_UID=1000
-      - USER_GID=1000
+      - USER_UID=3318
+      - USER_GID=513
     volumes:
-      # - ./gitea-data:/data
-      - gitea-data:/data
+      - ./gitea-data:/data
+      # - gitea-data:/data
       - ./gitea/app.ini:/data/gitea/conf/app.ini
+    ports:
+      - "3000:3000"
     networks:
       - ci-network
 
@@ -62,6 +64,6 @@ services:
 networks:
   ci-network:
 
-volumes:
-  jenkins_home:
-  gitea-data:
+# volumes:
+#   jenkins_home:
+#   gitea-data:
