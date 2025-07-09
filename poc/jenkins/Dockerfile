@@ -20,7 +20,7 @@ RUN apt-get update && \
 
 # Jenkinsプラグインのインストール
 COPY plugins.txt /usr/share/jenkins/ref/plugins.txt
-RUN jenkins-plugin-cli -f /usr/share/jenkins/ref/plugins.txt
+RUN JAVA_OPTS="-Dhttps.proxyHost=http-p.srv.cc.suzuka-ct.ac.jp -Dhttps.proxyPort=8080" jenkins-plugin-cli -f /usr/share/jenkins/ref/plugins.txt
 
 # Create init.groovy.d directory and add startup script
 RUN mkdir -p /usr/share/jenkins/ref/init.groovy.d
