@@ -6,6 +6,10 @@ USER root
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
+ENV HTTP_PROXY=http://http-p.srv.cc.suzuka-ct.ac.jp:8080
+ENV HTTPS_PROXY=http://http-p.srv.cc.suzuka-ct.ac.jp:8080
+ENV NO_PROXY=localhost,127.0.0.1
+
 # OSレベルのパッケージインストール
 RUN apt-get update && \
   apt-get install -y --no-install-recommends apt-transport-https ca-certificates curl gnupg2 software-properties-common git && \

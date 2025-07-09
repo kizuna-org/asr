@@ -2,8 +2,7 @@
 
 services:
   jenkins:
-    build:
-      context: ./jenkins
+    image: jenkins
     volumes:
       # --- ここからが変更点 ---
       # 名前付きボリュームからホストのディレクトリへのマウントに変更
