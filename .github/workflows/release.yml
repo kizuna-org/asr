@@ -16,10 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     outputs:
-      is-release-commit: ${{ steps.detect-release-commit.outputs.is-release-commit }}
-      title: ${{ fromJson(steps.check-associated-pr.outputs.info)[0].title }}
-      body: ${{ fromJson(steps.check-associated-pr.outputs.info)[0].body }}
-      next-tag: ${{ fromJson(steps.check-associated-pr.outputs.info)[0].head.ref }}
+      is-release-commit: ${{ steps.check-associated-pr.outputs.is-release-commit }}
+      title: ${{ fromJson(steps.check-associated-pr.outputs.info).title }}
+      body: ${{ fromJson(steps.check-associated-pr.outputs.info).body }}
+      next-tag: ${{ fromJson(steps.check-associated-pr.outputs.info).headRefName }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -27,21 +27,16 @@ jobs:
       - name: Check associated Pull Request
         id: check-associated-pr
         run: |
-          info="$(gh api "/repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls")"
-          echo "info=$info" | tee -a "$GITHUB_OUTPUT"
+          info="$(gh pr list -S="$GITHUB_SHA" -s=merged --json='title,body,headRefName,author,labels' --jq='.[0]')"
+          isGitHubActionsApp="$(jq -r '.author.login == "app/github-actions"' <<<"$info")"
+          releaseLabel="$(jq -rc '.labels[] | select(.name == "release")' <<<"$info")"
+          if [[ "$isGitHubActionsApp" && -n "$releaseLabel" ]]; then
+            echo 'is-release-commit=true'
+          else
+            echo 'is-release-commit=false'
+          fi | tee -a "$GITHUB_OUTPUT"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      - name: Detect release commit
-        id: detect-release-commit
-        run: |
-          if "$isGitHubActionsBot" && "$(jq '.[].name | contains("release")' <<<"$labels")"; then
-            echo 'is-release-commit=true' | tee -a "$GITHUB_OUTPUT"
-          else
-            echo 'is-release-commit=false' | tee -a "$GITHUB_OUTPUT"
-          fi
-        env:
-          isGitHubActionsBot: ${{ fromJson(steps.check-associated-pr.outputs.info)[0].user.login == 'github-actions[bot]' }}
-          labels: ${{ toJson(fromJson(steps.check-associated-pr.outputs.info)[0].labels) }}
 
   get-projects:
     name: Get updated projects
@@ -97,12 +92,10 @@ jobs:
         project: ${{ fromJson(needs.get-projects.outputs.updated-projects) }}
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - name: Get next version
         id: get-next-version
         run: |
-          current_version="$(git tag | grep "$project" | tail -n 1)"
+          current_version="$(gh release list --json='tagName' --jq="map(select(.tagName | test(\"^$project-\"))) | .[0].tagName")"
           echo "version=$((${current_version/$project-} + 1))" | tee -a "$GITHUB_OUTPUT"
         env:
           project: ${{ matrix.project.name }}
