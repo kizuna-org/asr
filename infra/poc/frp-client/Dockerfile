@@ -10,3 +10,6 @@ RUN echo "Acquire::http::Proxy \"${PROXY_URL}\";" > /etc/apt/apt.conf.d/01proxy 
     busybox=1:1.36.1-6ubuntu3.1 \
     tcpdump=4.99.4-3ubuntu4 \
     && rm -rf /var/lib/apt/lists/*
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 CMD pgrep squid || exit 1
+USER nobody:nogroup

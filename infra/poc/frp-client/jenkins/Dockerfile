@@ -37,4 +37,6 @@ RUN apt-get update && \
   && JAVA_OPTS="-Dhttps.proxyHost=http-p.srv.cc.suzuka-ct.ac.jp -Dhttps.proxyPort=8080" jenkins-plugin-cli -f /usr/share/jenkins/ref/plugins.txt \
   && mkdir -p /usr/share/jenkins/ref/init.groovy.d
 
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 CMD curl -f http://localhost:8080/login || exit 1
+
 USER jenkins
