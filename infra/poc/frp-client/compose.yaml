@@ -16,7 +16,7 @@ services:
       - ci-network
     # --- ここからが追記 ---
     # コンテナの実行ユーザーをホストのユーザーに合わせ、権限問題を回避する
-    user: "127.0.0.1:3318:513"
+    user: "3318:513"
     # --- ここまでが追記 ---
     environment:
       - CASC_JENKINS_CONFIG=/usr/share/jenkins/ref/casc.yaml
