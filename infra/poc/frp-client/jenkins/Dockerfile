@@ -6,9 +6,13 @@ USER root
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-ENV HTTP_PROXY=http://http-p.srv.cc.suzuka-ct.ac.jp:8080
-ENV HTTPS_PROXY=http://http-p.srv.cc.suzuka-ct.ac.jp:8080
-ENV NO_PROXY=localhost,127.0.0.1
+ARG HTTP_PROXY=http://http-p.srv.cc.suzuka-ct.ac.jp:8080
+ARG HTTPS_PROXY=http://http-p.srv.cc.suzuka-ct.ac.jp:8080
+ARG NO_PROXY=localhost,127.0.0.1
+
+ENV HTTP_PROXY=${HTTP_PROXY}
+ENV HTTPS_PROXY=${HTTPS_PROXY}
+ENV NO_PROXY=${NO_PROXY}
 
 # OSレベルのパッケージインストール
 RUN apt-get update && \
