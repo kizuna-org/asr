@@ -21,11 +21,11 @@ echo -e "\nGiteaが起動しました。"
 # 2. 管理者ユーザーを作成する
 echo "--- Giteaユーザー '${GITEA_USER}' を作成しています... ---"
 # --- 修正点: --user git を追加 ---
-if docker compose exec --user git gitea gitea admin user list | grep -q "${GITEA_USER}"; then
+if sudo docker compose exec --user git gitea gitea admin user list | grep -q "${GITEA_USER}"; then
     echo "ユーザー '${GITEA_USER}' は既に存在します。"
 else
     # --- 修正点: --user git を追加 ---
-    docker compose exec --user git gitea gitea admin user create \
+    sudo docker compose exec --user git gitea gitea admin user create \
         --username "${GITEA_USER}" \
         --password "${GITEA_PASS}" \
         --email "${GITEA_EMAIL}" \
