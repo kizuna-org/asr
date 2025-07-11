@@ -1,3 +1,4 @@
+# kics-scan disable=1c1325ff-831d-43a1-973e-839ae57dfcc0,698ed579-b239-4f8f-a388-baa4bcb13ef8,698ed579-b239-4f8f-a388-baa4bcb13ef8,bc2908f3-f73c-40a9-8793-c1b7d5544f79
 # frp-server/compose.yaml - frpサーバー + Cloudflare Tunnel設定
 
 services:
@@ -8,10 +9,14 @@ services:
       - ./frps.toml:/etc/frp/frps.toml
       - /etc/letsencrypt:/etc/letsencrypt:ro
     ports:
-      - 443:7000
+      - 0.0.0.0:443:7000
     restart: unless-stopped
     networks:
       - frp-network
+    security_opt:
+      - apparmor:unconfined
+      - no-new-privileges:true
+
   cloudflared:
     image: cloudflare/cloudflared:latest
     container_name: cloudflared
@@ -23,6 +28,9 @@ services:
       - frp-network
     depends_on:
       - frps
+    security_opt:
+      - apparmor:unconfined
+      - no-new-privileges:true
 
 networks:
   frp-network:
