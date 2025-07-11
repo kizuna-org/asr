@@ -1,7 +1,7 @@
 #!/bin/bash
 # setup.sh - FRP Server セットアップスクリプト
 
-set -e
+set -eu
 
 echo "=== FRP Server セットアップ ==="
 
