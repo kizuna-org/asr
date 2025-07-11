@@ -32,7 +32,7 @@ RUN apt-get update && \
   "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \
   $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null \
   && apt-get update \
-  && apt-get install -y --no-install-recommends docker-ce-cli \
+  && apt-get install -y --no-install-recommends docker-ce-cli=5:28.3.2-1~debian.12~bookworm \
   && rm -rf /var/lib/apt/lists/* \
   && JAVA_OPTS="-Dhttps.proxyHost=http-p.srv.cc.suzuka-ct.ac.jp -Dhttps.proxyPort=8080" jenkins-plugin-cli -f /usr/share/jenkins/ref/plugins.txt \
   && mkdir -p /usr/share/jenkins/ref/init.groovy.d
