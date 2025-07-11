@@ -1,3 +1,4 @@
+# hadolint ignore=DL3007
 FROM ubuntu/squid:latest
 
 ARG PROXY_URL=http://http-p.srv.cc.suzuka-ct.ac.jp:8080/

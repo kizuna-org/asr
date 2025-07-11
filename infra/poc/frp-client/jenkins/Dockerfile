@@ -20,12 +20,12 @@ COPY startup-trigger.groovy /usr/share/jenkins/ref/init.groovy.d/startup-trigger
 
 RUN apt-get update && \
   apt-get install -y --no-install-recommends \
-  apt-transport-https \
-  ca-certificates \
-  curl \
-  gnupg2 \
-  software-properties-common \
-  git \
+  apt-transport-https=2.6.1 \
+  ca-certificates=20230311+deb12u1 \
+  curl=7.88.1-10+deb12u12 \
+  gnupg2=2.2.40-1.1 \
+  software-properties-common=0.99.30-4.1~deb12u1 \
+  git=1:2.39.5-0+deb12u2 \
   && mkdir -p /etc/apt/keyrings \
   && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
   && echo \
