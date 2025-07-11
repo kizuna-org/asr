@@ -14,7 +14,6 @@ services:
     networks:
       - frp-network
     security_opt:
-      - apparmor:unconfined
       - no-new-privileges:true
 
   cloudflared:
@@ -29,7 +28,6 @@ services:
     depends_on:
       - frps
     security_opt:
-      - apparmor:unconfined
       - no-new-privileges:true
 
 networks:

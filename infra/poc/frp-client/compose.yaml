@@ -25,7 +25,6 @@ services:
     depends_on:
       - gitea
     security_opt:
-      - apparmor:unconfined
       - no-new-privileges:true
 
   gitea:
@@ -43,7 +42,6 @@ services:
     networks:
       - ci-network
     security_opt:
-      - apparmor:unconfined
       - no-new-privileges:true
 
   # --- frpクライアント設定（squid経由で外部frpsサーバーに接続）---
@@ -60,7 +58,6 @@ services:
       # - squid
     restart: unless-stopped
     security_opt:
-      - apparmor:unconfined
       - no-new-privileges:true
 
   # squid:
