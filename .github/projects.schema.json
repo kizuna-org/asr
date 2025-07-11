@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "array",
+  "title": "Projects Configuration",
+  "description": "Configuration file for project definitions",
+  "items": {
+    "type": "object",
+    "title": "Project Entry",
+    "properties": {
+      "name": { "type": "string", "title": "Project Name" },
+      "path": { "type": "string", "title": "Project Path" }
+    },
+    "required": ["name", "path"],
+    "additionalProperties": false
+  }
+}
