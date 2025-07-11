@@ -28,7 +28,7 @@ services:
       - no-new-privileges:true
 
   gitea:
-    image: gitea/gitea:latest
+    image: gitea/gitea:latest@sha256:8e2e3f40c5ff3fee920c6d0faac0db9cca2183d80ff23965d1022434d37e7910
     container_name: gitea
     environment:
       - USER_UID=3318
@@ -46,7 +46,7 @@ services:
 
   # --- frpクライアント設定（squid経由で外部frpsサーバーに接続）---
   frpc:
-    image: snowdreamtech/frpc:latest
+    image: snowdreamtech/frpc:latest@sha256:f484536eda0f5c9a367ba9a366b5e1506324b9a31da9edbd4baa75005ded9d9c
     container_name: frpc
     volumes:
       - ./frp/frpc.toml:/etc/frp/frpc.toml
