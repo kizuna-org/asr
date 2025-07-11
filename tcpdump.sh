@@ -11,8 +11,7 @@ LOCAL_PATH="./squid_capture.pcap"
 
 # 1. リモートでtcpdumpを実行（例: 1000パケットキャプチャ）
 echo "[INFO] ssh $REMOTE_HOST sudo docker compose exec $CONTAINER_NAME tcpdump -i any -w $PCAP_PATH -c 1000"
-ssh "$REMOTE_HOST" "sudo docker compose exec $CONTAINER_NAME tcpdump -i any -w $PCAP_PATH -c 1000"
-
+ssh "$REMOTE_HOST" "sudo docker compose exec -T $CONTAINER_NAME tcpdump -i any -w $PCAP_PATH -c 1000"
 # 2. ファイルの存在を確認
 echo "[INFO] ssh $REMOTE_HOST sudo docker compose exec $CONTAINER_NAME ls -l $PCAP_PATH"
 ssh "$REMOTE_HOST" "sudo docker compose exec $CONTAINER_NAME ls -l $PCAP_PATH"
