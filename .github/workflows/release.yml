@@ -30,7 +30,7 @@ jobs:
           info="$(gh pr list -S="$GITHUB_SHA" -s=merged --json='title,body,headRefName,author,labels' --jq='.[0]')"
           isGitHubActionsApp="$(jq -r '.author.login == "app/github-actions"' <<<"$info")"
           releaseLabel="$(jq -rc '.labels[] | select(.name == "release")' <<<"$info")"
-          if [[ "$isGitHubActionsApp" && -n "$releaseLabel" ]]; then
+          if "$isGitHubActionsApp" && [[ -n "$releaseLabel" ]]; then
             echo 'is-release-commit=true'
           else
             echo 'is-release-commit=false'
