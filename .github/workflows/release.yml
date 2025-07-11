@@ -14,6 +14,7 @@ jobs:
       contents: read
       pull-requests: read
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       is-release-commit: ${{ steps.detect-release-commit.outputs.is-release-commit }}
       title: ${{ fromJson(steps.check-associated-pr.outputs.info)[0].title }}
@@ -50,6 +51,7 @@ jobs:
     needs: detect-release-commit
     if: ${{ needs.detect-release-commit.outputs.is-release-commit == 'false' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     outputs:
       updated-projects: ${{ steps.extract-projects.outputs.projects }}
     steps:
@@ -89,6 +91,7 @@ jobs:
     needs: get-projects
     if: ${{ needs.get-projects.outputs.updated-projects != '[]' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       matrix:
         project: ${{ fromJson(needs.get-projects.outputs.updated-projects) }}
@@ -137,6 +140,7 @@ jobs:
     needs: detect-release-commit
     if: ${{ needs.detect-release-commit.outputs.is-release-commit == 'true' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
