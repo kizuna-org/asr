@@ -1,6 +1,6 @@
 # jenkins/Dockerfile (最終確定版)
 
-FROM jenkins/jenkins:lts
+FROM jenkins/jenkins:lts@sha256:f4607803bd1ee4dc91b1695b07d3a04c77b4f575a507ff65375af888e1497662
 
 USER root
 

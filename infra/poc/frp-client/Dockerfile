@@ -1,6 +1,6 @@
 # kics-scan disable=f45ea400-6bbe-4501-9fc7-1c3d75c32067
 # hadolint ignore=DL3007
-FROM ubuntu/squid:latest
+FROM ubuntu/squid:latest@sha256:98f98aaa024e4a58433450f8adde48ef5748f1ae05133b2367d64317cc881a3a
 
 ARG PROXY_URL=http://http-p.srv.cc.suzuka-ct.ac.jp:8080/
 
