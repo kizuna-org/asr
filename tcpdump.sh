@@ -19,6 +19,6 @@ ssh "$REMOTE_HOST" "sudo docker compose exec $CONTAINER_NAME ls -l $PCAP_PATH"
 
 # 3. リモートからホストにpcapファイルをコピー
 echo "[INFO] ssh $REMOTE_HOST sudo docker cp $CONTAINER_NAME:$PCAP_PATH ~/temp/poc/squid_capture.pcap"
-ssh "$REMOTE_HOST" "sudo docker cp squid:/var/spool/squid/squid_capture.pcap ~/temp/poc/squid_capture.pcap"
+ssh "$REMOTE_HOST" "sudo docker cp $CONTAINER_NAME:/var/spool/squid/squid_capture.pcap ~/temp/poc/squid_capture.pcap"
 echo "[INFO] scp $REMOTE_HOST:~/temp/poc/squid_capture.pcap $LOCAL_PATH"
 scp "edu-gpu:~/temp/poc/squid_capture.pcap" "./squid_capture.pcap"
