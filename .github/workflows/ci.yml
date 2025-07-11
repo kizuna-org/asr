@@ -24,6 +24,7 @@ jobs:
       - dockerfile-lint
       - terraform-lint
       - kics
+      - ansible-lint
     steps:
       - name: All status check
         run: echo "All status check passed"
@@ -135,3 +136,14 @@ jobs:
       - uses: checkmarx/kics-github-action@c06a133a98c75c2f920014d688015a5fb18095a4 # v2.1.10
         with:
           path: .
+
+  ansible-lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run ansible-lint
+        uses: ansible/ansible-lint@06f616d6e86e9ce4c74393318d1cbb2d016af413 # v25.6.1
+        with:
+          working_directory: "infra/ansible"
+          requirements_file: "requirements.yml"
