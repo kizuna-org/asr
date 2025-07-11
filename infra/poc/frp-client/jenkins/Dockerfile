@@ -15,23 +15,28 @@ ENV HTTPS_PROXY=${HTTPS_PROXY}
 ENV NO_PROXY=${NO_PROXY}
 
 # OSレベルのパッケージインストール
-RUN apt-get update && \
-  apt-get install -y --no-install-recommends apt-transport-https ca-certificates curl gnupg2 software-properties-common git && \
-  mkdir -p /etc/apt/keyrings && \
-  curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg && \
-  echo \
-  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \
-  $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null && \
-  apt-get update && \
-  apt-get install -y --no-install-recommends docker-ce-cli && \
-  rm -rf /var/lib/apt/lists/*
-
-# Jenkinsプラグインのインストール
 COPY plugins.txt /usr/share/jenkins/ref/plugins.txt
-RUN JAVA_OPTS="-Dhttps.proxyHost=http-p.srv.cc.suzuka-ct.ac.jp -Dhttps.proxyPort=8080" jenkins-plugin-cli -f /usr/share/jenkins/ref/plugins.txt
-
-# Create init.groovy.d directory and add startup script
-RUN mkdir -p /usr/share/jenkins/ref/init.groovy.d
 COPY startup-trigger.groovy /usr/share/jenkins/ref/init.groovy.d/startup-trigger.groovy
+
+RUN apt-get update && \
+  apt-get install -y --no-install-recommends \
+  apt-transport-https=2.6.1 \
+  ca-certificates=20230311+deb12u1 \
+  curl=7.88.1-10+deb12u12 \
+  gnupg2=2.2.40-1.1 \
+  software-properties-common=0.99.30-4.1~deb12u1 \
+  git=1:2.39.5-0+deb12u2 \
+  && mkdir -p /etc/apt/keyrings \
+  && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
+  && echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \
+  $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null \
+  && apt-get update \
+  && apt-get install -y --no-install-recommends docker-ce-cli=5:28.3.2-1~debian.12~bookworm \
+  && rm -rf /var/lib/apt/lists/* \
+  && JAVA_OPTS="-Dhttps.proxyHost=http-p.srv.cc.suzuka-ct.ac.jp -Dhttps.proxyPort=8080" jenkins-plugin-cli -f /usr/share/jenkins/ref/plugins.txt \
+  && mkdir -p /usr/share/jenkins/ref/init.groovy.d
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 CMD curl -f http://localhost:8080/login || exit 1
 
 USER jenkins
