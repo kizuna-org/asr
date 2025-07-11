@@ -71,7 +71,7 @@ jobs:
         id: extract-projects
         run: |
           for key in $(jq -r 'to_entries[] | select(.value == "true") | .key' <<<"$updatedProjects"); do
-            jq '.[] | select(.name == "'$key'")' <<<"$projects"
+            jq '.[] | select(.name == "'"$key"'")' <<<"$projects"
           done | echo "projects=$(jq -sc)" | tee -a "$GITHUB_OUTPUT"
         env:
           projects: ${{ steps.convert-to-json.outputs.result }}
@@ -96,7 +96,11 @@ jobs:
         id: get-next-version
         run: |
           current_version="$(gh release list --json='tagName' --jq="map(select(.tagName | test(\"^$project-\"))) | .[0].tagName")"
-          echo "version=$((${current_version/$project-} + 1))" | tee -a "$GITHUB_OUTPUT"
+          if [[ -n "$current_version" ]]; then
+            echo "version=$((${current_version#"$project-"} + 1))"
+          else
+            echo 'version=1'
+          fi | tee -a "$GITHUB_OUTPUT"
         env:
           project: ${{ matrix.project.name }}
       - name: Create changelog file
