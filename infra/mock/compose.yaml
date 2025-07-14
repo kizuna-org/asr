@@ -1,0 +1,8 @@
+services:
+  dind-host:
+    build:
+      context: ./dind-host
+      dockerfile: Dockerfile
+    ports:
+      - 50022:22
+    privileged: true
