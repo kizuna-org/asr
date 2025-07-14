@@ -7,14 +7,18 @@ ansible-mock: up-mock
 	cd infra/ansible && \
 	ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook -i hosts.mock.yml site.yml -C
 
+.PHONY: ansible-mock-apply
+ansible-mock-apply: up-mock
+	cd infra/ansible && \
+	ANSIBLE_HOST_KEY_CHECKING=False ansible-playbook -i hosts.mock.yml site.yml
+
 .PHONY: up-mock
 up-mock: make-mock-key
 	export PUB_KEY="$$(cat infra/mock/dind-host/dind-host.pub)" && \
 	cd infra/mock && \
 	docker compose build \
 	  --build-arg PUB_KEY="$$PUB_KEY" && \
-	docker compose up -d && \
-	echo "root_password: $$ROOT_PASSWORD"
+	docker compose up -d
 
 .PHONY: make-mock-key
 make-mock-key: infra/mock/dind-host/dind-host infra/mock/dind-host/dind-host.pub
@@ -28,3 +32,4 @@ infra/mock/dind-host/dind-host & infra/mock/dind-host/dind-host.pub:
 clean:
 	rm infra/mock/dind-host/dind-host
 	rm infra/mock/dind-host/dind-host.pub
+	cd infra/mock && docker compose down
