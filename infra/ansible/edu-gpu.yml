@@ -1,3 +1,4 @@
 - name: Edu GPU
   hosts: edu_gpu
   roles:
+    - frpclient

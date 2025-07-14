@@ -1,0 +1,76 @@
+# kics-scan disable=d6355c88-1e8d-49e9-b2f2-f8a1ca12c75b,1c1325ff-831d-43a1-973e-839ae57dfcc0,698ed579-b239-4f8f-a388-baa4bcb13ef8
+# compose.yaml (bind mount対応版)
+
+services:
+  jenkins:
+    image: jenkins
+    volumes:
+      # --- ここからが変更点 ---
+      # 名前付きボリュームからホストのディレクトリへのマウントに変更
+      - ./jenkins_home:/var/jenkins_home
+      - ./jenkins/casc.yaml:/usr/share/jenkins/ref/casc.yaml
+      # --- ここまでが変更点 ---
+      # - jenkins_home:/var/jenkins_home
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - ci-network
+    # --- ここからが追記 ---
+    # コンテナの実行ユーザーをホストのユーザーに合わせ、権限問題を回避する
+    user: "3318:513"
+    # --- ここまでが追記 ---
+    environment:
+      - CASC_JENKINS_CONFIG=/usr/share/jenkins/ref/casc.yaml
+    env_file:
+      - .env
+    depends_on:
+      - gitea
+    security_opt:
+      - no-new-privileges:true
+
+  gitea:
+    image: gitea/gitea:latest@sha256:8e2e3f40c5ff3fee920c6d0faac0db9cca2183d80ff23965d1022434d37e7910
+    container_name: gitea
+    environment:
+      - USER_UID=3318
+      - USER_GID=513
+    volumes:
+      - ./gitea-data:/data
+      # - gitea-data:/data
+      - ./gitea/app.ini:/data/gitea/conf/app.ini
+    ports:
+      - "127.0.0.1:3000:3000"
+    networks:
+      - ci-network
+    security_opt:
+      - no-new-privileges:true
+
+  # --- frpクライアント設定（squid経由で外部frpsサーバーに接続）---
+  frpc:
+    image: snowdreamtech/frpc:latest@sha256:f484536eda0f5c9a367ba9a366b5e1506324b9a31da9edbd4baa75005ded9d9c
+    container_name: frpc
+    volumes:
+      - ./frp/frpc.toml:/etc/frp/frpc.toml
+    networks:
+      - ci-network
+    depends_on:
+      - jenkins
+      - gitea
+      # - squid
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  # squid:
+  #   image: squid
+  #   container_name: squid
+  #   volumes:
+  #     - ./squid/squid.conf:/etc/squid/squid.conf
+  #   networks:
+  #     - ci-network
+
+networks:
+  ci-network:
+
+# volumes:
+#   jenkins_home:
+#   gitea-data:

@@ -1,0 +1,39 @@
+- name: Ensure target directory exists
+  file:
+    path: /opt/frpclient
+    state: directory
+
+- name: Copy compose.yaml
+  copy:
+    src: files/compose.yaml
+    dest: /opt/frpclient/compose.yaml
+
+- name: Copy frpc.toml
+  copy:
+    src: files/frpc.toml
+    dest: /opt/frpclient/frp/frpc.toml
+    mode: "0644"
+
+- name: Copy Jenkins files
+  copy:
+    src: files/jenkins/
+    dest: /opt/frpclient/jenkins/
+    mode: "0644"
+
+- name: Copy Gitea files
+  copy:
+    src: files/gitea/
+    dest: /opt/frpclient/gitea/
+    mode: "0644"
+
+- name: Copy Squid files
+  copy:
+    src: files/squid/
+    dest: /opt/frpclient/squid/
+    mode: "0644"
+
+- name: Run docker compose up
+  community.docker.docker_compose:
+    project_src: /opt/frpclient
+    state: present
+    build: true
