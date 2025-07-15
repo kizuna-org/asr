@@ -15,6 +15,9 @@ services:
     networks:
       - ci-network
     # --- ここからが追記 ---
+    ports:
+      - "8080:8080" # Jenkins Web UI をホストに公開
+    # --- ここまでが追記 ---
     # コンテナの実行ユーザーをホストのユーザーに合わせ、権限問題を回避する
     user: "3318:513"
     # --- ここまでが追記 ---
@@ -67,6 +70,39 @@ services:
   #     - ./squid/squid.conf:/etc/squid/squid.conf
   #   networks:
   #     - ci-network
+
+  # --- blackbox-exporter設定 ---
+  blackbox-exporter:
+    image: prom/blackbox-exporter:latest
+    container_name: blackbox-exporter
+    ports:
+      - "9115:9115" # Blackbox Exporter をホストに公開
+    networks:
+      - ci-network
+    depends_on:
+      - jenkins
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ./blackbox/prometheus.yml:/etc/prometheus/prometheus.yml
+      # Jenkinsの起動確認例: http://localhost:9115/probe?target=http://jenkins:8080&module=http_2xx
+      # curl "http://localhost:9115/probe?target=http://jenkins:8080&module=http_2xx"
+      # Prometheusのscrape_config例（./blackbox/prometheus.yml）:
+      # scrape_configs:
+      #   - job_name: 'jenkins-alive'
+      #     metrics_path: /probe
+      #     params:
+      #       module: [http_2xx]
+      #     static_configs:
+      #       - targets:
+      #         - http://jenkins:8080
+      #     relabel_configs:
+      #       - source_labels: [__address__]
+      #         target_label: __param_target
+      #       - source_labels: [__param_target]
+      #         target_label: instance
+      #       - target_label: __address__
+      #         replacement: blackbox-exporter:9115
 
 networks:
   ci-network:

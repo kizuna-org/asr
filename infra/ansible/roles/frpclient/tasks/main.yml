@@ -32,6 +32,12 @@
     dest: /opt/frpclient/squid/
     mode: "0644"
 
+- name: Copy Blackbox Exporter Prometheus config
+  copy:
+    src: files/blackbox/prometheus.yml
+    dest: /opt/frpclient/blackbox/prometheus.yml
+    mode: "0644"
+
 - name: Run docker compose up
   community.docker.docker_compose:
     project_src: /opt/frpclient
