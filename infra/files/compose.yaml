@@ -1,0 +1,53 @@
+# kics-scan disable=d6355c88-1e8d-49e9-b2f2-f8a1ca12c75b,1c1325ff-831d-43a1-973e-839ae57dfcc0,698ed579-b239-4f8f-a388-baa4bcb13ef8
+services:
+  jenkins:
+    image: jenkins
+    volumes:
+      - ./jenkins_home:/var/jenkins_home
+      - ./jenkins/casc.yaml:/usr/share/jenkins/ref/casc.yaml
+      - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - ci-network
+    user: "3318:513"
+    environment:
+      - CASC_JENKINS_CONFIG=/usr/share/jenkins/ref/casc.yaml
+    # env_file:
+    #   - .env
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/login"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  frpc:
+    image: snowdreamtech/frpc:latest@sha256:f484536eda0f5c9a367ba9a366b5e1506324b9a31da9edbd4baa75005ded9d9c
+    container_name: frpc
+    volumes:
+      - ./frp/frpc.toml:/etc/frp/frpc.toml
+    networks:
+      - ci-network
+    depends_on:
+      - jenkins
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+
+  blackbox-exporter:
+    image: prom/blackbox-exporter:latest
+    container_name: blackbox-exporter
+    ports:
+      - "9115:9115"
+    networks:
+      - ci-network
+    depends_on:
+      - jenkins
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ./blackbox/prometheus.yml:/etc/prometheus/prometheus.yml
+
+networks:
+  ci-network:

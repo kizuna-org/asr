@@ -1,45 +1,9 @@
-- name: Ensure target directory exists
-  file:
-    path: /opt/frpclient
-    state: directory
+- set_fact:
+    frpclient_dir: ~/frpclient
 
-- name: Copy compose.yaml
+- name: Copy files
   copy:
-    src: files/compose.yaml
-    dest: /opt/frpclient/compose.yaml
-
-- name: Copy frpc.toml
-  copy:
-    src: files/frpc.toml
-    dest: /opt/frpclient/frp/frpc.toml
+    src: "{{ playbook_dir }}/../files/"
+    dest: "{{ frpclient_dir }}/"
     mode: "0644"
-
-- name: Copy Jenkins files
-  copy:
-    src: files/jenkins/
-    dest: /opt/frpclient/jenkins/
-    mode: "0644"
-
-- name: Copy Gitea files
-  copy:
-    src: files/gitea/
-    dest: /opt/frpclient/gitea/
-    mode: "0644"
-
-- name: Copy Squid files
-  copy:
-    src: files/squid/
-    dest: /opt/frpclient/squid/
-    mode: "0644"
-
-- name: Copy Blackbox Exporter Prometheus config
-  copy:
-    src: files/blackbox/prometheus.yml
-    dest: /opt/frpclient/blackbox/prometheus.yml
-    mode: "0644"
-
-- name: Run docker compose up
-  community.docker.docker_compose:
-    project_src: /opt/frpclient
-    state: present
-    build: true
+  notify: Restart compose

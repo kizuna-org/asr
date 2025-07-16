@@ -1,0 +1,11 @@
+- name: Restart compose
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      chmod +x {{ frpclient_dir }}/docker_pre_build.sh
+      {{ frpclient_dir }}/docker_pre_build.sh
+      sudo docker compose -f {{ frpclient_dir }}/compose.yaml down || :
+      sudo docker compose -f {{ frpclient_dir }}/compose.yaml up -d --build
+    chdir: "{{ frpclient_dir }}"
+  changed_when: true
+  listen: Restart compose
