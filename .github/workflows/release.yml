@@ -28,6 +28,7 @@ jobs:
         id: check-associated-pr
         run: |
           info="$(gh pr list -S="$GITHUB_SHA" -s=merged --json='title,body,headRefName,author,labels' --jq='.[0]')"
+          echo "info=$info" | tee -a "$GITHUB_OUTPUT"
           isGitHubActionsApp="$(jq -r '.author.login == "app/github-actions"' <<<"$info")"
           releaseLabel="$(jq -rc '.labels[] | select(.name == "release")' <<<"$info")"
           if "$isGitHubActionsApp" && [[ -n "$releaseLabel" ]]; then
