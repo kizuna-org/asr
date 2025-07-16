@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Generate YAML file for paths-filter
         id: generate-yaml
-        uses: mikefarah/yq@1187c954ec44c3a0e62c13ca7dc9dadc1ca80ae7 # 4.46.1
+        uses: mikefarah/yq@1187c954ec44c3a0e62c13ca7dc9dadc1ca80ae7 # v4.46.1
         with:
           cmd: >
             yq 'map({(.name): [.path + "/**"]}) | .[]' .github/projects.yml
@@ -34,7 +34,7 @@ jobs:
           filters: ${{ steps.generate-yaml.outputs.result }}
       - name: Convert YAML to JSON
         id: convert-to-json
-        uses: mikefarah/yq@1187c954ec44c3a0e62c13ca7dc9dadc1ca80ae7 # 4.46.1
+        uses: mikefarah/yq@1187c954ec44c3a0e62c13ca7dc9dadc1ca80ae7 # v4.46.1
         with:
           cmd: yq -o json .github/projects.yml
       - name: Extract project names
