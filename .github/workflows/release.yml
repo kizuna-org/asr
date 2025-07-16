@@ -104,6 +104,7 @@ jobs:
           fi | tee -a "$GITHUB_OUTPUT"
         env:
           project: ${{ matrix.project.name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       - name: Create changelog file
         run: |
           cat <<EOF >"$file"
@@ -115,7 +116,7 @@ jobs:
             jq -rc '.download_url' <<<"$changelog" | xargs curl | tail -n +3 >>"$file"
           fi
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           message: ${{ github.event.head_commit.message }}
           version: ${{ steps.get-next-version.outputs.version }}
           branch: ${{ matrix.project.name }}-${{ steps.get-next-version.outputs.version }}
