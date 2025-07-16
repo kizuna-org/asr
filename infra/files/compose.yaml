@@ -1,4 +1,5 @@
 # kics-scan disable=d6355c88-1e8d-49e9-b2f2-f8a1ca12c75b,1c1325ff-831d-43a1-973e-839ae57dfcc0,698ed579-b239-4f8f-a388-baa4bcb13ef8
+# hoga
 services:
   jenkins:
     image: jenkins
@@ -17,10 +18,10 @@ services:
       - no-new-privileges:true
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/login"]
-      interval: 30s
+      interval: 10s
       timeout: 10s
-      retries: 5
-      start_period: 60s
+      retries: 10
+      start_period: 10s
 
   frpc:
     image: snowdreamtech/frpc:latest@sha256:f484536eda0f5c9a367ba9a366b5e1506324b9a31da9edbd4baa75005ded9d9c

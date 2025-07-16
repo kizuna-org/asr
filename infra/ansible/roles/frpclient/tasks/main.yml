@@ -1,6 +1,3 @@
-- set_fact:
-    frpclient_dir: ~/frpclient
-
 - name: Copy files
   copy:
     src: "{{ playbook_dir }}/../files/"

@@ -5,4 +5,5 @@ services:
       dockerfile: Dockerfile
     ports:
       - 50022:22
+    network_mode: "host"
     privileged: true
