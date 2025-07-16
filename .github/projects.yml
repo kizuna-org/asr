@@ -1,1 +1,4 @@
 # yaml-language-server: $schema=./projects.schema.json
+
+- name: example
+  path: example
