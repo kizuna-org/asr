@@ -21,6 +21,7 @@ jobs:
       - dotenv-lint
       - markdown-lint
       - shell-lint
+      - get-projects
       - python-lint
       - dockerfile-lint
       - terraform-lint
