@@ -1,0 +1,150 @@
+name: release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions: {}
+
+jobs:
+  detect-release-commit:
+    name: Detect release commit
+    permissions:
+      contents: read
+      pull-requests: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      is-release-commit: ${{ steps.check-associated-pr.outputs.is-release-commit }}
+      title: ${{ fromJson(steps.check-associated-pr.outputs.info).title }}
+      body: ${{ fromJson(steps.check-associated-pr.outputs.info).body }}
+      next-tag: ${{ fromJson(steps.check-associated-pr.outputs.info).headRefName }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Check associated Pull Request
+        id: check-associated-pr
+        run: |
+          info="$(gh pr list -S="$GITHUB_SHA" -s=merged --json='title,body,headRefName,author,labels' --jq='.[0]')"
+          isGitHubActionsApp="$(jq -r '.author.login == "app/github-actions"' <<<"$info")"
+          releaseLabel="$(jq -rc '.labels[] | select(.name == "release")' <<<"$info")"
+          if "$isGitHubActionsApp" && [[ -n "$releaseLabel" ]]; then
+            echo 'is-release-commit=true'
+          else
+            echo 'is-release-commit=false'
+          fi | tee -a "$GITHUB_OUTPUT"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  get-projects:
+    name: Get updated projects
+    permissions:
+      contents: read
+      pull-requests: read
+    needs: detect-release-commit
+    if: ${{ needs.detect-release-commit.outputs.is-release-commit == 'false' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      updated-projects: ${{ steps.extract-projects.outputs.projects }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate YAML file for paths-filter
+        id: generate-yaml
+        uses: mikefarah/yq@1187c954ec44c3a0e62c13ca7dc9dadc1ca80ae7 # 4.46.1
+        with:
+          cmd: >
+            yq 'map({(.name): [.path + "/**"]}) | .[]' .github/projects.yml
+      - name: Filter updated projects
+        id: filter
+        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+        with:
+          filters: ${{ steps.generate-yaml.outputs.result }}
+      - name: Convert YAML to JSON
+        id: convert-to-json
+        uses: mikefarah/yq@1187c954ec44c3a0e62c13ca7dc9dadc1ca80ae7 # 4.46.1
+        with:
+          cmd: yq -o json .github/projects.yml
+      - name: Extract project names
+        id: extract-projects
+        run: |
+          for key in $(jq -r 'to_entries[] | select(.value == "true") | .key' <<<"$updatedProjects"); do
+            jq '.[] | select(.name == "'"$key"'")' <<<"$projects"
+          done | echo "projects=$(jq -sc)" | tee -a "$GITHUB_OUTPUT"
+        env:
+          projects: ${{ steps.convert-to-json.outputs.result }}
+          updatedProjects: ${{ toJson(steps.filter.outputs) }}
+
+  create-pull-request:
+    name: Create release Pull Request for ${{ matrix.project.name }}
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    needs: get-projects
+    if: ${{ needs.get-projects.outputs.updated-projects != '[]' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        project: ${{ fromJson(needs.get-projects.outputs.updated-projects) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get next version
+        id: get-next-version
+        run: |
+          current_version="$(gh release list --json='tagName' --jq="map(select(.tagName | test(\"^$project-\"))) | .[0].tagName")"
+          if [[ -n "$current_version" ]]; then
+            echo "version=$((${current_version#"$project-"} + 1))"
+          else
+            echo 'version=1'
+          fi | tee -a "$GITHUB_OUTPUT"
+        env:
+          project: ${{ matrix.project.name }}
+      - name: Create changelog file
+        run: |
+          cat <<EOF >"$file"
+          ## What's Changed for $version
+
+          - $message
+          EOF
+          if changelog="$(gh api "/repos/$GITHUB_REPOSITORY/contents/$file?ref=$branch")"; then
+            jq -rc '.download_url' <<<"$changelog" | xargs curl | tail -n +3 >>"$file"
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          message: ${{ github.event.head_commit.message }}
+          version: ${{ steps.get-next-version.outputs.version }}
+          branch: ${{ matrix.project.name }}-${{ steps.get-next-version.outputs.version }}
+          file: ${{ matrix.project.path }}/CHANGELOG.md
+      - name: Create release Pull Request
+        uses: peter-evans/create-pull-request@271a8d0340265f705b14b6d32b9829c1cb33d45e # v7.0.8
+        with:
+          commit-message: "chore(release): Release ${{ matrix.project.name }} ${{ steps.get-next-version.outputs.version }}"
+          author: github-actions[bot] <41898282+github-actions[bot]@users.noreply.github.com>
+          branch: ${{ matrix.project.name }}-${{ steps.get-next-version.outputs.version }}
+          sign-commits: true
+          title: Release ${{ matrix.project.name }} ${{ steps.get-next-version.outputs.version }}
+          body-path: ${{ matrix.project.path }}/CHANGELOG.md
+          labels: release
+
+  release:
+    name: Create release and tag
+    permissions:
+      contents: write
+    needs: detect-release-commit
+    if: ${{ needs.detect-release-commit.outputs.is-release-commit == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Create release and tag
+        uses: ncipollo/release-action@bcfe5470707e8832e12347755757cec0eb3c22af # v1.18.0
+        with:
+          body: ${{ needs.detect-release-commit.outputs.body }}
+          name: ${{ needs.detect-release-commit.outputs.title }}
+          tag: ${{ needs.detect-release-commit.outputs.next-tag }}
