@@ -8,7 +8,12 @@
     "title": "Project Entry",
     "properties": {
       "name": { "type": "string", "title": "Project Name" },
-      "path": { "type": "string", "title": "Project Path" }
+      "path": { "type": "string", "title": "Project Path" },
+      "ci-type": {
+        "type": "string",
+        "pattern": "^(python)$",
+        "title": "Project Type for CI"
+      }
     },
     "required": ["name", "path"],
     "additionalProperties": false

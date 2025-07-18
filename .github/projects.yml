@@ -2,3 +2,4 @@
 
 - name: example
   path: example
+  ci-type: python

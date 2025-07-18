@@ -1,0 +1,48 @@
+name: Detect Changed Projects
+
+on:
+  workflow_call:
+    outputs:
+      updated-projects:
+        description: List of updated projects
+        value: ${{ jobs.get-projects.outputs.updated-projects }}
+
+permissions: {}
+
+jobs:
+  get-projects:
+    name: Get updated projects
+    permissions:
+      contents: read
+      pull-requests: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      updated-projects: ${{ steps.extract-projects.outputs.projects }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Generate YAML file for paths-filter
+        id: generate-yaml
+        uses: mikefarah/yq@1187c954ec44c3a0e62c13ca7dc9dadc1ca80ae7 # v4.46.1
+        with:
+          cmd: >
+            yq 'map({(.name): [.path + "/**"]}) | .[]' .github/projects.yml
+      - name: Filter updated projects
+        id: filter
+        uses: dorny/paths-filter@de90cc6fb38fc0963ad72b210f1f284cd68cea36 # v3.0.2
+        with:
+          filters: ${{ steps.generate-yaml.outputs.result }}
+      - name: Convert YAML to JSON
+        id: convert-to-json
+        uses: mikefarah/yq@1187c954ec44c3a0e62c13ca7dc9dadc1ca80ae7 # v4.46.1
+        with:
+          cmd: yq -o json .github/projects.yml
+      - name: Extract project names
+        id: extract-projects
+        run: |
+          for key in $(jq -r 'to_entries[] | select(.value == "true") | .key' <<<"$updatedProjects"); do
+            jq '.[] | select(.name == "'"$key"'")' <<<"$projects"
+          done | echo "projects=$(jq -sc)" | tee -a "$GITHUB_OUTPUT"
+        env:
+          projects: ${{ steps.convert-to-json.outputs.result }}
+          updatedProjects: ${{ toJson(steps.filter.outputs) }}
