@@ -112,6 +112,7 @@ jobs:
     needs: get-projects
     if: ${{ needs.get-projects.outputs.updated-projects != '[]' }}
     strategy:
+      fail-fast: false
       matrix:
         project: ${{ fromJson(needs.get-projects.outputs.updated-projects) }}
     defaults:
@@ -120,8 +121,18 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - id: check-pyproject
+        name: Check for pyproject.toml
+        run: |
+          if [[ -f pyproject.toml ]]; then
+            echo 'exists=true' >>"$GITHUB_OUTPUT"
+          else
+            echo 'exists=false' >>"$GITHUB_OUTPUT"
+          fi
       - uses: astral-sh/ruff-action@0c50076f12c38c3d0115b7b519b54a91cb9cf0ad # v3.5.0
+        if: ${{ steps.check-pyproject.outputs.exists }}
       - name: Lint check
+        if: ${{ steps.check-pyproject.outputs.exists }}
         run: ruff check
 
   python-format-check:
@@ -130,6 +141,7 @@ jobs:
     needs: get-projects
     if: ${{ needs.get-projects.outputs.updated-projects != '[]' }}
     strategy:
+      fail-fast: false
       matrix:
         project: ${{ fromJson(needs.get-projects.outputs.updated-projects) }}
     defaults:
@@ -138,8 +150,18 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - id: check-pyproject
+        name: Check for pyproject.toml
+        run: |
+          if [[ -f pyproject.toml ]]; then
+            echo 'exists=true' >>"$GITHUB_OUTPUT"
+          else
+            echo 'exists=false' >>"$GITHUB_OUTPUT"
+          fi
       - uses: astral-sh/ruff-action@0c50076f12c38c3d0115b7b519b54a91cb9cf0ad # v3.5.0
+        if: ${{ steps.check-pyproject.outputs.exists == 'true' }}
       - name: Format check
+        if: ${{ steps.check-pyproject.outputs.exists == 'true' }}
         run: ruff format --check
 
   python-type-check:
@@ -148,6 +170,7 @@ jobs:
     needs: get-projects
     if: ${{ needs.get-projects.outputs.updated-projects != '[]' }}
     strategy:
+      fail-fast: false
       matrix:
         project: ${{ fromJson(needs.get-projects.outputs.updated-projects) }}
     defaults:
@@ -156,13 +179,24 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+      - id: check-pyproject
+        name: Check for pyproject.toml
+        run: |
+          if [[ -f pyproject.toml ]]; then
+            echo 'exists=true' >>"$GITHUB_OUTPUT"
+          else
+            echo 'exists=false' >>"$GITHUB_OUTPUT"
+          fi
       - uses: astral-sh/setup-uv@bd01e18f51369d5a26f1651c3cb451d3417e3bba # v6.3.1
+        if: ${{ steps.check-pyproject.outputs.exists == 'true' }}
         with:
           activate-environment: true
           working-directory: ${{ matrix.project.path }}
       - name: Update project
+        if: ${{ steps.check-pyproject.outputs.exists == 'true' }}
         run: uv sync
       - name: Type check
+        if: ${{ steps.check-pyproject.outputs.exists == 'true' }}
         run: uvx ty check
 
   dockerfile-lint:
