@@ -22,6 +22,7 @@ jobs:
       - markdown-lint
       - shell-lint
       - get-projects
+      - extract-python-projects
       - python-lint
       - python-format-check
       - python-type-check
@@ -106,97 +107,74 @@ jobs:
   get-projects:
     uses: ./.github/workflows/detect-changed-projects.yml
 
+  extract-python-projects:
+    needs: get-projects
+    if: ${{ needs.get-projects.outputs.updated-projects != '[]' }}
+    uses: ./.github/workflows/extract-projects-by-ci-type.yml
+    with:
+      ci-type: python
+      updated-projects: ${{ needs.get-projects.outputs.updated-projects }}
+
   python-lint:
     name: "python-lint: ${{ matrix.project.name }}"
     runs-on: ubuntu-latest
-    needs: get-projects
-    if: ${{ needs.get-projects.outputs.updated-projects != '[]' }}
+    needs: extract-python-projects
+    if: ${{ needs.extract-python-projects.outputs.projects != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        project: ${{ fromJson(needs.get-projects.outputs.updated-projects) }}
+        project: ${{ fromJson(needs.extract-python-projects.outputs.projects) }}
     defaults:
       run:
         working-directory: ${{ matrix.project.path }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - id: check-pyproject
-        name: Check for pyproject.toml
-        run: |
-          if [[ -f pyproject.toml ]]; then
-            echo 'exists=true' >>"$GITHUB_OUTPUT"
-          else
-            echo 'exists=false' >>"$GITHUB_OUTPUT"
-          fi
       - uses: astral-sh/ruff-action@0c50076f12c38c3d0115b7b519b54a91cb9cf0ad # v3.5.0
-        if: ${{ steps.check-pyproject.outputs.exists }}
       - name: Lint check
-        if: ${{ steps.check-pyproject.outputs.exists }}
         run: ruff check
 
   python-format-check:
     name: "python-format-check: ${{ matrix.project.name }}"
     runs-on: ubuntu-latest
-    needs: get-projects
-    if: ${{ needs.get-projects.outputs.updated-projects != '[]' }}
+    needs: extract-python-projects
+    if: ${{ needs.extract-python-projects.outputs.projects != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        project: ${{ fromJson(needs.get-projects.outputs.updated-projects) }}
+        project: ${{ fromJson(needs.extract-python-projects.outputs.projects) }}
     defaults:
       run:
         working-directory: ${{ matrix.project.path }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - id: check-pyproject
-        name: Check for pyproject.toml
-        run: |
-          if [[ -f pyproject.toml ]]; then
-            echo 'exists=true' >>"$GITHUB_OUTPUT"
-          else
-            echo 'exists=false' >>"$GITHUB_OUTPUT"
-          fi
       - uses: astral-sh/ruff-action@0c50076f12c38c3d0115b7b519b54a91cb9cf0ad # v3.5.0
-        if: ${{ steps.check-pyproject.outputs.exists == 'true' }}
       - name: Format check
-        if: ${{ steps.check-pyproject.outputs.exists == 'true' }}
         run: ruff format --check
 
   python-type-check:
     name: "python-type-check: ${{ matrix.project.name }}"
     runs-on: ubuntu-latest
-    needs: get-projects
-    if: ${{ needs.get-projects.outputs.updated-projects != '[]' }}
+    needs: extract-python-projects
+    if: ${{ needs.extract-python-projects.outputs.projects != '[]' }}
     strategy:
       fail-fast: false
       matrix:
-        project: ${{ fromJson(needs.get-projects.outputs.updated-projects) }}
+        project: ${{ fromJson(needs.extract-python-projects.outputs.projects) }}
     defaults:
       run:
         working-directory: ${{ matrix.project.path }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - id: check-pyproject
-        name: Check for pyproject.toml
-        run: |
-          if [[ -f pyproject.toml ]]; then
-            echo 'exists=true' >>"$GITHUB_OUTPUT"
-          else
-            echo 'exists=false' >>"$GITHUB_OUTPUT"
-          fi
       - uses: astral-sh/setup-uv@bd01e18f51369d5a26f1651c3cb451d3417e3bba # v6.3.1
-        if: ${{ steps.check-pyproject.outputs.exists == 'true' }}
         with:
           activate-environment: true
           working-directory: ${{ matrix.project.path }}
       - name: Update project
-        if: ${{ steps.check-pyproject.outputs.exists == 'true' }}
         run: uv sync
       - name: Type check
-        if: ${{ steps.check-pyproject.outputs.exists == 'true' }}
         run: uvx ty check
 
   dockerfile-lint:

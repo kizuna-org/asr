@@ -1,0 +1,37 @@
+name: Extract Projects by CI Type
+
+on:
+  workflow_call:
+    inputs:
+      ci-type:
+        description: The type of CI to filter projects by
+        required: true
+        type: string
+      updated-projects:
+        description: List of updated projects
+        required: true
+        type: string
+    outputs:
+      projects:
+        description: List of specified projects
+        value: ${{ jobs.extract-projects.outputs.projects }}
+
+permissions: {}
+
+jobs:
+  extract-projects:
+    name: Extract ${{ inputs.ci-type }} projects
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      projects: ${{ steps.extract-projects.outputs.projects }}
+    steps:
+      - name: Extract updated projects
+        id: extract-projects
+        env:
+          PROJECTS: ${{ fromJson(inputs.ci-type) }}
+          CI_TYPE: ${{ inputs.ci-type }}
+        run: |
+          echo "projects=$(jq "select(.[][\"ci-type\"] == \"$CI_TYPE\")" <<<"$PROJECTS")" >>"$GITHUB_OUTPUT"
