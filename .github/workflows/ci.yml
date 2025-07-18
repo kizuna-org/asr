@@ -29,9 +29,17 @@ jobs:
       - terraform-lint
       - kics
       - ansible-lint
+    if: ${{ always() }}
     steps:
-      - name: All status check
-        run: echo "All status check passed"
+      - name: Fail if any needed job failed
+        env:
+          JOBS: ${{ toJson(needs) }}
+        run: |
+          for result in $(jq '.[].result' <<<"$JOBS"); do
+            if [[ "$result" =~ failure|cancelled ]]; then
+              exit 1
+            fi
+          done
 
   ci-req-check:
     runs-on: ubuntu-latest
