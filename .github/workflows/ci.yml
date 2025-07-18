@@ -35,8 +35,8 @@ jobs:
         env:
           JOBS: ${{ toJson(needs) }}
         run: |
-          for result in $(jq '.[].result' <<<"$JOBS"); do
-            if [[ "$result" =~ failure|cancelled ]]; then
+          for result in $(jq -r '.[].result' <<<"$JOBS"); do
+            if [[ ! "$result" =~ ^(success|skipped)$ ]]; then
               exit 1
             fi
           done
