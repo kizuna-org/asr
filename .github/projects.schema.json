@@ -15,7 +15,7 @@
         "title": "Project Type for CI"
       }
     },
-    "required": ["name", "path", "ci-type"],
+    "required": ["name", "path"],
     "additionalProperties": false
   }
 }
