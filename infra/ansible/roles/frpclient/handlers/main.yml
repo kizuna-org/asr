@@ -3,7 +3,7 @@
     cmd: |
       set -euo pipefail
       chmod +x {{ frpclient_dir }}/docker_pre_build.sh
-      {{ frpclient_dir }}/docker_pre_build.sh >> {{ frpclient_dir }}/docker_pre_build.log 2>&1
+      {{ frpclient_dir }}/docker_pre_build.sh > {{ frpclient_dir }}/docker_pre_build.log 2>&1
       sudo docker compose -f {{ frpclient_dir }}/compose.yaml down || :
       sudo docker compose -f {{ frpclient_dir }}/compose.yaml up -d --build
     chdir: "{{ frpclient_dir }}"
