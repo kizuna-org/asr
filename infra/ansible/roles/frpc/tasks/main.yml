@@ -1,6 +1,6 @@
 - name: Copy files
   copy:
-    src: "{{ playbook_dir }}/../files/"
+    src: "{{ playbook_dir }}/../frpc/"
     dest: "{{ frpclient_dir }}/"
     mode: "0644"
   notify: Restart compose
