@@ -31,7 +31,7 @@ jobs:
       - name: Extract updated projects
         id: extract-projects
         env:
-          PROJECTS: ${{ fromJson(inputs.ci-type) }}
+          PROJECTS: ${{ inputs.updated-projects }}
           CI_TYPE: ${{ inputs.ci-type }}
         run: |
-          echo "projects=$(jq "select(.[][\"ci-type\"] == \"$CI_TYPE\")" <<<"$PROJECTS")" >>"$GITHUB_OUTPUT"
+          echo "projects=$(jq -c --arg CI_TYPE "$CI_TYPE" 'map(select(.["ci-type"] == $CI_TYPE))' <<<"$PROJECTS")" >>"$GITHUB_OUTPUT"
