@@ -1,1 +1,0 @@
-../../../../frpc/jenkins/Dockerfile

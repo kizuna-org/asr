@@ -37,30 +37,10 @@ RUN sed -i 's/^#?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config && 
   echo 'PubkeyAuthentication yes' >> /etc/ssh/sshd_config
 
 # dindのイメージ自体にdind内で使うイメージをキャッシュしておくためにここでビルド
-COPY --link ./for-cache/ /home/ansible_user/for-cache/
+COPY ./for-cache/ /home/ansible_user/for-cache/
 RUN chown -R ansible_user:ansible_user /home/ansible_user/for-cache
 RUN chmod -R 755 /home/ansible_user/for-cache
-RUN ls -al /home/ansible_user/for-cache
-RUN set -eux; \
-  # dockerdをバックグラウンドで起動
-  dockerd-entrypoint.sh & \
-  DOCKER_PID=$!; \
-  # dockerdが起動するまで待機 (最大30秒)
-  timeout=60; \
-  while ! docker info >/dev/null 2>&1; do \
-  if [ "$timeout" -le 0 ]; then \
-  echo "Timed out waiting for Docker daemon to start"; \
-  kill $DOCKER_PID; \
-  exit 1; \
-  fi; \
-  sleep 1; \
-  timeout=$((timeout - 1)); \
-  done; \
-  # ビルドスクリプトを実行 (build時はroot権限で実行)
-  cd /home/ansible_user/for-cache && ./docker_pre_build.sh; \
-  # 一時的に起動したdockerdを停止
-  kill $DOCKER_PID; \
-  wait $DOCKER_PID
+COPY ./docker-load.sh /home/ansible_user/docker-load.sh
 
 # 起動コマンド (変更なし)
 CMD ["sh", "-c", "/usr/sbin/sshd && exec dockerd-entrypoint.sh dockerd"]

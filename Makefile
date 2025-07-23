@@ -28,6 +28,7 @@ mock-test: init ansible-mock-apply mock-up
 mock-up: init make-mock-key
 	export PUB_KEY="$$(cat infra/mock/dind-host/dind-host.pub)" && \
 	cd infra/mock && \
+	cd dind-host && \
 	DOCKER_BUILDKIT=1 docker compose build \
 	  --build-arg PUB_KEY="$$PUB_KEY" && \
 	docker compose up -d
@@ -69,3 +70,4 @@ clean:
 	rm -f infra/mock/etc/letsencrypt/live/frps-connect.shiron.dev/privkey.pem
 	rm -f infra/mock/.mock-key.stamp
 	cd infra/mock && docker compose down
+	ssh-keygen -R '[localhost]:50022'
