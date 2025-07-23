@@ -5,7 +5,7 @@ services:
     image: jenkins
     volumes:
       - ./jenkins_home:/var/jenkins_home
-      - ./jenkins/casc.yaml:/usr/share/jenkins/ref/casc.yaml
+      - ./jenkins/casc.yaml:/usr/share/jenkins/ref/casc.yaml:ro
       - /var/run/docker.sock:/var/run/docker.sock
     networks:
       - ci-network

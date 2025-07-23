@@ -19,7 +19,8 @@ RUN if [ -z "${PUB_KEY}" ]; then echo "Error: PUB_KEY build-arg is not set"; exi
 
 RUN apk add --no-cache openssh sudo
 RUN ssh-keygen -A
-RUN adduser -D -h /home/ansible_user ansible_user
+RUN addgroup -g 513 ansible_user
+RUN adduser -D -u 3318 -G ansible_user -h /home/ansible_user ansible_user
 RUN passwd -u ansible_user
 RUN chown ansible_user:ansible_user /etc/ssh/ssh_host_*_key
 
