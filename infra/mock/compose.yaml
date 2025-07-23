@@ -1,8 +1,42 @@
 services:
   dind-host:
     build:
-      context: ./dind-host
+      context: ./dind-host-build-context
       dockerfile: Dockerfile
     ports:
       - 50022:22
     privileged: true
+    networks:
+      - mock-network
+    extra_hosts:
+      - "frps-connect.shiron.dev:172.28.0.20"
+      - "http-p.srv.cc.suzuka-ct.ac.jp:172.28.0.30"
+
+  frps:
+    image: snowdreamtech/frps:latest@sha256:fb8688b1da7fc2f3cfb70bccab427967c4783dba3018c09f3b2b2dcf6ef5571a
+    volumes:
+      - ./frps/frps/frps.toml:/etc/frp/frps.toml
+      - ./etc/letsencrypt:/etc/letsencrypt:ro
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - 8000:8000
+    networks:
+      mock-network:
+        ipv4_address: 172.28.0.20
+
+  squid:
+    image: ubuntu/squid
+    volumes:
+      - ./squid/squid.conf:/etc/squid/squid.conf
+    networks:
+      mock-network:
+        ipv4_address: 172.28.0.30
+
+networks:
+  mock-network:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.28.0.0/24

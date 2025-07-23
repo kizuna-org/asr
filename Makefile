@@ -25,10 +25,10 @@ mock-test: init ansible-mock-apply mock-up
 	# docker run --rm -e BLACKBOX_URL=http://localhost:9115/probe?target=http://jenkins:8080&module=http_2xx blackbox-status-check
 
 .PHONY: mock-up
-mock-up: init make-mock-key
+mock-up: init make-mock-key prepare-mock-context
 	export PUB_KEY="$$(cat infra/mock/dind-host/dind-host.pub)" && \
 	cd infra/mock && \
-	docker compose build \
+	DOCKER_BUILDKIT=1 docker compose build \
 	  --build-arg PUB_KEY="$$PUB_KEY" && \
 	docker compose up -d
 
@@ -36,16 +36,45 @@ mock-up: init make-mock-key
 mock-down: init
 	cd infra/mock && docker compose down
 
-.PHONY: make-mock-key
-make-mock-key: infra/mock/dind-host/dind-host infra/mock/dind-host/dind-host.pub
+.PHONY: prepare-mock-context
+prepare-mock-context: clean-mock-context make-mock-key
+	mkdir -p infra/mock/dind-host-build-context/for-cache
+	cp -RL infra/mock/dind-host/* infra/mock/dind-host-build-context/
 
-infra/mock/dind-host/dind-host & infra/mock/dind-host/dind-host.pub:
-	cd infra/mock/dind-host && ssh-keygen -t rsa -b 4096 -f dind-host -N ""
+.PHONY: clean-mock-context
+clean-mock-context:
+	rm -rf infra/mock/dind-host-build-context
+
+.PHONY: make-mock-key
+make-mock-key: infra/mock/.mock-key.stamp
+
+infra/mock/.mock-key.stamp: \
+	infra/mock/dind-host/dind-host \
+	infra/mock/dind-host/dind-host.pub \
+	infra/mock/etc/letsencrypt/live/frps-connect.shiron.dev/fullchain.pem \
+	infra/mock/etc/letsencrypt/live/frps-connect.shiron.dev/privkey.pem
+	touch infra/mock/.mock-key.stamp
+
+infra/mock/dind-host/dind-host infra/mock/dind-host/dind-host.pub:
+	cd infra/mock/dind-host && \
+	ssh-keygen -t rsa -b 4096 -f dind-host -N ""
 	ssh-keygen -R '[localhost]:50022'
 	chmod 600 infra/mock/dind-host/dind-host
 
+infra/mock/etc/letsencrypt/live/frps-connect.shiron.dev/fullchain.pem \
+infra/mock/etc/letsencrypt/live/frps-connect.shiron.dev/privkey.pem:
+	mkdir -p infra/mock/etc/letsencrypt/live/frps-connect.shiron.dev
+	openssl req -x509 -nodes -days 365 \
+	  -newkey rsa:2048 \
+	  -keyout infra/mock/etc/letsencrypt/live/frps-connect.shiron.dev/privkey.pem \
+	  -out infra/mock/etc/letsencrypt/live/frps-connect.shiron.dev/fullchain.pem \
+	  -subj "/CN=frps-connect.shiron.dev"
+
 .PHONY: clean
-clean:
-	rm infra/mock/dind-host/dind-host
-	rm infra/mock/dind-host/dind-host.pub
+clean: clean-mock-context
+	rm -f infra/mock/dind-host/dind-host
+	rm -f infra/mock/dind-host/dind-host.pub
+	rm -f infra/mock/etc/letsencrypt/live/frps-connect.shiron.dev/fullchain.pem
+	rm -f infra/mock/etc/letsencrypt/live/frps-connect.shiron.dev/privkey.pem
+	rm -f infra/mock/.mock-key.stamp
 	cd infra/mock && docker compose down

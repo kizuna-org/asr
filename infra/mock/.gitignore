@@ -1,2 +1,4 @@
 dind-host/dind-host
 dind-host/dind-host.pub
+etc/
+dind-host-build-context/
