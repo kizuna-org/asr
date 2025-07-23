@@ -37,12 +37,11 @@ RUN sed -i 's/^#?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config && 
   echo 'PubkeyAuthentication yes' >> /etc/ssh/sshd_config
 
 # dindのイメージ自体にdind内で使うイメージをキャッシュしておくためにここでビルド
-COPY ./for-cache/ /home/ansible_user/for-cache/
+COPY --link ./for-cache/ /home/ansible_user/for-cache/
 RUN chown -R ansible_user:ansible_user /home/ansible_user/for-cache
 RUN chmod -R 755 /home/ansible_user/for-cache
 RUN ls -al /home/ansible_user/for-cache
-RUN --mount=type=docker \
-  set -eux; \
+RUN set -eux; \
   # dockerdをバックグラウンドで起動
   dockerd-entrypoint.sh & \
   DOCKER_PID=$!; \

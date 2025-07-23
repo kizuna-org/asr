@@ -25,7 +25,7 @@ mock-test: init ansible-mock-apply mock-up
 	# docker run --rm -e BLACKBOX_URL=http://localhost:9115/probe?target=http://jenkins:8080&module=http_2xx blackbox-status-check
 
 .PHONY: mock-up
-mock-up: init make-mock-key prepare-mock-context
+mock-up: init make-mock-key
 	export PUB_KEY="$$(cat infra/mock/dind-host/dind-host.pub)" && \
 	cd infra/mock && \
 	DOCKER_BUILDKIT=1 docker compose build \
@@ -35,15 +35,6 @@ mock-up: init make-mock-key prepare-mock-context
 .PHONY: mock-down
 mock-down: init
 	cd infra/mock && docker compose down
-
-.PHONY: prepare-mock-context
-prepare-mock-context: clean-mock-context make-mock-key
-	mkdir -p infra/mock/dind-host-build-context/for-cache
-	cp -RL infra/mock/dind-host/* infra/mock/dind-host-build-context/
-
-.PHONY: clean-mock-context
-clean-mock-context:
-	rm -rf infra/mock/dind-host-build-context
 
 .PHONY: make-mock-key
 make-mock-key: infra/mock/.mock-key.stamp
@@ -71,7 +62,7 @@ infra/mock/etc/letsencrypt/live/frps-connect.shiron.dev/privkey.pem:
 	  -subj "/CN=frps-connect.shiron.dev"
 
 .PHONY: clean
-clean: clean-mock-context
+clean:
 	rm -f infra/mock/dind-host/dind-host
 	rm -f infra/mock/dind-host/dind-host.pub
 	rm -f infra/mock/etc/letsencrypt/live/frps-connect.shiron.dev/fullchain.pem
