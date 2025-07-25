@@ -16,4 +16,7 @@ RUN useradd -m -s /bin/bash dataset-manager && \
     chown -R dataset-manager:dataset-manager /mnt/samba
 USER dataset-manager
 
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+  CMD test -d /mnt/samba/ || exit 1
+
 ENTRYPOINT ["sh", "-c", "/mount.sh && python3 /main.py"]
