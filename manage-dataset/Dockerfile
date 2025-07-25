@@ -12,4 +12,8 @@ RUN chmod +x /mount.sh
 COPY file_fetcher.py /file_fetcher.py
 COPY main.py /main.py
 
+RUN useradd -m -s /bin/bash dataset-manager && \
+    chown -R dataset-manager:dataset-manager /mnt/samba
+USER dataset-manager
+
 ENTRYPOINT ["sh", "-c", "/mount.sh && python3 /main.py"]
