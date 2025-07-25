@@ -1,7 +1,7 @@
 FROM ubuntu:24.04
 
 RUN apt-get update && \
-    apt-get install -y cifs-utils && \
+    apt-get install --no-install-recommends -y cifs-utils=2:7.0-2ubuntu0.2 && \
     rm -rf /var/lib/apt/lists/*
 
 RUN mkdir -p /mnt/samba
