@@ -27,6 +27,8 @@ services:
       - frps
     security_opt:
       - no-new-privileges:true
+    env_file:
+      - .env
 
 networks:
   frp-network:

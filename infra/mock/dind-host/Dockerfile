@@ -43,5 +43,9 @@ RUN chown -R ansible_user:ansible_user /home/ansible_user/for-cache
 RUN chmod -R 755 /home/ansible_user/for-cache
 COPY ./docker-load.sh /home/ansible_user/docker-load.sh
 
+# docker/daemon.json を作成し、DNS を 172.28.0.40 に設定
+RUN mkdir -p /etc/docker \
+  && echo '{"dns": ["172.28.0.40"]}' > /etc/docker/daemon.json
+
 # 起動コマンド (変更なし)
 CMD ["sh", "-c", "/usr/sbin/sshd && exec dockerd-entrypoint.sh dockerd"]

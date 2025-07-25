@@ -1,6 +1,6 @@
 # jenkins/Dockerfile (最終確定版)
 
-FROM jenkins/jenkins:lts
+FROM jenkins/jenkins:2.516.1-lts
 
 USER root
 
@@ -42,7 +42,7 @@ RUN if ping -c 1 -W 1 http-p.srv.cc.suzuka-ct.ac.jp > /dev/null 2>&1; then \
   apt-transport-https=2.6.1 \
   ca-certificates=20230311+deb12u1 \
   curl=7.88.1-10+deb12u12 \
-  gnupg2=2.2.40-1.1 \
+  gnupg=2.2.40-1.1 \
   software-properties-common=0.99.30-4.1~deb12u1 \
   git=1:2.39.5-0+deb12u2 && \
   mkdir -p /etc/apt/keyrings && \

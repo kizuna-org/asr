@@ -56,18 +56,15 @@ infra/mock/dind-host/dind-host infra/mock/dind-host/dind-host.pub:
 infra/mock/etc/letsencrypt/live/frps-connect.shiron.dev/fullchain.pem \
 infra/mock/etc/letsencrypt/live/frps-connect.shiron.dev/privkey.pem:
 	mkdir -p infra/mock/etc/letsencrypt/live/frps-connect.shiron.dev
-	openssl req -x509 -nodes -days 365 \
-	  -newkey rsa:2048 \
-	  -keyout infra/mock/etc/letsencrypt/live/frps-connect.shiron.dev/privkey.pem \
-	  -out infra/mock/etc/letsencrypt/live/frps-connect.shiron.dev/fullchain.pem \
-	  -subj "/CN=frps-connect.shiron.dev"
+	scp snct-proxy-srv.shiron.dev:~/frps-connect.shiron.dev/fullchain.pem infra/mock/etc/letsencrypt/live/frps-connect.shiron.dev/fullchain.pem
+	scp snct-proxy-srv.shiron.dev:~/frps-connect.shiron.dev/privkey.pem infra/mock/etc/letsencrypt/live/frps-connect.shiron.dev/privkey.pem
 
 .PHONY: clean
 clean:
+	cd infra/mock && docker compose down
 	rm -f infra/mock/dind-host/dind-host
 	rm -f infra/mock/dind-host/dind-host.pub
 	rm -f infra/mock/etc/letsencrypt/live/frps-connect.shiron.dev/fullchain.pem
 	rm -f infra/mock/etc/letsencrypt/live/frps-connect.shiron.dev/privkey.pem
 	rm -f infra/mock/.mock-key.stamp
-	cd infra/mock && docker compose down
 	ssh-keygen -R '[localhost]:50022'

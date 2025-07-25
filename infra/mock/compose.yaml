@@ -8,9 +8,8 @@ services:
     privileged: true
     networks:
       - mock-network
-    extra_hosts:
-      - "frps-connect.shiron.dev:172.28.0.20"
-      - "http-p.srv.cc.suzuka-ct.ac.jp:172.28.0.30"
+    dns:
+      - 172.28.0.40
 
   frps:
     image: snowdreamtech/frps:latest@sha256:fb8688b1da7fc2f3cfb70bccab427967c4783dba3018c09f3b2b2dcf6ef5571a
@@ -24,6 +23,8 @@ services:
     networks:
       mock-network:
         ipv4_address: 172.28.0.20
+    dns:
+      - 172.28.0.40
 
   squid:
     image: ubuntu/squid
@@ -32,6 +33,19 @@ services:
     networks:
       mock-network:
         ipv4_address: 172.28.0.30
+    dns:
+      - 172.28.0.40
+
+  dnsmasq:
+    image: dockurr/dnsmasq
+    container_name: dnsmasq
+    volumes:
+      - ./dnsmasq/dnsmasq.conf:/etc/dnsmasq.conf:ro
+    cap_add:
+      - NET_ADMIN
+    networks:
+      mock-network:
+        ipv4_address: 172.28.0.40
 
 networks:
   mock-network:

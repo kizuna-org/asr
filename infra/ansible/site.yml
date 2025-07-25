@@ -1,2 +1,4 @@
 - name: Edu GPU
   import_playbook: edu-gpu.yml
+- name: Cloud Proxy
+  import_playbook: cloud-proxy.yml
