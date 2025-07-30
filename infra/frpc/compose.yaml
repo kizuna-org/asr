@@ -22,6 +22,20 @@ services:
       timeout: 10s
       retries: 10
       start_period: 10s
+    restart: always
+
+  samba:
+    image: ghcr.io/dockur/samba:4.21.6@sha256:3b7ffd8f614deb8e93158a32709a7aea468ee30b7687b162bb2143ed04ac8340
+    container_name: samba
+    volumes:
+      - ./samba:/storage
+    networks:
+      - ci-network
+    environment:
+      NAME: $SAMBA_NAME
+      USER: $SAMBA_USER
+      PASS: $SAMBA_PASS
+    restart: always
 
   frpc:
     image: snowdreamtech/frpc:latest@sha256:f484536eda0f5c9a367ba9a366b5e1506324b9a31da9edbd4baa75005ded9d9c
@@ -32,7 +46,7 @@ services:
       - ci-network
     depends_on:
       - jenkins
-    restart: unless-stopped
+    restart: always
     security_opt:
       - no-new-privileges:true
 
@@ -49,6 +63,16 @@ services:
       - no-new-privileges:true
     volumes:
       - ./blackbox/prometheus.yml:/etc/prometheus/prometheus.yml
+    restart: always
+
+  portainer:
+    image: portainer/portainer-ce:2.27.0-rc2@sha256:00a51f306e154c0e1849d17d45bb4b2b947a2af28deb1e031db0adc076f97d26
+    ports:
+      - "9000:9000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./portainer_data:/data
+    restart: always
 
 networks:
   ci-network:

@@ -1,3 +1,6 @@
+- name: Load secret
+  ansible.builtin.include_vars: secret.yml
+
 - name: Copy files
   copy:
     src: "{{ playbook_dir }}/../frps/"

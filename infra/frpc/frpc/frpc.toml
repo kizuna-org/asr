@@ -14,7 +14,7 @@ log.level = "debug"
 log.maxDays = 7
 
 [transport]
-tls.enable = true
+# tls.enable = true
 # proxyURL = "http://squid:3128"
 proxyURL = "http://http-p.srv.cc.suzuka-ct.ac.jp:8080"
 
