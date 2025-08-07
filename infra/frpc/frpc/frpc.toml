@@ -32,6 +32,13 @@ type = "http"
 path = "/login"
 intervalSeconds = 10
 
+[[proxies]]
+name = "ssh"
+type = "tcp"
+localIP = "host.docker.internal"
+localPort = 22
+remotePort = 6000
+
 # Gitea HTTP プロキシ設定 (将来有効にする場合)
 # [[proxies]]
 # name = "gitea-http"

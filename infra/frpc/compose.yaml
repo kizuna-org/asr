@@ -24,18 +24,18 @@ services:
       start_period: 10s
     restart: always
 
-  samba:
-    image: ghcr.io/dockur/samba:4.21.6@sha256:3b7ffd8f614deb8e93158a32709a7aea468ee30b7687b162bb2143ed04ac8340
-    container_name: samba
-    volumes:
-      - ./samba:/storage
-    networks:
-      - ci-network
-    environment:
-      NAME: $SAMBA_NAME
-      USER: $SAMBA_USER
-      PASS: $SAMBA_PASS
-    restart: always
+  # samba:
+  #   image: ghcr.io/dockur/samba:4.21.6@sha256:3b7ffd8f614deb8e93158a32709a7aea468ee30b7687b162bb2143ed04ac8340
+  #   container_name: samba
+  #   volumes:
+  #     - ./samba:/storage
+  #   networks:
+  #     - ci-network
+  #   environment:
+  #     NAME: $SAMBA_NAME
+  #     USER: $SAMBA_USER
+  #     PASS: $SAMBA_PASS
+  #   restart: always
 
   frpc:
     image: snowdreamtech/frpc:latest@sha256:f484536eda0f5c9a367ba9a366b5e1506324b9a31da9edbd4baa75005ded9d9c
@@ -47,6 +47,8 @@ services:
     depends_on:
       - jenkins
     restart: always
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     security_opt:
       - no-new-privileges:true
 
