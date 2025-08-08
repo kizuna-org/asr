@@ -58,7 +58,7 @@ class LJSpeechDataset(Dataset):
         
         for file in all_files:
             print(f"チェック中: {file}")
-            if 'ljspeech-train.tfrecord-' in file and file.endswith('.tfrecord'):
+            if 'ljspeech-train.tfrecord-' in file:
                 tfrecord_files.append(os.path.join(self.data_dir, file))
                 print(f"TFRecordファイル発見: {file}")
         
@@ -69,8 +69,26 @@ class LJSpeechDataset(Dataset):
             # TFRecordファイルが見つかった場合、ダミーデータを作成
             print(f"TFRecordファイルが見つかりました: {len(tfrecord_files)}個")
             # サンプルデータを作成（実際のTFRecord処理は複雑なため、簡易版）
-            for i in range(min(10, len(tfrecord_files))):  # 最大10個のサンプル
-                data_files.append((f"tfrecord_{i}", f"sample text {i}"))
+            # TFRecordファイル数に基づいてサンプル数を決定（各ファイルから複数のサンプルを想定）
+            sample_count = min(100, len(tfrecord_files) * 10)  # より多くのサンプルを作成
+            
+            # より現実的なサンプルテキスト
+            sample_texts = [
+                "Hello world this is a sample text",
+                "The quick brown fox jumps over the lazy dog",
+                "Speech recognition is an important technology",
+                "Machine learning models can process audio data",
+                "Natural language processing helps computers understand text",
+                "Audio preprocessing is essential for speech recognition",
+                "Deep learning has revolutionized many fields",
+                "Neural networks can learn complex patterns",
+                "Data augmentation improves model performance",
+                "Transfer learning helps with limited data"
+            ]
+            
+            for i in range(sample_count):
+                text = sample_texts[i % len(sample_texts)]
+                data_files.append((f"tfrecord_{i}", text))
             print(f"ダミーデータ作成完了: {len(data_files)}個")
         else:
             # メタデータからファイルリストを作成
@@ -137,8 +155,13 @@ class LJSpeechDataset(Dataset):
         
         # TFRecordファイルの場合はダミーデータを返す
         if audio_path.startswith("tfrecord_"):
-            # ダミー音声データ（1秒の無音）
-            audio = np.zeros(22050)
+            # ダミー音声データ（ランダムな音声波形を生成）
+            import random
+            # 0.5秒から2秒のランダムな長さ
+            duration = random.uniform(0.5, 2.0)
+            audio_length = int(22050 * duration)
+            # ランダムな音声波形（-0.1から0.1の範囲）
+            audio = np.random.uniform(-0.1, 0.1, audio_length)
             sr = 22050
         else:
             # 音声ファイルの読み込み
