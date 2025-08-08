@@ -1,6 +1,6 @@
 services:
   asr-app:
-    build: .
+    image: asr-app # 絶対に修正しないでください。ホストサーバーの環境が特殊なため、このimage以外では動きません
     ports:
       - "8501:8501"  # Streamlit
       - "8000:8000"  # FastAPI
