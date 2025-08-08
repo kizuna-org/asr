@@ -13,6 +13,8 @@ import pandas as pd
 from .model import LightweightASRModel, FastASRModel, CHAR_TO_ID, ID_TO_CHAR
 from .dataset import AudioPreprocessor, TextPreprocessor, ASRDataset, create_dataloader, SyntheticDataset
 from .trainer import ASRTrainer, FastTrainer
+from .controlled_trainer import ControlledASRTrainer
+from .ljspeech_dataset import create_ljspeech_dataloader
 from .utils import (
     AudioRecorder, RealTimeASR, AudioProcessor, ModelManager, 
     PerformanceMonitor, create_sample_audio_data, save_sample_dataset
@@ -39,6 +41,10 @@ if 'performance_monitor' not in st.session_state:
     st.session_state.performance_monitor = PerformanceMonitor()
 if 'training_history' not in st.session_state:
     st.session_state.training_history = {'loss': [], 'wer': [], 'epoch': []}
+if 'controlled_trainer' not in st.session_state:
+    st.session_state.controlled_trainer = None
+if 'training_status' not in st.session_state:
+    st.session_state.training_status = {}
 
 # タイトル
 st.title("🎤 リアルタイム音声認識モデル学習システム")
@@ -170,80 +176,182 @@ with tab2:
     if st.session_state.model and st.session_state.audio_preprocessor:
         st.subheader("🚀 学習実行")
         
-        # データセットの読み込み
-        data_dir = "data/raw"
-        if os.path.exists(data_dir) and os.listdir(data_dir):
-            try:
-                dataset = ASRDataset(
-                    data_dir=data_dir,
-                    audio_preprocessor=st.session_state.audio_preprocessor,
-                    text_preprocessor=st.session_state.text_preprocessor
-                )
-                
-                if len(dataset) > 0:
-                    st.success(f"✅ データセット読み込み完了: {len(dataset)}サンプル")
-                    
-                    # データローダーの作成
-                    train_loader = create_dataloader(
-                        dataset, 
-                        batch_size=batch_size, 
-                        shuffle=True
+        # データセット選択
+        dataset_type = st.selectbox(
+            "データセットタイプ",
+            ["サンプルデータ", "LJSpeechデータセット"],
+            help="使用するデータセットを選択してください"
+        )
+        
+        if dataset_type == "LJSpeechデータセット":
+            # LJSpeechデータセットの確認
+            ljspeech_dir = "/app/datasets/ljspeech/1.1.1"
+            if os.path.exists(ljspeech_dir):
+                try:
+                    # LJSpeechデータローダーを作成
+                    train_loader, dataset_info = create_ljspeech_dataloader(
+                        data_dir=ljspeech_dir,
+                        audio_preprocessor=st.session_state.audio_preprocessor,
+                        text_preprocessor=st.session_state.text_preprocessor,
+                        batch_size=batch_size,
+                        max_length=1000
                     )
                     
-                    # トレーナーの初期化
-                    if model_type.startswith("Fast"):
-                        st.session_state.trainer = FastTrainer(
-                            model=st.session_state.model,
-                            train_loader=train_loader,
-                            device=device,
-                            learning_rate=learning_rate,
-                            max_epochs=max_epochs,
-                            model_save_dir="models"
+                    st.success(f"✅ LJSpeechデータセット読み込み完了: {dataset_info['total_samples']}サンプル")
+                    st.info(f"📊 データセット情報: {dataset_info['tfrecord_files']}個のTFRecordファイル")
+                    
+                    # サンプルテキストの表示
+                    if dataset_info['sample_texts']:
+                        st.write("📝 サンプルテキスト:")
+                        for i, text in enumerate(dataset_info['sample_texts'][:3]):
+                            st.write(f"{i+1}. {text}")
+                    
+                except Exception as e:
+                    st.error(f"❌ LJSpeechデータセットの読み込みに失敗しました: {str(e)}")
+                    return
+            else:
+                st.error("❌ LJSpeechデータセットが見つかりません")
+                return
+        else:
+            # サンプルデータセットの読み込み
+            data_dir = "data/raw"
+            if os.path.exists(data_dir) and os.listdir(data_dir):
+                try:
+                    dataset = ASRDataset(
+                        data_dir=data_dir,
+                        audio_preprocessor=st.session_state.audio_preprocessor,
+                        text_preprocessor=st.session_state.text_preprocessor
+                    )
+                    
+                    if len(dataset) > 0:
+                        st.success(f"✅ サンプルデータセット読み込み完了: {len(dataset)}サンプル")
+                        train_loader = create_dataloader(
+                            dataset, 
+                            batch_size=batch_size, 
+                            shuffle=True
                         )
                     else:
-                        st.session_state.trainer = ASRTrainer(
-                            model=st.session_state.model,
-                            train_loader=train_loader,
-                            device=device,
-                            learning_rate=learning_rate,
-                            max_epochs=max_epochs,
-                            model_save_dir="models"
-                        )
-                    
-                    # 学習開始ボタン
-                    if st.button("🎯 学習開始", type="primary"):
-                        st.subheader("📈 学習進捗")
-                        
-                        # プログレスバー
-                        progress_bar = st.progress(0)
-                        status_text = st.empty()
-                        
-                        # 学習履歴の表示用
-                        chart_placeholder = st.empty()
-                        
-                        # 学習実行
-                        try:
-                            history = st.session_state.trainer.train()
-                            
-                            # 学習履歴を更新
-                            st.session_state.training_history = {
-                                'loss': history['train_losses'],
-                                'wer': history['train_wers'],
-                                'epoch': list(range(1, len(history['train_losses']) + 1))
-                            }
-                            
-                            st.success("✅ 学習が完了しました！")
-                            
-                        except Exception as e:
-                            st.error(f"❌ 学習中にエラーが発生しました: {str(e)}")
-                
-                else:
-                    st.warning("⚠️ データセットが空です。サンプルデータを生成するか、音声ファイルをアップロードしてください。")
+                        st.warning("⚠️ データセットが空です。サンプルデータを生成してください。")
+                        return
+                except Exception as e:
+                    st.error(f"❌ データセットの読み込みに失敗しました: {str(e)}")
+                    return
+            else:
+                st.info("ℹ️ サンプルデータを生成してください。")
+                return
+        
+        # 制御可能なトレーナーの初期化
+        if st.session_state.controlled_trainer is None:
+            st.session_state.controlled_trainer = ControlledASRTrainer(
+                model=st.session_state.model,
+                train_loader=train_loader,
+                device=device,
+                learning_rate=learning_rate,
+                max_epochs=max_epochs,
+                model_save_dir="models"
+            )
+        
+        # 学習制御UI
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            if st.button("▶️ 学習開始", type="primary"):
+                result = st.session_state.controlled_trainer.start_training()
+                st.success(result["message"])
+        
+        with col2:
+            if st.button("⏸️ 一時停止"):
+                result = st.session_state.controlled_trainer.pause_training()
+                st.info(result["message"])
+        
+        with col3:
+            if st.button("▶️ 再開"):
+                result = st.session_state.controlled_trainer.resume_training()
+                st.success(result["message"])
+        
+        with col4:
+            if st.button("⏹️ 停止"):
+                result = st.session_state.controlled_trainer.stop_training()
+                st.warning(result["message"])
+        
+        # 学習状態の表示
+        if st.session_state.controlled_trainer:
+            status = st.session_state.controlled_trainer.get_training_status()
             
-            except Exception as e:
-                st.error(f"❌ データセットの読み込みに失敗しました: {str(e)}")
-        else:
-            st.info("ℹ️ データディレクトリが空です。サンプルデータを生成するか、音声ファイルをアップロードしてください。")
+            st.subheader("📊 学習状態")
+            col1, col2, col3 = st.columns(3)
+            
+            with col1:
+                st.metric("学習中", "✅" if status["is_training"] else "❌")
+                st.metric("一時停止", "✅" if status["is_paused"] else "❌")
+            
+            with col2:
+                st.metric("現在のエポック", f"{status['current_epoch'] + 1}/{status['max_epochs']}")
+                st.metric("現在のバッチ", status["current_batch"])
+            
+            with col3:
+                st.metric("ベスト損失", f"{status['best_val_loss']:.4f}")
+                st.metric("ベストエポック", status["best_epoch"] + 1)
+        
+        # チェックポイント管理
+        st.subheader("💾 チェックポイント管理")
+        
+        if st.session_state.controlled_trainer:
+            checkpoints = st.session_state.controlled_trainer.get_available_checkpoints()
+            
+            if checkpoints:
+                selected_checkpoint = st.selectbox(
+                    "チェックポイントを選択",
+                    checkpoints,
+                    help="読み込むチェックポイントを選択してください"
+                )
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    if st.button("📥 チェックポイント読み込み"):
+                        checkpoint_path = os.path.join("models", selected_checkpoint)
+                        result = st.session_state.controlled_trainer.load_checkpoint(checkpoint_path)
+                        st.success(result["message"])
+                
+                with col2:
+                    if st.button("💾 現在の状態を保存"):
+                        result = st.session_state.controlled_trainer.save_checkpoint()
+                        st.success(result["message"])
+            else:
+                st.info("ℹ️ 利用可能なチェックポイントがありません")
+        
+        # リアルタイム学習進捗
+        if st.session_state.controlled_trainer and status["is_training"]:
+            st.subheader("📈 リアルタイム学習進捗")
+            
+            # 学習曲線の表示
+            if status["train_losses"]:
+                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
+                
+                # 損失曲線
+                ax1.plot(status["train_losses"], label='Train Loss')
+                if status["val_losses"]:
+                    ax1.plot(status["val_losses"], label='Val Loss')
+                ax1.set_title('Training and Validation Loss')
+                ax1.set_xlabel('Epoch')
+                ax1.set_ylabel('Loss')
+                ax1.legend()
+                ax1.grid(True)
+                
+                # WER曲線
+                ax2.plot(status["train_wers"], label='Train WER')
+                if status["val_wers"]:
+                    ax2.plot(status["val_wers"], label='Val WER')
+                ax2.set_title('Training and Validation WER')
+                ax2.set_xlabel('Epoch')
+                ax2.set_ylabel('WER')
+                ax2.legend()
+                ax2.grid(True)
+                
+                plt.tight_layout()
+                st.pyplot(fig)
+                plt.close()
 
 with tab3:
     st.header("🎤 リアルタイム音声認識")

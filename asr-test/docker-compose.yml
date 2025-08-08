@@ -9,6 +9,7 @@ services:
       - ./models:/app/models
       - ./app:/app/app
       - ./static:/app/static
+      - /home/students/r03i/r03i18/temp/datasets:/app/datasets
     environment:
       - PYTHONPATH=/app
       - CUDA_VISIBLE_DEVICES=0
