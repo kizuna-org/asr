@@ -317,6 +317,7 @@ class ControlledASRTrainer:
             total_loss += loss.item()
             
             # WER計算（サンプル数制限）
+            wer_score = 0.0
             if batch_idx % 10 == 0:
                 with torch.no_grad():
                     decoded_sequences = self.model.decode(logits, audio_lengths)
@@ -337,7 +338,9 @@ class ControlledASRTrainer:
                 self.progress_callback(progress)
         
         avg_loss = total_loss / num_batches if num_batches > 0 else 0.0
-        avg_wer = total_wer / (num_batches // 10) if num_batches > 0 else 0.0
+        # WER計算の頻度を調整してゼロ除算を防ぐ
+        wer_batches = max(1, (num_batches + 9) // 10)  # 切り上げ除算
+        avg_wer = total_wer / wer_batches if wer_batches > 0 else 0.0
         
         return avg_loss, avg_wer
     
