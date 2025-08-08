@@ -419,7 +419,17 @@ with tab3:
     if auto_refresh and st.session_state.controlled_trainer:
         status = st.session_state.controlled_trainer.get_training_status()
         if status["is_training"]:
-            st.rerun()
+            # 自動更新のためのJavaScript
+            st.markdown(
+                """
+                <script>
+                    setTimeout(function(){
+                        window.location.reload();
+                    }, 5000);
+                </script>
+                """,
+                unsafe_allow_html=True
+            )
     
     if not st.session_state.controlled_trainer:
         st.info("ℹ️ 学習を開始すると進捗が表示されます")
@@ -685,7 +695,15 @@ with tab6:
             
             # リアルタイム更新
             if st.button("🔄 状態更新"):
-                st.rerun()
+                # ページを更新
+                st.markdown(
+                    """
+                    <script>
+                        window.location.reload();
+                    </script>
+                    """,
+                    unsafe_allow_html=True
+                )
             
             # 学習状態の詳細表示
             col1, col2, col3, col4 = st.columns(4)
