@@ -74,24 +74,45 @@ class AudioPreprocessor:
         """
         numpy配列から音声を前処理
         """
-        # テンソルに変換
-        waveform = torch.from_numpy(audio_array).float()
-        if len(waveform.shape) == 1:
-            waveform = waveform.unsqueeze(0)
-        
-        # サンプリングレートの統一
-        if sample_rate != self.sample_rate:
-            resampler = torchaudio.transforms.Resample(sample_rate, self.sample_rate)
-            waveform = resampler(waveform)
-        
-        # メルスペクトログラムに変換
-        mel_spec = self.mel_transform(waveform)
-        log_mel_spec = self.log_transform(mel_spec)
-        
-        # 正規化
-        log_mel_spec = (log_mel_spec - log_mel_spec.mean()) / (log_mel_spec.std() + 1e-8)
-        
-        return log_mel_spec.squeeze(0).transpose(0, 1)
+        try:
+            print(f"前処理開始: 音声配列形状={audio_array.shape}, サンプリングレート={sample_rate}")
+            
+            # テンソルに変換
+            waveform = torch.from_numpy(audio_array).float()
+            if len(waveform.shape) == 1:
+                waveform = waveform.unsqueeze(0)
+            print(f"テンソル変換後: {waveform.shape}")
+            
+            # サンプリングレートの統一
+            if sample_rate != self.sample_rate:
+                print(f"リサンプリング: {sample_rate} -> {self.sample_rate}")
+                resampler = torchaudio.transforms.Resample(sample_rate, self.sample_rate)
+                waveform = resampler(waveform)
+                print(f"リサンプリング後: {waveform.shape}")
+            
+            # メルスペクトログラムに変換
+            print("メルスペクトログラム変換開始...")
+            mel_spec = self.mel_transform(waveform)
+            print(f"メルスペクトログラム形状: {mel_spec.shape}")
+            
+            log_mel_spec = self.log_transform(mel_spec)
+            print(f"対数変換後形状: {log_mel_spec.shape}")
+            
+            # 正規化
+            log_mel_spec = (log_mel_spec - log_mel_spec.mean()) / (log_mel_spec.std() + 1e-8)
+            print(f"正規化後形状: {log_mel_spec.shape}")
+            
+            result = log_mel_spec.squeeze(0).transpose(0, 1)
+            print(f"最終結果形状: {result.shape}")
+            
+            return result
+            
+        except Exception as e:
+            print(f"音声前処理エラー: {e}")
+            import traceback
+            traceback.print_exc()
+            # エラーの場合はダミーデータを返す
+            return torch.zeros((100, 80))  # ダミーの特徴量
 
 
 class TextPreprocessor:
@@ -115,11 +136,21 @@ class TextPreprocessor:
     
     def ids_to_text(self, ids: List[int]) -> str:
         """ID列をテキストに変換"""
-        text = ""
-        for id_val in ids:
-            if id_val in self.id_to_char and self.id_to_char[id_val] != '<blank>':
-                text += self.id_to_char[id_val]
-        return text
+        try:
+            print(f"テキスト変換開始: IDs={ids}")
+            text = ""
+            for id_val in ids:
+                if id_val in self.id_to_char and self.id_to_char[id_val] != '<blank>':
+                    char = self.id_to_char[id_val]
+                    text += char
+                    print(f"ID {id_val} -> '{char}'")
+                else:
+                    print(f"ID {id_val} は無効またはブランク")
+            print(f"最終テキスト: '{text}'")
+            return text
+        except Exception as e:
+            print(f"テキスト変換エラー: {e}")
+            return ""
 
 
 class ASRDataset(Dataset):

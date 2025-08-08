@@ -144,29 +144,49 @@ class RealTimeASR:
     
     def recognize_audio(self, audio_data: np.ndarray) -> str:
         """音声データを認識"""
-        if len(audio_data) == 0:
-            return ""
-        
-        # 音声の前処理
-        audio_features = self.audio_preprocessor.preprocess_audio_from_array(
-            audio_data, self.sample_rate
-        )
-        
-        # バッチ次元を追加
-        audio_features = audio_features.unsqueeze(0).to(self.device)
-        
-        # 推論
-        with torch.no_grad():
-            logits = self.model(audio_features)
-            decoded_sequences = self.model.decode(logits)
-        
-        # テキストに変換
-        if decoded_sequences:
-            text_ids = decoded_sequences[0]
-            text = self.text_preprocessor.ids_to_text(text_ids)
-            return text
-        
-        return ""
+        try:
+            print(f"音声データ長: {len(audio_data)}")
+            print(f"音声データ範囲: {audio_data.min():.4f} ~ {audio_data.max():.4f}")
+            
+            if len(audio_data) == 0:
+                print("音声データが空です")
+                return ""
+            
+            # 音声の前処理
+            print("音声前処理開始...")
+            audio_features = self.audio_preprocessor.preprocess_audio_from_array(
+                audio_data, self.sample_rate
+            )
+            print(f"特徴量形状: {audio_features.shape}")
+            
+            # バッチ次元を追加
+            audio_features = audio_features.unsqueeze(0).to(self.device)
+            print(f"バッチ次元追加後形状: {audio_features.shape}")
+            
+            # 推論
+            print("推論開始...")
+            with torch.no_grad():
+                logits = self.model(audio_features)
+                print(f"ロジット形状: {logits.shape}")
+                decoded_sequences = self.model.decode(logits)
+                print(f"デコード結果: {decoded_sequences}")
+            
+            # テキストに変換
+            if decoded_sequences:
+                text_ids = decoded_sequences[0]
+                print(f"テキストID: {text_ids}")
+                text = self.text_preprocessor.ids_to_text(text_ids)
+                print(f"変換後テキスト: '{text}'")
+                return text
+            else:
+                print("デコード結果が空です")
+                return ""
+                
+        except Exception as e:
+            print(f"音声認識エラー: {e}")
+            import traceback
+            traceback.print_exc()
+            return f"エラー: {str(e)}"
 
 
 class AudioProcessor:
