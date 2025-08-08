@@ -64,7 +64,7 @@ if 'training_status' not in st.session_state:
 if 'training_progress' not in st.session_state:
     st.session_state.training_progress = {'current_epoch': 0, 'current_batch': 0, 'total_batches': 0}
 if 'dataset_info' not in st.session_state:
-    st.session_state.dataset_info = {}
+    st.session_state.dataset_info = None
 
 # メモリ管理
 def clear_memory():
@@ -246,6 +246,7 @@ with tab2:
                         'samples': len(samples),
                         'path': 'data/raw'
                     }
+                    st.info(f"✅ データセット情報を設定しました: {st.session_state.dataset_info}")
                 except Exception as e:
                     st.error(f"❌ サンプルデータ生成に失敗しました: {str(e)}")
     
@@ -265,6 +266,7 @@ with tab2:
                 'samples': len(uploaded_files),
                 'path': 'data/custom'
             }
+            st.info(f"✅ カスタムデータセット情報を設定しました: {st.session_state.dataset_info}")
     
     # データセット選択
     st.write("**データセット選択**")
@@ -283,6 +285,7 @@ with tab2:
                 'samples': 'unknown',
                 'path': ljspeech_dir
             }
+            st.info(f"✅ LJSpeechデータセット情報を設定しました: {st.session_state.dataset_info}")
         else:
             st.error("❌ LJSpeechデータセットが見つかりません")
             st.info("ℹ️ サンプルデータを生成するか、カスタムデータをアップロードしてください")
@@ -299,6 +302,7 @@ with tab2:
         st.info(f"📊 現在のデータセット: {st.session_state.dataset_info['type']} ({st.session_state.dataset_info['samples']}サンプル)")
     elif st.session_state.dataset_info:
         st.warning("⚠️ データセット情報が不正です")
+        st.session_state.dataset_info = None  # 不正なデータをクリア
     
     # ステップ3: 学習実行
     st.subheader("3️⃣ 学習実行")
@@ -331,6 +335,11 @@ with tab2:
         with col1:
             if st.button("▶️ 学習開始", type="primary"):
                 try:
+                    # データセット情報の検証
+                    if not st.session_state.dataset_info or not isinstance(st.session_state.dataset_info, dict):
+                        st.error("❌ データセット情報が不正です")
+                        st.stop()
+                    
                     # データローダーの作成
                     if st.session_state.dataset_info['type'] == 'sample':
                         dataset = ASRDataset(
@@ -390,7 +399,11 @@ with tab2:
                     st.success(result["message"])
                     
                 except Exception as e:
+                    import traceback
                     st.error(f"❌ 学習開始に失敗しました: {str(e)}")
+                    st.error(f"詳細: {traceback.format_exc()}")
+                    st.error(f"dataset_info: {st.session_state.dataset_info}")
+                    st.error(f"dataset_info type: {type(st.session_state.dataset_info)}")
         
         with col2:
             if st.button("⏸️ 一時停止"):
