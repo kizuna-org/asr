@@ -324,6 +324,22 @@ class FastASRModel(nn.Module):
         
         print(f"Flexible CTC Debug - Final decoded: {decoded}")
         return decoded
+    
+    def _ctc_decode(self, pred):
+        decoded = []
+        prev = None
+        
+        # デバッグ情報を追加
+        print(f"CTC Debug - Raw predictions: {pred[:20].tolist()}")
+        print(f"CTC Debug - Prediction stats - min: {pred.min()}, max: {pred.max()}, unique: {torch.unique(pred).tolist()}")
+        
+        for p in pred:
+            if p != prev and p != 0:
+                decoded.append(p.item())
+            prev = p
+        
+        print(f"CTC Debug - Decoded IDs: {decoded}")
+        return decoded
 
 
 # 文字マッピング
