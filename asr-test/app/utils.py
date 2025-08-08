@@ -57,12 +57,15 @@ class AudioRecorder:
         self.format = format
         
         # PyAudioの初期化を試行（エラー出力を抑制）
-        try:
-            with open(os.devnull, 'w') as devnull:
-                with contextlib.redirect_stderr(devnull):
-                    self.audio = pyaudio.PyAudio()
-        except Exception as e:
-            print(f"PyAudio初期化エラー: {e}")
+        if pyaudio is not None:
+            try:
+                with open(os.devnull, 'w') as devnull:
+                    with contextlib.redirect_stderr(devnull):
+                        self.audio = pyaudio.PyAudio()
+            except Exception as e:
+                print(f"PyAudio初期化エラー: {e}")
+                self.audio = None
+        else:
             self.audio = None
             
         self.stream = None
@@ -122,7 +125,10 @@ class AudioRecorder:
         if self.is_recording:
             audio_data = np.frombuffer(in_data, dtype=np.float32)
             self.audio_queue.put(audio_data)
-        return (in_data, pyaudio.paContinue)
+        if pyaudio is not None:
+            return (in_data, pyaudio.paContinue)
+        else:
+            return (in_data, 0)  # paContinueの値
     
     def get_audio_data(self, duration_seconds: float) -> np.ndarray:
         """指定時間の音声データを取得"""
