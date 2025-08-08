@@ -210,10 +210,23 @@ class RealTimeASR:
         if len(audio_data) == 0:
             return ""
         
+        # モデルが学習済みかチェック
+        if hasattr(self.model, 'is_trained') and not self.model.is_trained():
+            print("⚠️ 警告: モデルが学習されていません。認識結果は不正確です。")
+            return "[未学習モデル]"
+        
+        # デバッグ情報を追加
+        print(f"Audio Debug - Input shape: {audio_data.shape}")
+        print(f"Audio Debug - Input range: [{audio_data.min():.4f}, {audio_data.max():.4f}]")
+        print(f"Audio Debug - Input mean: {audio_data.mean():.4f}")
+        
         # 音声の前処理
         audio_features = self.audio_preprocessor.preprocess_audio_from_array(
             audio_data, self.sample_rate
         )
+        
+        print(f"Audio Debug - Features shape: {audio_features.shape}")
+        print(f"Audio Debug - Features range: [{audio_features.min():.4f}, {audio_features.max():.4f}]")
         
         # バッチ次元を追加
         audio_features = audio_features.unsqueeze(0).to(self.device)
@@ -227,6 +240,8 @@ class RealTimeASR:
         if decoded_sequences:
             text_ids = decoded_sequences[0]
             text = self.text_preprocessor.ids_to_text(text_ids)
+            print(f"Audio Debug - Decoded IDs: {text_ids}")
+            print(f"Audio Debug - Final text: '{text}'")
             return text
         
         return ""
@@ -389,7 +404,7 @@ def create_sample_audio_data(num_samples: int = 10, duration: float = 3.0) -> Li
     # サンプルテキスト（より短く、認識しやすいもの）
     texts = [
         "hello",
-        "world",
+        "world", 
         "test",
         "audio",
         "speech",
@@ -408,28 +423,54 @@ def create_sample_audio_data(num_samples: int = 10, duration: float = 3.0) -> Li
         t = np.linspace(0, duration, audio_length)
         
         # 基本周波数（人間の声の範囲）
-        base_freq = np.random.uniform(100, 300)  # 100-300Hz
+        base_freq = np.random.uniform(150, 250)  # 150-250Hz（より現実的な声の周波数）
         
         # 複数の調波を追加
         audio = np.zeros(audio_length)
-        for harmonic in range(1, 6):  # 1次から5次調波
+        for harmonic in range(1, 8):  # 1次から7次調波
             freq = base_freq * harmonic
-            amplitude = 0.1 / harmonic  # 高調波ほど振幅が小さくなる
+            amplitude = 0.15 / harmonic  # 高調波ほど振幅が小さくなる
             audio += amplitude * np.sin(2 * np.pi * freq * t)
         
+        # フォルマント（母音の特徴的な周波数）を追加
+        formant_freqs = [500, 1500, 2500]  # 一般的な母音のフォルマント
+        for formant_freq in formant_freqs:
+            formant_amp = 0.05
+            audio += formant_amp * np.sin(2 * np.pi * formant_freq * t)
+        
         # ノイズを追加（現実的な音声に近づける）
-        noise = np.random.randn(audio_length) * 0.02
+        noise = np.random.randn(audio_length) * 0.01
         audio += noise
         
         # エンベロープを適用（音声の開始と終了を滑らかに）
-        envelope = np.exp(-t / (duration * 0.1))  # 指数減衰
+        # アタック時間（音の立ち上がり）
+        attack_time = 0.05  # 50ms
+        attack_samples = int(attack_time * sample_rate)
+        
+        # リリース時間（音の減衰）
+        release_time = 0.1  # 100ms
+        release_samples = int(release_time * sample_rate)
+        
+        # エンベロープ作成
+        envelope = np.ones(audio_length)
+        
+        # アタック部分（線形増加）
+        if attack_samples > 0:
+            envelope[:attack_samples] = np.linspace(0, 1, attack_samples)
+        
+        # リリース部分（指数減衰）
+        if release_samples > 0:
+            release_start = audio_length - release_samples
+            if release_start > attack_samples:
+                envelope[release_start:] = np.exp(-np.linspace(0, 3, release_samples))
+        
         audio *= envelope
         
         # 正規化
         audio = AudioProcessor.normalize_audio(audio)
         
-        # 振幅を調整
-        audio *= 0.3
+        # 振幅を調整（より現実的な音量）
+        audio *= 0.4
         
         samples.append((audio, texts[i]))
     

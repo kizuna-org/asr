@@ -119,10 +119,28 @@ def recognize_audio(audio_data: np.ndarray, sample_rate: int = 16000) -> Dict[st
     try:
         start_time = time.time()
         
+        # モデルが学習済みかチェック
+        if hasattr(model, 'is_trained') and not model.is_trained():
+            logger.warning("⚠️ 警告: モデルが学習されていません。認識結果は不正確です。")
+            return {
+                "text": "[未学習モデル]",
+                "warning": "モデルが学習されていません。まず学習を実行してください。",
+                "inference_time": 0.0,
+                "audio_duration": len(audio_data) / sample_rate,
+                "realtime_ratio": 0.0
+            }
+        
+        # デバッグ情報を追加
+        print(f"API Debug - Input shape: {audio_data.shape}")
+        print(f"API Debug - Sample rate: {sample_rate}")
+        print(f"API Debug - Model type: {type(model).__name__}")
+        
         # 音声の前処理
         audio_features = audio_preprocessor.preprocess_audio_from_array(
             audio_data, sample_rate
         )
+        
+        print(f"API Debug - Features shape: {audio_features.shape}")
         
         # バッチ次元を追加
         audio_features = audio_features.unsqueeze(0).to(device)
@@ -138,8 +156,11 @@ def recognize_audio(audio_data: np.ndarray, sample_rate: int = 16000) -> Dict[st
         if decoded_sequences:
             text_ids = decoded_sequences[0]
             text = text_preprocessor.ids_to_text(text_ids)
+            print(f"API Debug - Decoded IDs: {text_ids}")
+            print(f"API Debug - Final text: '{text}'")
         else:
             text = ""
+            print("API Debug - No decoded sequences")
         
         # パフォーマンス記録
         audio_duration = len(audio_data) / sample_rate

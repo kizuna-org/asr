@@ -66,17 +66,34 @@ class LightweightASRModel(nn.Module):
     
     def _init_weights(self):
         """重みの初期化"""
-        for module in self.modules():
-            if isinstance(module, nn.Linear):
-                nn.init.xavier_uniform_(module.weight)
-                if module.bias is not None:
-                    nn.init.zeros_(module.bias)
-            elif isinstance(module, nn.LSTM):
-                for name, param in module.named_parameters():
-                    if 'weight' in name:
-                        nn.init.xavier_uniform_(param)
-                    elif 'bias' in name:
-                        nn.init.zeros_(param)
+        for m in self.modules():
+            if isinstance(m, nn.Conv1d):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.BatchNorm1d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.normal_(m.weight, 0, 0.01)
+                nn.init.constant_(m.bias, 0)
+    
+    def is_trained(self) -> bool:
+        """モデルが学習済みかどうかを確認"""
+        # 重みの統計をチェック
+        with torch.no_grad():
+            # 出力層の重みをチェック
+            output_weights = self.output_layer.weight
+            weight_mean = output_weights.mean().item()
+            weight_std = output_weights.std().item()
+            
+            # 初期化時の値と比較（初期化は平均0、標準偏差0.01）
+            # 学習済みならば、重みの分布が初期化時と異なるはず
+            is_trained = abs(weight_mean) > 0.001 or weight_std > 0.02
+            
+            print(f"Model trained check - Weight mean: {weight_mean:.6f}, std: {weight_std:.6f}, is_trained: {is_trained}")
+            
+            return is_trained
     
     def forward(self, x, lengths=None):
         """
@@ -137,6 +154,12 @@ class LightweightASRModel(nn.Module):
         
         # 最も確率の高いクラスを選択
         predictions = torch.argmax(logits, dim=-1)
+        
+        # デバッグ情報を追加
+        print(f"Debug - Logits shape: {logits.shape}")
+        print(f"Debug - Predictions shape: {predictions.shape}")
+        print(f"Debug - First few predictions: {predictions[0][:10].tolist()}")
+        print(f"Debug - Logits stats - min: {logits.min():.4f}, max: {logits.max():.4f}, mean: {logits.mean():.4f}")
         
         # CTCデコード（重複除去とブランク除去）
         decoded_sequences = []
@@ -210,6 +233,22 @@ class FastASRModel(nn.Module):
         # CTC損失
         self.ctc_loss = CTCLoss(blank=0, zero_infinity=True)
     
+    def is_trained(self) -> bool:
+        """モデルが学習済みかどうかを確認"""
+        # 重みの統計をチェック
+        with torch.no_grad():
+            # 出力層の重みをチェック
+            output_weights = self.output_layer.weight
+            weight_mean = output_weights.mean().item()
+            weight_std = output_weights.std().item()
+            
+            # 初期化時の値と比較
+            is_trained = abs(weight_mean) > 0.001 or weight_std > 0.02
+            
+            print(f"FastASR trained check - Weight mean: {weight_mean:.6f}, std: {weight_std:.6f}, is_trained: {is_trained}")
+            
+            return is_trained
+    
     def forward(self, x, lengths=None):
         batch_size, time_steps, _ = x.size()
         
@@ -232,7 +271,13 @@ class FastASRModel(nn.Module):
         return self.ctc_loss(logits, targets, logit_lengths, target_lengths)
     
     def decode(self, logits, lengths=None):
+        # デバッグ情報を追加
+        print(f"FastASR Debug - Logits shape: {logits.shape}")
+        print(f"FastASR Debug - Logits stats - min: {logits.min():.4f}, max: {logits.max():.4f}, mean: {logits.mean():.4f}")
+        
         predictions = torch.argmax(logits, dim=-1)
+        print(f"FastASR Debug - First few predictions: {predictions[0][:10].tolist()}")
+        
         return [self._ctc_decode(pred) for pred in predictions]
     
     def _ctc_decode(self, pred):
