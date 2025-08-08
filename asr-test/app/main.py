@@ -406,6 +406,8 @@ with tab2:
         
         if uploaded_files:
             st.write(f"📁 {len(uploaded_files)}個のファイルがアップロードされました")
+            # ファイル情報をセッション状態に保存
+            st.session_state.uploaded_files = uploaded_files
             # ファイルの保存処理をここに追加
             st.session_state.dataset_info = {
                 'type': 'custom',
@@ -446,7 +448,140 @@ with tab2:
     
     # データセット情報の表示
     if st.session_state.dataset_info and isinstance(st.session_state.dataset_info, dict):
-        st.info(f"📊 現在のデータセット: {st.session_state.dataset_info['type']} ({st.session_state.dataset_info['samples']}サンプル)")
+        dataset_type = st.session_state.dataset_info.get('type', '')
+        dataset_samples = st.session_state.dataset_info.get('samples', 0)
+        dataset_path = st.session_state.dataset_info.get('path', '')
+        
+        # データセット情報をカード形式で表示
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("データセットタイプ", dataset_type.upper())
+        with col2:
+            st.metric("サンプル数", dataset_samples if dataset_samples != 'unknown' else 'Unknown')
+        with col3:
+            st.metric("データパス", os.path.basename(dataset_path) if dataset_path else 'N/A')
+        
+        st.info(f"📊 現在のデータセット: {dataset_type} ({dataset_samples}サンプル)")
+        
+        # データセットの最初の5つを表示
+        if st.button("🔍 データセットの最初の5つを表示", help="データセットの内容を確認できます"):
+            try:
+                dataset_path = st.session_state.dataset_info.get('path', '')
+                dataset_type = st.session_state.dataset_info.get('type', '')
+                
+                if dataset_type == 'sample' and os.path.exists(dataset_path):
+                    # サンプルデータセットの表示
+                    metadata_path = os.path.join(dataset_path, "metadata.json")
+                    if os.path.exists(metadata_path):
+                        with open(metadata_path, 'r') as f:
+                            metadata = json.load(f)
+                        
+                        st.subheader("📋 サンプルデータセット（最初の5つ）")
+                        for i, item in enumerate(metadata[:5]):
+                            with st.expander(f"サンプル {i+1}: {item['text']}"):
+                                st.write(f"**テキスト**: {item['text']}")
+                                st.write(f"**音声ファイル**: {item['audio']}")
+                                
+                                # 音声ファイルの存在確認
+                                audio_path = os.path.join(dataset_path, item['audio'])
+                                if os.path.exists(audio_path):
+                                    st.success("✅ 音声ファイルが存在します")
+                                    
+                                    # 音声ファイルの情報を表示
+                                    try:
+                                        import librosa
+                                        audio, sr = librosa.load(audio_path, sr=None)
+                                        st.write(f"**長さ**: {len(audio)/sr:.2f}秒")
+                                        st.write(f"**サンプリングレート**: {sr}Hz")
+                                        st.write(f"**サンプル数**: {len(audio):,}")
+                                        
+                                        # 音声波形の表示
+                                        st.line_chart(audio[:1000])  # 最初の1000サンプルを表示
+                                    except Exception as e:
+                                        st.error(f"音声ファイルの読み込みエラー: {e}")
+                                else:
+                                    st.error("❌ 音声ファイルが見つかりません")
+                
+                elif dataset_type == 'ljspeech':
+                    # LJSpeechデータセットの表示
+                    st.subheader("📋 LJSpeechデータセット（最初の5つ）")
+                    st.info("LJSpeechデータセットはTFRecord形式で保存されているため、直接的な内容表示は制限されています。")
+                    st.write("**データセット情報**:")
+                    st.write(f"- **パス**: {dataset_path}")
+                    st.write(f"- **形式**: TFRecord")
+                    st.write(f"- **サンプル数**: 約13,100個")
+                    
+                    # TFRecordファイルの一覧を表示
+                    tfrecord_files = []
+                    if os.path.exists(dataset_path):
+                        for file in os.listdir(dataset_path):
+                            if file.endswith('.tfrecord'):
+                                tfrecord_files.append(file)
+                    
+                    if tfrecord_files:
+                        st.write("**利用可能なTFRecordファイル**:")
+                        for i, file in enumerate(tfrecord_files[:5]):
+                            st.write(f"- {file}")
+                        if len(tfrecord_files) > 5:
+                            st.write(f"- ... 他 {len(tfrecord_files)-5}個のファイル")
+                        
+                        # サンプルデータの表示を試行
+                        if st.button("🔍 サンプルデータを読み込み表示", help="TFRecordファイルからサンプルを読み込みます"):
+                            try:
+                                # LJSpeechデータセットからサンプルを取得
+                                from app.ljspeech_dataset import create_ljspeech_dataloader
+                                
+                                # データローダーを作成（サンプル用）
+                                sample_loader = create_ljspeech_dataloader(
+                                    data_dir=dataset_path,
+                                    batch_size=5,
+                                    shuffle=False
+                                )
+                                
+                                st.write("**サンプルデータ（最初の5つ）**:")
+                                for batch_idx, (audio_features, text_ids, audio_lengths, text_lengths) in enumerate(sample_loader):
+                                    if batch_idx == 0:  # 最初のバッチのみ
+                                        for i in range(min(5, len(audio_features))):
+                                            with st.expander(f"サンプル {i+1}"):
+                                                # テキストIDを文字に変換
+                                                text = st.session_state.text_preprocessor.ids_to_text(text_ids[i].tolist())
+                                                st.write(f"**テキスト**: {text}")
+                                                st.write(f"**音声特徴量の形状**: {audio_features[i].shape}")
+                                                st.write(f"**音声長**: {audio_lengths[i].item()}フレーム")
+                                                st.write(f"**テキスト長**: {text_lengths[i].item()}文字")
+                                                
+                                                # 音声特徴量の可視化
+                                                if audio_features[i].shape[0] > 0:
+                                                    # 最初の10フレームを表示
+                                                    features_sample = audio_features[i][:10].detach().numpy()
+                                                    st.write("**音声特徴量（最初の10フレーム）**:")
+                                                    st.dataframe(features_sample)
+                                        break
+                                
+                            except Exception as e:
+                                st.error(f"❌ サンプルデータ読み込みエラー: {str(e)}")
+                                st.info("ℹ️ TFRecordファイルの読み込みに失敗しました。データセットの形式を確認してください。")
+                
+                elif dataset_type == 'custom':
+                    # カスタムデータセットの表示
+                    st.subheader("📋 カスタムデータセット（最初の5つ）")
+                    st.info("カスタムデータセットの詳細表示は、データセットの形式によって異なります。")
+                    
+                    if 'uploaded_files' in st.session_state:
+                        uploaded_files = st.session_state.uploaded_files
+                        for i, file in enumerate(uploaded_files[:5]):
+                            with st.expander(f"ファイル {i+1}: {file.name}"):
+                                st.write(f"**ファイル名**: {file.name}")
+                                st.write(f"**サイズ**: {file.size:,} bytes")
+                                st.write(f"**タイプ**: {file.type}")
+                
+                else:
+                    st.warning("⚠️ このデータセットタイプの表示はサポートされていません")
+                    
+            except Exception as e:
+                st.error(f"❌ データセット表示エラー: {str(e)}")
+                import traceback
+                st.error(f"詳細: {traceback.format_exc()}")
     elif st.session_state.dataset_info:
         st.warning("⚠️ データセット情報が不正です")
         st.session_state.dataset_info = None  # 不正なデータをクリア
