@@ -231,7 +231,7 @@ class FastASRModel(nn.Module):
         logits = F.log_softmax(logits, dim=-1)
         return self.ctc_loss(logits, targets, logit_lengths, target_lengths)
     
-    def decode(self, logits):
+    def decode(self, logits, lengths=None):
         predictions = torch.argmax(logits, dim=-1)
         return [self._ctc_decode(pred) for pred in predictions]
     
