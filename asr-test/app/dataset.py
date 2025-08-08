@@ -7,7 +7,7 @@ import json
 from torch.utils.data import Dataset, DataLoader
 from typing import List, Tuple, Optional
 import soundfile as sf
-from .model import CHAR_TO_ID, ID_TO_CHAR
+from app.model import CHAR_TO_ID, ID_TO_CHAR
 
 
 class AudioPreprocessor:

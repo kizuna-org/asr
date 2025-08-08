@@ -12,9 +12,9 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from jiwer import wer
 
-from .model import LightweightASRModel, FastASRModel, ID_TO_CHAR
-from .dataset import AudioPreprocessor, TextPreprocessor, ASRDataset, create_dataloader
-from .ljspeech_dataset import create_ljspeech_dataloader
+from app.model import LightweightASRModel, FastASRModel, ID_TO_CHAR
+from app.dataset import AudioPreprocessor, TextPreprocessor, ASRDataset, create_dataloader
+from app.ljspeech_dataset import create_ljspeech_dataloader
 
 
 class ControlledASRTrainer:

@@ -4,7 +4,7 @@ import os
 import json
 from typing import List, Tuple, Optional
 from torch.utils.data import Dataset
-from .dataset import AudioPreprocessor, TextPreprocessor
+from app.dataset import AudioPreprocessor, TextPreprocessor
 
 
 class LJSpeechDataset(Dataset):
@@ -178,7 +178,7 @@ class LJSpeechDataLoader:
     def get_dataloader(self):
         """PyTorch DataLoaderを作成"""
         from torch.utils.data import DataLoader
-        from .dataset import collate_fn
+        from app.dataset import collate_fn
         
         return DataLoader(
             self.dataset,

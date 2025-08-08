@@ -10,7 +10,7 @@ import time
 from typing import Optional, List, Tuple
 import os
 import json
-from .model import ID_TO_CHAR
+from app.model import ID_TO_CHAR
 
 
 class AudioRecorder:
