@@ -52,9 +52,18 @@ class LJSpeechDataset(Dataset):
         
         # TFRecordファイルを検索
         tfrecord_files = []
-        for file in os.listdir(self.data_dir):
-            if file.startswith('ljspeech-train.tfrecord-') and file.endswith('.tfrecord'):
+        all_files = os.listdir(self.data_dir)
+        print(f"ディレクトリ内の全ファイル数: {len(all_files)}")
+        print(f"ファイル例: {all_files[:5]}")
+        
+        for file in all_files:
+            print(f"チェック中: {file}")
+            if 'ljspeech-train.tfrecord-' in file and file.endswith('.tfrecord'):
                 tfrecord_files.append(os.path.join(self.data_dir, file))
+                print(f"TFRecordファイル発見: {file}")
+        
+        print(f"TFRecordファイル検索結果: {len(tfrecord_files)}個")
+        print(f"TFRecordファイル例: {tfrecord_files[:3] if tfrecord_files else 'なし'}")
         
         if tfrecord_files:
             # TFRecordファイルが見つかった場合、ダミーデータを作成
@@ -62,6 +71,7 @@ class LJSpeechDataset(Dataset):
             # サンプルデータを作成（実際のTFRecord処理は複雑なため、簡易版）
             for i in range(min(10, len(tfrecord_files))):  # 最大10個のサンプル
                 data_files.append((f"tfrecord_{i}", f"sample text {i}"))
+            print(f"ダミーデータ作成完了: {len(data_files)}個")
         else:
             # メタデータからファイルリストを作成
             if self.metadata and isinstance(self.metadata, (list, dict)):
