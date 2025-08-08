@@ -4,6 +4,7 @@ import numpy as np
 import os
 import time
 import json
+import gc
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
@@ -49,6 +50,22 @@ if 'training_progress' not in st.session_state:
     st.session_state.training_progress = {'current_epoch': 0, 'current_batch': 0, 'total_batches': 0}
 if 'dataset_info' not in st.session_state:
     st.session_state.dataset_info = {}
+
+# メモリ管理
+def clear_memory():
+    """メモリをクリア"""
+    gc.collect()
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+# 定期的なメモリクリア
+if 'last_memory_clear' not in st.session_state:
+    st.session_state.last_memory_clear = time.time()
+
+# 5分ごとにメモリクリア
+if time.time() - st.session_state.last_memory_clear > 300:
+    clear_memory()
+    st.session_state.last_memory_clear = time.time()
 
 # タイトル
 st.title("🎤 リアルタイム音声認識モデル学習システム")

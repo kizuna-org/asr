@@ -43,12 +43,14 @@ COPY app/ ./app/
 COPY data/ ./data/
 COPY static/ ./static/
 COPY start_services.sh ./
+COPY start_streamlit_safe.sh ./
 
 # appディレクトリをPythonパッケージとして設定
 RUN touch app/__init__.py
 
 # 起動スクリプトに実行権限を付与
 RUN chmod +x start_services.sh
+RUN chmod +x start_streamlit_safe.sh
 
 # ポートの公開
 EXPOSE 8501 8000
