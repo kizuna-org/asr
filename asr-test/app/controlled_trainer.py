@@ -29,7 +29,10 @@ class ControlledASRTrainer:
                  weight_decay: float = 1e-5,
                  max_epochs: int = 100,
                  patience: int = 10,
-                 model_save_dir: str = 'models'):
+                 model_save_dir: str = 'models',
+                 gradient_clip: float = 1.0,
+                 early_stopping_patience: int = 10,
+                 validation_split: float = 0.2):
         
         self.model = model.to(device)
         self.train_loader = train_loader
@@ -38,6 +41,9 @@ class ControlledASRTrainer:
         self.max_epochs = max_epochs
         self.patience = patience
         self.model_save_dir = model_save_dir
+        self.gradient_clip = gradient_clip
+        self.early_stopping_patience = early_stopping_patience
+        self.validation_split = validation_split
         
         # 学習制御変数
         self.is_training = False
@@ -181,13 +187,18 @@ class ControlledASRTrainer:
             "is_paused": self.is_paused,
             "current_epoch": self.current_epoch,
             "current_batch": self.current_batch,
+            "total_batches": len(self.train_loader),
             "max_epochs": self.max_epochs,
             "best_val_loss": self.best_val_loss,
             "best_epoch": self.best_epoch,
             "train_losses": self.train_losses,
             "val_losses": self.val_losses,
             "train_wers": self.train_wers,
-            "val_wers": self.val_wers
+            "val_wers": self.val_wers,
+            "learning_rate": self.optimizer.param_groups[0]['lr'],
+            "gradient_clip": self.gradient_clip,
+            "early_stopping_patience": self.early_stopping_patience,
+            "validation_split": self.validation_split
         }
     
     def _training_loop(self):
@@ -247,7 +258,7 @@ class ControlledASRTrainer:
                 self.epoch_callback(epoch, train_loss, val_loss, train_wer, val_wer)
             
             # 早期停止のチェック
-            if epoch - self.best_epoch >= self.patience:
+            if epoch - self.best_epoch >= self.early_stopping_patience:
                 print(f"Early stopping at epoch {epoch + 1}")
                 break
         
@@ -293,7 +304,7 @@ class ControlledASRTrainer:
             loss.backward()
             
             # 勾配クリッピング
-            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.gradient_clip)
             
             # パラメータ更新
             self.optimizer.step()
