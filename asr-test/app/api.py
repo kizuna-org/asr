@@ -11,9 +11,9 @@ import time
 from typing import List, Dict, Any
 import logging
 
-from model import LightweightASRModel, FastASRModel, CHAR_TO_ID, ID_TO_CHAR
-from dataset import AudioPreprocessor, TextPreprocessor
-from utils import AudioProcessor, PerformanceMonitor
+from .model import LightweightASRModel, FastASRModel, CHAR_TO_ID, ID_TO_CHAR
+from .dataset import AudioPreprocessor, TextPreprocessor
+from .utils import AudioProcessor, PerformanceMonitor
 
 # ログ設定
 logging.basicConfig(level=logging.INFO)

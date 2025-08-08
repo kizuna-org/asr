@@ -12,4 +12,4 @@ echo "🎤 WebUI: http://localhost:58080/static/index.html"
 echo "📚 API Docs: http://localhost:58080/docs"
 
 # uvicornでFastAPIサーバーを起動
-uvicorn app.api:app --host 0.0.0.0 --port 8000 --reload
+python -m uvicorn app.api:app --host 0.0.0.0 --port 8000 --reload

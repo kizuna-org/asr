@@ -37,9 +37,12 @@ COPY app/ ./app/
 COPY data/ ./data/
 COPY static/ ./static/
 
+# appディレクトリをPythonパッケージとして設定
+RUN touch app/__init__.py
+
 # ポートの公開
 EXPOSE 8501 8000
 
 # アプリケーションの起動
-CMD ["uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000"]
 
