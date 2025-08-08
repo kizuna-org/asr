@@ -90,10 +90,10 @@ class LightweightASRModel(nn.Module):
         
         # CNN特徴抽出
         # (batch_size, time_steps, input_dim) -> (batch_size, input_dim, time_steps)
-        x = x.transpose(1, 2)
+        x = x.permute(0, 2, 1).contiguous()
         x = self.conv_layers(x)
         # (batch_size, hidden_dim, time_steps) -> (batch_size, time_steps, hidden_dim)
-        x = x.transpose(1, 2)
+        x = x.permute(0, 2, 1).contiguous()
         
         # LSTM処理
         if lengths is not None:
@@ -118,7 +118,7 @@ class LightweightASRModel(nn.Module):
         CTC損失を計算
         """
         # logits: (batch_size, time_steps, num_classes) -> (time_steps, batch_size, num_classes)
-        logits = logits.transpose(0, 1)
+        logits = logits.permute(1, 0, 2).contiguous()
         logits = F.log_softmax(logits, dim=-1)
         
         return self.ctc_loss(logits, targets, logit_lengths, target_lengths)
@@ -214,9 +214,9 @@ class FastASRModel(nn.Module):
         batch_size, time_steps, _ = x.size()
         
         # CNN特徴抽出
-        x = x.transpose(1, 2)
+        x = x.permute(0, 2, 1).contiguous()
         x = self.conv_layers(x)
-        x = x.transpose(1, 2)
+        x = x.permute(0, 2, 1).contiguous()
         
         # LSTM処理
         x, _ = self.lstm(x)
@@ -227,7 +227,7 @@ class FastASRModel(nn.Module):
         return logits
     
     def compute_loss(self, logits, targets, logit_lengths, target_lengths):
-        logits = logits.transpose(0, 1)
+        logits = logits.permute(1, 0, 2).contiguous()
         logits = F.log_softmax(logits, dim=-1)
         return self.ctc_loss(logits, targets, logit_lengths, target_lengths)
     

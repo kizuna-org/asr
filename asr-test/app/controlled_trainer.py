@@ -294,14 +294,18 @@ class ControlledASRTrainer:
             # 勾配をゼロにリセット
             self.optimizer.zero_grad()
             
+            # メモリクリア
+            torch.cuda.empty_cache() if torch.cuda.is_available() else None
+            
             # 順伝播
             logits = self.model(audio_features, audio_lengths)
             
             # 損失計算
             loss = self.model.compute_loss(logits, text_ids, audio_lengths, text_lengths)
             
-            # 逆伝播
-            loss.backward()
+            # 逆伝播（勾配計算の安全性を確保）
+            if loss.requires_grad:
+                loss.backward()
             
             # 勾配クリッピング
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.gradient_clip)
