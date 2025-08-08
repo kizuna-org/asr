@@ -79,6 +79,10 @@ class AudioPreprocessor:
         if len(waveform.shape) == 1:
             waveform = waveform.unsqueeze(0)
         
+        # 音声の正規化
+        if waveform.abs().max() > 0:
+            waveform = waveform / waveform.abs().max()
+        
         # サンプリングレートの統一
         if sample_rate != self.sample_rate:
             resampler = torchaudio.transforms.Resample(sample_rate, self.sample_rate)
@@ -88,8 +92,14 @@ class AudioPreprocessor:
         mel_spec = self.mel_transform(waveform)
         log_mel_spec = self.log_transform(mel_spec)
         
-        # 正規化
-        log_mel_spec = (log_mel_spec - log_mel_spec.mean()) / (log_mel_spec.std() + 1e-8)
+        # 正規化（より安定した方法）
+        if log_mel_spec.numel() > 0:
+            mean = log_mel_spec.mean()
+            std = log_mel_spec.std()
+            if std > 1e-8:
+                log_mel_spec = (log_mel_spec - mean) / std
+            else:
+                log_mel_spec = log_mel_spec - mean
         
         return log_mel_spec.squeeze(0).transpose(0, 1)
 
