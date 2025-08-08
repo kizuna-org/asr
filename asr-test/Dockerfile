@@ -36,13 +36,17 @@ RUN mkdir -p data/raw data/processed models
 COPY app/ ./app/
 COPY data/ ./data/
 COPY static/ ./static/
+COPY start_services.sh ./
 
 # appディレクトリをPythonパッケージとして設定
 RUN touch app/__init__.py
+
+# 起動スクリプトに実行権限を付与
+RUN chmod +x start_services.sh
 
 # ポートの公開
 EXPOSE 8501 8000
 
 # アプリケーションの起動
-CMD ["python", "-m", "uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["./start_services.sh"]
 
