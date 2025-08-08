@@ -47,6 +47,13 @@ RUN pip install --no-cache-dir torch==2.0.1+cpu torchvision==0.15.2+cpu torchaud
 ENV ALSA_PCM_CARD=0
 ENV ALSA_PCM_DEVICE=0
 ENV PYTHONWARNINGS=ignore
+ENV ALSA_CONFIG_PATH=/dev/null
+ENV ALSA_PCM_NAME=null
+
+# ALSA設定ファイルを作成（エラーを抑制）
+RUN mkdir -p /etc/alsa/conf.d && \
+    echo 'pcm.!default { type null }' > /etc/alsa/conf.d/99-null.conf && \
+    echo 'ctl.!default { type null }' >> /etc/alsa/conf.d/99-null.conf
 
 
 # ディレクトリの作成

@@ -10,6 +10,13 @@ import pandas as pd
 import librosa
 import soundfile as sf
 
+# ALSAエラーを抑制
+os.environ['ALSA_PCM_CARD'] = '0'
+os.environ['ALSA_PCM_DEVICE'] = '0'
+os.environ['ALSA_CONFIG_PATH'] = '/dev/null'
+os.environ['ALSA_PCM_NAME'] = 'null'
+os.environ['PYTHONWARNINGS'] = 'ignore'
+
 # PyTorchの初期化を最適化
 os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128'
 os.environ['OMP_NUM_THREADS'] = '1'

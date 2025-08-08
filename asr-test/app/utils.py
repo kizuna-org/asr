@@ -2,7 +2,6 @@ import torch
 import numpy as np
 import librosa
 import soundfile as sf
-import pyaudio
 import wave
 import threading
 import queue
@@ -12,6 +11,20 @@ import os
 import json
 from app.model import ID_TO_CHAR
 
+# ALSAエラーを抑制
+os.environ['ALSA_PCM_CARD'] = '0'
+os.environ['ALSA_PCM_DEVICE'] = '0'
+os.environ['ALSA_CONFIG_PATH'] = '/dev/null'
+os.environ['ALSA_PCM_NAME'] = 'null'
+os.environ['PYTHONWARNINGS'] = 'ignore'
+
+# PyAudioを遅延インポート（エラーを抑制）
+try:
+    import pyaudio
+except ImportError:
+    pyaudio = None
+    print("PyAudioが利用できません")
+
 
 class AudioRecorder:
     """リアルタイム音声録音クラス"""
@@ -20,20 +33,34 @@ class AudioRecorder:
                  sample_rate=16000,
                  chunk_size=1024,
                  channels=1,
-                 format=pyaudio.paFloat32):
-        # ALSAエラーを抑制
+                 format=None):
+        # pyaudioが利用できない場合はデフォルト値を設定
+        if pyaudio is None:
+            format = 1  # paFloat32の値
+        else:
+            format = format or pyaudio.paFloat32
+        # ALSAエラーを強力に抑制
         import os
         os.environ['ALSA_PCM_CARD'] = '0'
         os.environ['ALSA_PCM_DEVICE'] = '0'
+        os.environ['ALSA_CONFIG_PATH'] = '/dev/null'
+        os.environ['ALSA_PCM_NAME'] = 'null'
+        os.environ['PYTHONWARNINGS'] = 'ignore'
+        
+        # 標準エラー出力を一時的にリダイレクト
+        import sys
+        import contextlib
         
         self.sample_rate = sample_rate
         self.chunk_size = chunk_size
         self.channels = channels
         self.format = format
         
-        # PyAudioの初期化を試行
+        # PyAudioの初期化を試行（エラー出力を抑制）
         try:
-            self.audio = pyaudio.PyAudio()
+            with open(os.devnull, 'w') as devnull:
+                with contextlib.redirect_stderr(devnull):
+                    self.audio = pyaudio.PyAudio()
         except Exception as e:
             print(f"PyAudio初期化エラー: {e}")
             self.audio = None
@@ -49,21 +76,29 @@ class AudioRecorder:
             return False
             
         try:
-            # ALSAエラーを抑制
+            # ALSAエラーを強力に抑制
             import os
+            import contextlib
             os.environ['ALSA_PCM_CARD'] = '0'
             os.environ['ALSA_PCM_DEVICE'] = '0'
+            os.environ['ALSA_CONFIG_PATH'] = '/dev/null'
+            os.environ['ALSA_PCM_NAME'] = 'null'
             
             self.is_recording = True
-            self.stream = self.audio.open(
-                format=self.format,
-                channels=self.channels,
-                rate=self.sample_rate,
-                input=True,
-                frames_per_buffer=self.chunk_size,
-                stream_callback=self._audio_callback
-            )
-            self.stream.start_stream()
+            
+            # エラー出力を抑制してストリームを開く
+            with open(os.devnull, 'w') as devnull:
+                with contextlib.redirect_stderr(devnull):
+                    self.stream = self.audio.open(
+                        format=self.format,
+                        channels=self.channels,
+                        rate=self.sample_rate,
+                        input=True,
+                        frames_per_buffer=self.chunk_size,
+                        stream_callback=self._audio_callback
+                    )
+                    self.stream.start_stream()
+            
             print("Recording started...")
             return True
         except OSError as e:
