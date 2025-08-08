@@ -37,8 +37,13 @@ class LJSpeechDataset(Dataset):
         """メタデータを読み込み"""
         metadata_path = os.path.join(self.data_dir, "metadata.json")
         if os.path.exists(metadata_path):
-            with open(metadata_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
+            try:
+                with open(metadata_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except json.JSONDecodeError:
+                # JSONでない場合は、テキストファイルとして読み込み
+                with open(metadata_path, 'r', encoding='utf-8') as f:
+                    return f.readlines()
         return {}
     
     def _get_data_files(self) -> List[Tuple[str, str]]:
@@ -46,14 +51,36 @@ class LJSpeechDataset(Dataset):
         data_files = []
         
         # メタデータからファイルリストを作成
-        if self.metadata:
-            for item in self.metadata:
-                audio_file = item.get('audio_file', '')
-                text = item.get('text', '')
-                if audio_file and text:
-                    audio_path = os.path.join(self.data_dir, audio_file)
-                    if os.path.exists(audio_path):
-                        data_files.append((audio_path, text))
+        if self.metadata and isinstance(self.metadata, (list, dict)):
+            if isinstance(self.metadata, dict):
+                # 辞書の場合は、キーをファイル名、値をテキストとして扱う
+                for audio_file, text in self.metadata.items():
+                    if audio_file and text:
+                        audio_path = os.path.join(self.data_dir, audio_file)
+                        if os.path.exists(audio_path):
+                            data_files.append((audio_path, text))
+            else:
+                # リストの場合
+                for item in self.metadata:
+                    # メタデータの型をチェック
+                    if isinstance(item, dict):
+                        audio_file = item.get('audio_file', '')
+                        text = item.get('text', '')
+                    elif isinstance(item, str):
+                        # 文字列の場合は、タブ区切りでパース
+                        parts = item.strip().split('\t')
+                        if len(parts) >= 2:
+                            audio_file = parts[0]
+                            text = parts[1]
+                        else:
+                            continue
+                    else:
+                        continue
+                    
+                    if audio_file and text:
+                        audio_path = os.path.join(self.data_dir, audio_file)
+                        if os.path.exists(audio_path):
+                            data_files.append((audio_path, text))
         else:
             # メタデータがない場合は、音声ファイルを直接検索
             for file in os.listdir(self.data_dir):
