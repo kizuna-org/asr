@@ -40,6 +40,15 @@ RUN pip install --no-cache-dir torch==2.0.1+cpu torchvision==0.15.2+cpu torchaud
   pip install --no-cache-dir -r requirements.txt && \
   pip install pandas==2.1.4
 
+# キャッシュが消えない様になるべくこれ以降を編集すること
+
+
+# ALSAエラー抑制の環境変数
+ENV ALSA_PCM_CARD=0
+ENV ALSA_PCM_DEVICE=0
+ENV PYTHONWARNINGS=ignore
+
+
 # ディレクトリの作成
 RUN mkdir -p data/raw data/processed models
 

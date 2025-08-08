@@ -21,18 +21,39 @@ class AudioRecorder:
                  chunk_size=1024,
                  channels=1,
                  format=pyaudio.paFloat32):
+        # ALSAエラーを抑制
+        import os
+        os.environ['ALSA_PCM_CARD'] = '0'
+        os.environ['ALSA_PCM_DEVICE'] = '0'
+        
         self.sample_rate = sample_rate
         self.chunk_size = chunk_size
         self.channels = channels
         self.format = format
-        self.audio = pyaudio.PyAudio()
+        
+        # PyAudioの初期化を試行
+        try:
+            self.audio = pyaudio.PyAudio()
+        except Exception as e:
+            print(f"PyAudio初期化エラー: {e}")
+            self.audio = None
+            
         self.stream = None
         self.is_recording = False
         self.audio_queue = queue.Queue()
     
     def start_recording(self):
         """録音開始"""
+        if self.audio is None:
+            print("PyAudioが初期化されていません")
+            return False
+            
         try:
+            # ALSAエラーを抑制
+            import os
+            os.environ['ALSA_PCM_CARD'] = '0'
+            os.environ['ALSA_PCM_DEVICE'] = '0'
+            
             self.is_recording = True
             self.stream = self.audio.open(
                 format=self.format,
@@ -88,7 +109,8 @@ class AudioRecorder:
     def close(self):
         """リソースの解放"""
         self.stop_recording()
-        self.audio.terminate()
+        if self.audio is not None:
+            self.audio.terminate()
 
 
 class RealTimeASR:
@@ -323,32 +345,50 @@ def create_sample_audio_data(num_samples: int = 10, duration: float = 3.0) -> Li
     sample_rate = 16000
     samples = []
     
-    # サンプルテキスト
+    # サンプルテキスト（より短く、認識しやすいもの）
     texts = [
-        "hello world",
-        "good morning",
-        "how are you",
-        "thank you",
-        "please help",
-        "nice to meet you",
-        "have a good day",
-        "see you later",
-        "goodbye",
-        "excuse me"
+        "hello",
+        "world",
+        "test",
+        "audio",
+        "speech",
+        "recognition",
+        "model",
+        "training",
+        "data",
+        "sample"
     ]
     
     for i in range(min(num_samples, len(texts))):
-        # ランダムな音声波形を生成
+        # より現実的な音声波形を生成
         audio_length = int(duration * sample_rate)
-        audio = np.random.randn(audio_length) * 0.1  # 小さな振幅
         
-        # 簡単な正弦波を追加（音声らしくする）
+        # 複数の周波数成分を持つ音声を生成
         t = np.linspace(0, duration, audio_length)
-        freq = np.random.uniform(200, 800)  # 200-800Hz
-        audio += 0.05 * np.sin(2 * np.pi * freq * t)
+        
+        # 基本周波数（人間の声の範囲）
+        base_freq = np.random.uniform(100, 300)  # 100-300Hz
+        
+        # 複数の調波を追加
+        audio = np.zeros(audio_length)
+        for harmonic in range(1, 6):  # 1次から5次調波
+            freq = base_freq * harmonic
+            amplitude = 0.1 / harmonic  # 高調波ほど振幅が小さくなる
+            audio += amplitude * np.sin(2 * np.pi * freq * t)
+        
+        # ノイズを追加（現実的な音声に近づける）
+        noise = np.random.randn(audio_length) * 0.02
+        audio += noise
+        
+        # エンベロープを適用（音声の開始と終了を滑らかに）
+        envelope = np.exp(-t / (duration * 0.1))  # 指数減衰
+        audio *= envelope
         
         # 正規化
         audio = AudioProcessor.normalize_audio(audio)
+        
+        # 振幅を調整
+        audio *= 0.3
         
         samples.append((audio, texts[i]))
     

@@ -648,6 +648,9 @@ with tab4:
                     samples = create_sample_audio_data(num_samples=1, duration=3.0)
                     audio_data = samples[0][0]  # 最初のサンプルの音声データ
                     
+                    # 音声データの情報を表示
+                    st.info(f"📊 生成された音声データ: 長さ={len(audio_data)}サンプル, 範囲=[{audio_data.min():.4f}, {audio_data.max():.4f}]")
+                    
                     # 一時ファイルとして保存
                     import tempfile
                     with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
@@ -667,7 +670,11 @@ with tab4:
                     inference_time = time.time() - start_time
                     
                     # 結果表示
-                    st.success(f"🎯 認識結果: **{text}**")
+                    if text.strip():
+                        st.success(f"🎯 認識結果: **{text}**")
+                    else:
+                        st.warning("⚠️ 認識結果が空です。モデルが正しく初期化されているか確認してください。")
+                    
                     st.info(f"⏱️ 推論時間: {inference_time:.4f}秒")
                     
                     # パフォーマンス記録
@@ -685,6 +692,8 @@ with tab4:
                     
                 except Exception as e:
                     st.error(f"❌ デモ音声生成に失敗しました: {str(e)}")
+                    import traceback
+                    st.error(f"詳細: {traceback.format_exc()}")
         
         with col2:
             st.info("💡 ヒント: デモ音声生成ボタンでテスト用の音声データを生成できます")
