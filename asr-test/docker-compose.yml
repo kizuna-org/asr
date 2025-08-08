@@ -1,8 +1,6 @@
-version: '3.8'
-
 services:
   asr-app:
-    build: .
+    image: asr-app
     ports:
       - "8501:8501"  # Streamlit
     volumes:
