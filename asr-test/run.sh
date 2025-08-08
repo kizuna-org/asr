@@ -2,108 +2,112 @@
 
 # これは開発PCで実行し、サーバーにデプロイするためのスクリプトです。
 
-# 関数定義
+# --- 設定項目 ---
+SSH_HOST="edu-gpu"
+# ControlMasterで使うソケットファイルのパス
+CONTROL_PATH="/tmp/ssh-master-${SSH_HOST}-%r@%h:%p"
+PORTS_TO_FORWARD=(58080 58081)
+
+# --- 関数定義 ---
+
+# マスターセッションを開始する関数
+start_ssh_master_session() {
+    echo "SSHマスターセッションを開始します..."
+    # -f: バックグラウンド実行, -n:標準入力をリダイレクトしない, -N:リモートコマンドを実行しない
+    # -M: マスターモード, -S: コントロールソケットのパス
+    ssh -f -n -N -M -S "${CONTROL_PATH}" "${SSH_HOST}"
+    
+    # セッションが確立されたか確認
+    if ! ssh -S "${CONTROL_PATH}" -O check "${SSH_HOST}" >/dev/null 2>&1; then
+        echo "❌ エラー: SSHマスターセッションの確立に失敗しました。"
+        echo "   'ssh ${SSH_HOST}' を手動で実行して接続できるか確認してください。"
+        exit 1
+    fi
+    echo "✅ SSHマスターセッションが確立されました。"
+}
+
+# ポート転送を実行する関数
+forward_port() {
+    local port=$1
+    echo "ポート${port}の転送を開始します..."
+    # -O forward: 既存のマスターセッションを使ってポート転送を追加
+    ssh -S "${CONTROL_PATH}" -O forward -L "${port}:localhost:${port}" "${SSH_HOST}"
+    
+    # 転送が成功したか確認
+    if ! lsof -ti:"${port}" > /dev/null 2>&1; then
+        echo "❌ エラー: ポート${port}の転送に失敗しました。"
+        cleanup # 失敗したらクリーンアップ
+        exit 1
+    fi
+    echo "✅ ポート${port}は正常に転送されています (http://localhost:${port})"
+}
+
+# クリーンアップ関数
 cleanup() {
     echo "クリーンアップを実行しています..."
-    
-    # 既存のポート転送プロセスを終了
-    if lsof -ti:8080 > /dev/null 2>&1; then
-        echo "ポート8080の既存プロセスを終了します..."
-        lsof -ti:8080 | xargs kill -9 2>/dev/null || true
+    # マスター接続が存在すれば終了させる
+    if ssh -S "${CONTROL_PATH}" -O check "${SSH_HOST}" >/dev/null 2>&1; then
+        echo "SSHマスターセッションを終了します..."
+        ssh -S "${CONTROL_PATH}" -O exit "${SSH_HOST}"
     fi
-    
-    if lsof -ti:8081 > /dev/null 2>&1; then
-        echo "ポート8081の既存プロセスを終了します..."
-        lsof -ti:8081 | xargs kill -9 2>/dev/null || true
-    fi
-    
-    # バックグラウンドプロセスを終了
-    if [ ! -z "$PORT_FORWARD_PID1" ] && kill -0 $PORT_FORWARD_PID1 2>/dev/null; then
-        kill $PORT_FORWARD_PID1 2>/dev/null || true
-    fi
-    
-    if [ ! -z "$PORT_FORWARD_PID2" ] && kill -0 $PORT_FORWARD_PID2 2>/dev/null; then
-        kill $PORT_FORWARD_PID2 2>/dev/null || true
-    fi
-    
+
+    # lsofでポートを強制的に解放 (念のため)
+    for port in "${PORTS_TO_FORWARD[@]}"; do
+        if lsof -ti:"${port}" > /dev/null 2>&1; then
+            echo "ポート${port}のプロセスを終了します..."
+            lsof -ti:"${port}" | xargs kill -9 2>/dev/null || true
+        fi
+    done
     echo "クリーンアップが完了しました。"
 }
 
-# 終了時のクリーンアップ関数
-final_cleanup() {
-    cleanup
-    exit 0
-}
+# --- メイン処理 ---
 
-# シグナルハンドラーを設定
-trap final_cleanup EXIT INT TERM
+# 終了時に必ずクリーンアップが実行されるように設定
+trap cleanup EXIT INT TERM
 
+# 最初に既存の接続をクリーンアップ
+cleanup
+sleep 1
+
+# [STEP 1] rsync, docker build, up などのデプロイ処理
 echo "rsyncでファイルをサーバーにコピーします。"
 rsync -avz \
   --exclude='__pycache__/' \
   --exclude='models/' \
-  ./ edu-gpu:/home/students/r03i/r03i18/asr-test/asr/asr-test
+  ./ ${SSH_HOST}:/home/students/r03i/r03i18/asr-test/asr/asr-test
 
 echo "コンテナを停止します。"
-ssh edu-gpu "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker compose down"
+ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker compose down"
 
 echo "イメージをビルドします。"
-ssh edu-gpu "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker build . -t asr-app"
+ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker build . -t asr-app"
 
 echo "コンテナを起動します。"
-ssh edu-gpu "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker compose up -d"
+ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker compose up -d"
 
 echo "デプロイが完了しました。"
-
-echo ""
-echo "ポート転送を開始します..."
-echo "Ctrl+Cで停止するまで、以下のポートでアクセスできます："
-echo "  - Streamlit: http://localhost:8080"
-echo "  - API: http://localhost:8081"
-echo ""
-echo "ポート転送を停止するには Ctrl+C を押してください。"
 echo ""
 
-# 既存のポート転送プロセスをクリーンアップ
-cleanup
+# [STEP 2] SSHマスターセッションを開始
+start_ssh_master_session
 
-# 少し待機してから新しいポート転送を開始
-sleep 2
+# [STEP 3] 各ポートの転送を開始
+for port in "${PORTS_TO_FORWARD[@]}"; do
+    forward_port "${port}"
+done
 
-# ポート転送をバックグラウンドで開始し、プロセスIDを記録
-echo "ポート8080の転送を開始します..."
-ssh -f -N -L 8080:localhost:58080 edu-gpu &
-PORT_FORWARD_PID1=$!
-
-echo "ポート8081の転送を開始します..."
-ssh -f -N -L 8081:localhost:58081 edu-gpu &
-PORT_FORWARD_PID2=$!
-
-# プロセスが正常に開始されたか確認
-sleep 2
-if ! kill -0 $PORT_FORWARD_PID1 2>/dev/null; then
-    echo "エラー: ポート8080の転送プロセスが開始できませんでした。"
-    exit 1
-fi
-
-if ! kill -0 $PORT_FORWARD_PID2 2>/dev/null; then
-    echo "エラー: ポート8081の転送プロセスが開始できませんでした。"
-    kill $PORT_FORWARD_PID1 2>/dev/null || true
-    exit 1
-fi
-
-echo "ポート転送が開始されました。"
+echo ""
+echo "全てのポート転送が完了しました。"
 echo "アプリケーションにアクセスする準備ができました。"
+echo "このスクリプトを終了する（Ctrl+C）と、ポート転送も自動的に停止します。"
 echo ""
-echo "停止するには Ctrl+C を押してください。"
 
-# ユーザーがCtrl+Cを押すまで待機
-echo "ポート転送が実行中です。Ctrl+Cで停止してください..."
-while true; do
-    # プロセスが生きているかチェック
-    if ! kill -0 $PORT_FORWARD_PID1 2>/dev/null || ! kill -0 $PORT_FORWARD_PID2 2>/dev/null; then
-        echo "ポート転送プロセスが予期せず終了しました。"
-        break
-    fi
+# マスターセッションが終了するまで待機
+echo "ポート転送を実行中です。停止するには Ctrl+C を押してください..."
+# -O check でマスター接続が生きているか監視
+while ssh -S "${CONTROL_PATH}" -O check "${SSH_HOST}" >/dev/null 2>&1; do
     sleep 5
 done
+
+echo "ポート転送セッションが終了しました。"
