@@ -69,6 +69,7 @@ def auto_load_latest_model():
         # モデルディレクトリを確認
         model_dir = "models"
         if not os.path.exists(model_dir):
+            print("モデルディレクトリが存在しません")
             return False
         
         # 利用可能なモデルファイルを検索
@@ -81,6 +82,7 @@ def auto_load_latest_model():
                 model_files.append((model_path, creation_time))
         
         if not model_files:
+            print("利用可能なモデルファイルが見つかりません")
             return False
         
         # 最新のモデルを選択
@@ -92,7 +94,27 @@ def auto_load_latest_model():
             with open(model_info_path, 'r') as f:
                 model_info = json.load(f)
         else:
-            model_info = {'model_type': 'LightweightASRModel', 'hidden_dim': 128}
+            # モデル情報ファイルがない場合は、チェックポイントから推測
+            print("モデル情報ファイルが見つかりません。チェックポイントから推測します...")
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            try:
+                checkpoint = torch.load(latest_model, map_location=device)
+                # パラメータのサイズからモデルタイプを推測
+                if 'output_layer.weight' in checkpoint['model_state_dict']:
+                    output_shape = checkpoint['model_state_dict']['output_layer.weight'].shape
+                    if output_shape[1] == 64:  # FastASRModel
+                        model_info = {'model_type': 'FastASRModel', 'hidden_dim': 64}
+                    elif output_shape[1] == 256:  # LightweightASRModel
+                        model_info = {'model_type': 'LightweightASRModel', 'hidden_dim': 128, 'num_layers': 2}
+                    else:
+                        model_info = {'model_type': 'LightweightASRModel', 'hidden_dim': 128, 'num_layers': 2}
+                else:
+                    model_info = {'model_type': 'LightweightASRModel', 'hidden_dim': 128, 'num_layers': 2}
+            except Exception as e:
+                print(f"チェックポイントの読み込みに失敗: {e}")
+                return False
+        
+        print(f"推測されたモデル情報: {model_info}")
         
         # モデルを初期化
         if model_info.get('model_type', '').startswith('Fast'):
@@ -110,8 +132,17 @@ def auto_load_latest_model():
         # モデルを読み込み
         device = "cuda" if torch.cuda.is_available() else "cpu"
         checkpoint = torch.load(latest_model, map_location=device)
-        model.load_state_dict(checkpoint['model_state_dict'])
-        model.eval()
+        
+        # モデルの状態辞書を読み込み
+        try:
+            model.load_state_dict(checkpoint['model_state_dict'])
+            print("モデルの状態辞書を正常に読み込みました")
+        except Exception as e:
+            print(f"モデルの状態辞書の読み込みに失敗: {e}")
+            print("新しいモデルとして初期化します")
+            # 読み込みに失敗した場合は、新しいモデルとして初期化
+            model = model.to(device)
+            model.eval()
         
         # 前処理器を初期化
         audio_preprocessor = AudioPreprocessor()
@@ -153,7 +184,10 @@ if 'dataset_info' not in st.session_state:
 
 # モデルが初期化されていない場合は自動ロードを試行
 if st.session_state.model is None:
-    auto_load_latest_model()
+    print("モデルが初期化されていません。自動ロードを試行します...")
+    auto_load_result = auto_load_latest_model()
+    if not auto_load_result:
+        print("自動ロードに失敗しました。新しいモデルを初期化する必要があります。")
 
 # メモリ管理
 def clear_memory():
@@ -287,7 +321,20 @@ with tab2:
     if st.session_state.model is not None:
         st.success("✅ モデルが自動的に読み込まれました")
         model_params = sum(p.numel() for p in st.session_state.model.parameters())
+        
+        # モデルの学習状態をチェック
+        is_trained = False
+        if hasattr(st.session_state.model, 'is_trained'):
+            is_trained = st.session_state.model.is_trained()
+        
         st.info(f"📊 モデル情報: {st.session_state.model.__class__.__name__}, パラメータ数: {model_params:,}")
+        
+        if is_trained:
+            st.success("✅ モデルは学習済みです")
+        else:
+            st.warning("⚠️ モデルは未学習です。学習を実行してください。")
+    else:
+        st.warning("⚠️ モデルが初期化されていません。下のボタンで初期化してください。")
     
     col1, col2 = st.columns(2)
     
