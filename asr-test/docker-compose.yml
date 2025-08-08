@@ -56,11 +56,11 @@ services:
     restart: unless-stopped
     stdin_open: true
     tty: true
-    command: ["./start_streamlit_safe.sh"]
+    command: ["./start_streamlit_minimal.sh"]
     deploy:
       resources:
         limits:
-          memory: 2G
+          memory: 4G
         reservations:
-          memory: 1G
+          memory: 2G
 
