@@ -32,17 +32,26 @@ class AudioRecorder:
     
     def start_recording(self):
         """録音開始"""
-        self.is_recording = True
-        self.stream = self.audio.open(
-            format=self.format,
-            channels=self.channels,
-            rate=self.sample_rate,
-            input=True,
-            frames_per_buffer=self.chunk_size,
-            stream_callback=self._audio_callback
-        )
-        self.stream.start_stream()
-        print("Recording started...")
+        try:
+            self.is_recording = True
+            self.stream = self.audio.open(
+                format=self.format,
+                channels=self.channels,
+                rate=self.sample_rate,
+                input=True,
+                frames_per_buffer=self.chunk_size,
+                stream_callback=self._audio_callback
+            )
+            self.stream.start_stream()
+            print("Recording started...")
+            return True
+        except OSError as e:
+            print(f"マイクアクセスエラー: {e}")
+            print("Dockerコンテナ内ではマイクアクセスが制限されています")
+            return False
+        except Exception as e:
+            print(f"録音開始エラー: {e}")
+            return False
     
     def stop_recording(self):
         """録音停止"""

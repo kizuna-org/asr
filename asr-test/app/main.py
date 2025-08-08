@@ -7,6 +7,8 @@ import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 import pandas as pd
+import librosa
+import soundfile as sf
 
 # PyTorchの初期化を最適化
 os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128'
@@ -585,47 +587,157 @@ with tab4:
                 
                 # 録音機の初期化
                 recorder = AudioRecorder()
-                recorder.start_recording()
                 
-                # リアルタイム認識の実行
-                realtime_asr = RealTimeASR(
-                    model=st.session_state.model,
-                    audio_preprocessor=st.session_state.audio_preprocessor,
-                    text_preprocessor=st.session_state.text_preprocessor,
-                    device=device
-                )
-                
-                # 認識結果の表示
-                result_placeholder = st.empty()
-                
-                try:
-                    for i in range(10):  # 10回の認識を実行
-                        audio_data = recorder.get_audio_data(3.0)  # 3秒間の音声
-                        
-                        if len(audio_data) > 0:
-                            start_time = time.time()
-                            text = realtime_asr.recognize_audio(audio_data)
-                            inference_time = time.time() - start_time
+                # 録音開始を試行
+                if recorder.start_recording():
+                    # リアルタイム認識の実行
+                    realtime_asr = RealTimeASR(
+                        model=st.session_state.model,
+                        audio_preprocessor=st.session_state.audio_preprocessor,
+                        text_preprocessor=st.session_state.text_preprocessor,
+                        device=device
+                    )
+                    
+                    # 認識結果の表示
+                    result_placeholder = st.empty()
+                    
+                    try:
+                        for i in range(10):  # 10回の認識を実行
+                            audio_data = recorder.get_audio_data(3.0)  # 3秒間の音声
                             
-                            if text.strip():
-                                st.session_state.recognized_text.append(text)
-                                result_placeholder.write(f"🎯 認識結果: **{text}**")
+                            if len(audio_data) > 0:
+                                start_time = time.time()
+                                text = realtime_asr.recognize_audio(audio_data)
+                                inference_time = time.time() - start_time
                                 
-                                # パフォーマンス記録
-                                st.session_state.performance_monitor.record_inference(
-                                    inference_time, 3.0
-                                )
-                        
-                        time.sleep(0.1)  # 少し待機
-                
-                finally:
-                    recorder.close()
+                                if text.strip():
+                                    st.session_state.recognized_text.append(text)
+                                    result_placeholder.write(f"🎯 認識結果: **{text}**")
+                                    
+                                    # パフォーマンス記録
+                                    st.session_state.performance_monitor.record_inference(
+                                        inference_time, 3.0
+                                    )
+                            
+                            time.sleep(0.1)  # 少し待機
+                    
+                    finally:
+                        recorder.close()
+                        st.session_state.recording = False
+                else:
+                    st.error("❌ マイクアクセスに失敗しました")
+                    st.info("ℹ️ Dockerコンテナ内ではマイクアクセスが制限されています")
+                    st.info("ℹ️ 代わりに音声ファイルをアップロードして認識してください")
                     st.session_state.recording = False
         
         with col2:
             if st.button("⏹️ 録音停止"):
                 st.session_state.recording = False
                 st.success("✅ 録音を停止しました")
+        
+        # 音声ファイルアップロード（代替手段）
+        st.subheader("📁 音声ファイルアップロード")
+        st.info("ℹ️ Dockerコンテナ内ではマイクアクセスが制限されているため、音声ファイルをアップロードして認識してください")
+        
+        # デモ用音声生成
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🎵 デモ音声生成", help="テスト用の音声データを生成します"):
+                try:
+                    from app.utils import create_sample_audio_data
+                    samples = create_sample_audio_data(num_samples=1, duration=3.0)
+                    audio_data = samples[0][0]  # 最初のサンプルの音声データ
+                    
+                    # 一時ファイルとして保存
+                    import tempfile
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
+                        sf.write(tmp_file.name, audio_data, 16000)
+                        temp_path = tmp_file.name
+                    
+                    # 認識実行
+                    realtime_asr = RealTimeASR(
+                        model=st.session_state.model,
+                        audio_preprocessor=st.session_state.audio_preprocessor,
+                        text_preprocessor=st.session_state.text_preprocessor,
+                        device=device
+                    )
+                    
+                    start_time = time.time()
+                    text = realtime_asr.recognize_audio(audio_data)
+                    inference_time = time.time() - start_time
+                    
+                    # 結果表示
+                    st.success(f"🎯 認識結果: **{text}**")
+                    st.info(f"⏱️ 推論時間: {inference_time:.4f}秒")
+                    
+                    # パフォーマンス記録
+                    st.session_state.performance_monitor.record_inference(
+                        inference_time, len(audio_data) / 16000
+                    )
+                    
+                    # 履歴に追加
+                    if not hasattr(st.session_state, 'recognized_text'):
+                        st.session_state.recognized_text = []
+                    st.session_state.recognized_text.append(text)
+                    
+                    # 一時ファイル削除
+                    os.unlink(temp_path)
+                    
+                except Exception as e:
+                    st.error(f"❌ デモ音声生成に失敗しました: {str(e)}")
+        
+        with col2:
+            st.info("💡 ヒント: デモ音声生成ボタンでテスト用の音声データを生成できます")
+        
+        uploaded_audio = st.file_uploader(
+            "音声ファイルをアップロードして認識",
+            type=['wav', 'mp3', 'flac', 'm4a'],
+            key="audio_upload_tab4"
+        )
+        
+        if uploaded_audio and st.session_state.model:
+            if st.button("🎯 音声認識実行", type="primary"):
+                try:
+                    # 音声ファイルを一時保存
+                    import tempfile
+                    with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as tmp_file:
+                        tmp_file.write(uploaded_audio.getvalue())
+                        temp_path = tmp_file.name
+                    
+                    # 音声を読み込み
+                    audio, sr = librosa.load(temp_path, sr=16000)
+                    
+                    # 認識実行
+                    realtime_asr = RealTimeASR(
+                        model=st.session_state.model,
+                        audio_preprocessor=st.session_state.audio_preprocessor,
+                        text_preprocessor=st.session_state.text_preprocessor,
+                        device=device
+                    )
+                    
+                    start_time = time.time()
+                    text = realtime_asr.recognize_audio(audio)
+                    inference_time = time.time() - start_time
+                    
+                    # 結果表示
+                    st.success(f"🎯 認識結果: **{text}**")
+                    st.info(f"⏱️ 推論時間: {inference_time:.4f}秒")
+                    
+                    # パフォーマンス記録
+                    st.session_state.performance_monitor.record_inference(
+                        inference_time, len(audio) / sr
+                    )
+                    
+                    # 履歴に追加
+                    if not hasattr(st.session_state, 'recognized_text'):
+                        st.session_state.recognized_text = []
+                    st.session_state.recognized_text.append(text)
+                    
+                    # 一時ファイル削除
+                    os.unlink(temp_path)
+                    
+                except Exception as e:
+                    st.error(f"❌ 音声認識に失敗しました: {str(e)}")
         
         # 認識結果の履歴
         if hasattr(st.session_state, 'recognized_text') and st.session_state.recognized_text:
