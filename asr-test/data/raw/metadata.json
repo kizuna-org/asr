@@ -1,0 +1,42 @@
+[
+  {
+    "audio": "sample_000.wav",
+    "text": "hello world"
+  },
+  {
+    "audio": "sample_001.wav",
+    "text": "good morning"
+  },
+  {
+    "audio": "sample_002.wav",
+    "text": "how are you"
+  },
+  {
+    "audio": "sample_003.wav",
+    "text": "thank you"
+  },
+  {
+    "audio": "sample_004.wav",
+    "text": "please help"
+  },
+  {
+    "audio": "sample_005.wav",
+    "text": "nice to meet you"
+  },
+  {
+    "audio": "sample_006.wav",
+    "text": "have a good day"
+  },
+  {
+    "audio": "sample_007.wav",
+    "text": "see you later"
+  },
+  {
+    "audio": "sample_008.wav",
+    "text": "goodbye"
+  },
+  {
+    "audio": "sample_009.wav",
+    "text": "excuse me"
+  }
+]
