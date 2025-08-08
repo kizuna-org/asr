@@ -878,9 +878,19 @@ with tab3:
     # 現在の学習状態の表示
     if not st.session_state.controlled_trainer:
         if not has_training_history:
-            st.info("ℹ️ 学習を開始すると進捗が表示されます")
+            st.warning("⚠️ **トレーナーが初期化されていません**")
+            st.info("💡 **解決方法**:")
+            st.info("1. 「🎯 モデル学習」タブに移動")
+            st.info("2. データセットを準備（サンプルデータ生成またはアップロード）")
+            st.info("3. 「▶️ 学習開始」ボタンをクリックしてトレーナーを初期化")
+            st.info("4. トレーナーが初期化されたら、リアルタイム学習進捗が表示されます")
+            
+            # クイックアクセスボタン
+            if st.button("🚀 モデル学習タブに移動", type="primary", use_container_width=True):
+                st.switch_page("🎯 モデル学習")
         else:
             st.success("✅ 保存された学習履歴が表示されています")
+            st.info("ℹ️ 新しい学習を開始するには、モデル学習タブでトレーナーを初期化してください")
     else:
         # 学習状態の表示
         status = st.session_state.controlled_trainer.get_training_status()
@@ -968,30 +978,39 @@ with tab3:
         # チェックポイント管理
         st.subheader("💾 チェックポイント管理")
         
-        checkpoints = st.session_state.controlled_trainer.get_available_checkpoints()
-        
-        if checkpoints:
-            selected_checkpoint = st.selectbox(
-                "チェックポイントを選択",
-                checkpoints,
-                key="checkpoint_select_tab3",
-                help="読み込むチェックポイントを選択してください"
-            )
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                if st.button("📥 チェックポイント読み込み"):
-                    checkpoint_path = os.path.join("models", selected_checkpoint)
-                    result = st.session_state.controlled_trainer.load_checkpoint(checkpoint_path)
-                    st.success(result["message"])
-            
-            with col2:
-                if st.button("💾 現在の状態を保存"):
-                    result = st.session_state.controlled_trainer.save_checkpoint()
-                    st.success(result["message"])
+        if not st.session_state.controlled_trainer:
+            st.warning("⚠️ トレーナーが初期化されていません")
+            st.info("ℹ️ トレーナーを初期化すると、チェックポイントの管理が可能になります")
         else:
-            st.info("ℹ️ 利用可能なチェックポイントがありません")
+            checkpoints = st.session_state.controlled_trainer.get_available_checkpoints()
+            
+            if checkpoints:
+                selected_checkpoint = st.selectbox(
+                    "チェックポイントを選択",
+                    checkpoints,
+                    key="checkpoint_select_tab4",
+                    help="読み込むチェックポイントを選択してください"
+                )
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    if st.button("📥 チェックポイント読み込み", use_container_width=True):
+                        checkpoint_path = os.path.join("models", selected_checkpoint)
+                        result = st.session_state.controlled_trainer.load_checkpoint(checkpoint_path)
+                        st.success(result["message"])
+                
+                with col2:
+                    if st.button("💾 現在の状態を保存", use_container_width=True):
+                        result = st.session_state.controlled_trainer.save_checkpoint()
+                        st.success(result["message"])
+                
+                # チェックポイント一覧
+                st.write("📋 利用可能なチェックポイント:")
+                for i, checkpoint in enumerate(checkpoints[-5:]):  # 最新5個を表示
+                    st.write(f"{i+1}. {checkpoint}")
+            else:
+                st.info("ℹ️ 利用可能なチェックポイントがありません")
 
 with tab4:
     st.header("🎤 リアルタイム音声認識")
@@ -1393,139 +1412,125 @@ with tab6:
                 )
         
         # 学習制御ボタン
-        st.subheader("🎮 制御ボタン")
+        st.subheader("🎮 学習制御")
+        
+        # トレーナーの初期化状態を表示
+        if st.session_state.controlled_trainer:
+            st.success("✅ **トレーナーが初期化済みです**")
+            status = st.session_state.controlled_trainer.get_training_status()
+            st.info(f"📊 **現在の状態**: {'学習中' if status['is_training'] else '停止中'} (エポック {status['current_epoch'] + 1}/{status['max_epochs']})")
+        else:
+            st.warning("⚠️ **トレーナーが初期化されていません**")
+            st.info("💡 **次のステップ**: 下の「▶️ 学習開始」ボタンをクリックしてトレーナーを初期化してください")
         
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            if st.button("▶️ 学習開始", type="primary", use_container_width=True):
-                if st.session_state.controlled_trainer:
+            if st.button("▶️ 学習開始", type="primary"):
+                try:
+                    # データセット情報の検証
+                    if not st.session_state.dataset_info or not isinstance(st.session_state.dataset_info, dict):
+                        st.error("❌ データセット情報が不正です")
+                        st.stop()
+                    
+                    # データローダーの作成
+                    if st.session_state.dataset_info['type'] == 'sample':
+                        dataset = ASRDataset(
+                            data_dir=st.session_state.dataset_info['path'],
+                            audio_preprocessor=st.session_state.audio_preprocessor,
+                            text_preprocessor=st.session_state.text_preprocessor
+                        )
+                        train_loader = create_dataloader(dataset, batch_size=batch_size, shuffle=True)
+                        st.success(f"✅ サンプルデータセット読み込み完了: {len(dataset)}サンプル")
+                    elif st.session_state.dataset_info['type'] == 'ljspeech':
+                        ljspeech_dir = "/app/datasets/ljspeech/1.1.1"
+                        if os.path.exists(ljspeech_dir):
+                            try:
+                                train_loader, dataset_info = create_ljspeech_dataloader(
+                                    data_dir=ljspeech_dir,
+                                    audio_preprocessor=st.session_state.audio_preprocessor,
+                                    text_preprocessor=st.session_state.text_preprocessor,
+                                    batch_size=batch_size
+                                )
+                                st.success(f"✅ LJSpeechデータセット読み込み完了: {dataset_info['total_samples']}サンプル")
+                            except ValueError as e:
+                                st.error(f"❌ LJSpeechデータセットエラー: {str(e)}")
+                                st.info("ℹ️ サンプルデータを生成するか、カスタムデータをアップロードしてください")
+                                st.stop()
+                        else:
+                            st.error("❌ LJSpeechデータセットが見つかりません")
+                            st.info("ℹ️ サンプルデータを生成するか、カスタムデータをアップロードしてください")
+                            st.stop()
+                    elif st.session_state.dataset_info['type'] == 'custom':
+                        # カスタムデータセットの処理
+                        if isinstance(st.session_state.dataset_info, dict):
+                            custom_path = st.session_state.dataset_info.get('path', 'data/custom')
+                        else:
+                            custom_path = 'data/custom'
+                        if os.path.exists(custom_path):
+                            dataset = ASRDataset(
+                                data_dir=custom_path,
+                                audio_preprocessor=st.session_state.audio_preprocessor,
+                                text_preprocessor=st.session_state.text_preprocessor
+                            )
+                            train_loader = create_dataloader(dataset, batch_size=batch_size, shuffle=True)
+                            st.success(f"✅ カスタムデータセット読み込み完了: {len(dataset)}サンプル")
+                        else:
+                            st.error(f"❌ カスタムデータセットが見つかりません: {custom_path}")
+                            st.stop()
+                    
+                    # 制御可能なトレーナーの初期化
+                    with st.spinner("トレーナーを初期化中..."):
+                        st.session_state.controlled_trainer = ControlledASRTrainer(
+                            model=st.session_state.model,
+                            train_loader=train_loader,
+                            device=device,
+                            learning_rate=learning_rate,
+                            max_epochs=max_epochs,
+                            model_save_dir="models",
+                            weight_decay=weight_decay,
+                            gradient_clip=gradient_clip,
+                            early_stopping_patience=early_stopping_patience if enable_early_stopping else None,
+                            validation_split=validation_split
+                        )
+                    
+                    # 学習開始
+                    st.session_state.training_start_time = time.time()
                     result = st.session_state.controlled_trainer.start_training()
-                    st.success(result["message"])
-                else:
-                    st.error("❌ トレーナーが初期化されていません")
+                    st.success("✅ **トレーナーの初期化と学習開始が完了しました！**")
+                    st.info("📊 「学習進捗」タブでリアルタイム進捗を確認できます")
+                    st.info("🎮 「学習制御」タブで学習を制御できます")
+                    
+                except Exception as e:
+                    import traceback
+                    st.error(f"❌ 学習開始に失敗しました: {str(e)}")
+                    st.error(f"詳細: {traceback.format_exc()}")
+                    st.error(f"dataset_info: {st.session_state.dataset_info}")
+                    st.error(f"dataset_info type: {type(st.session_state.dataset_info)}")
         
         with col2:
-            if st.button("⏸️ 一時停止", use_container_width=True):
+            if st.button("⏸️ 一時停止"):
                 if st.session_state.controlled_trainer:
                     result = st.session_state.controlled_trainer.pause_training()
                     st.info(result["message"])
                 else:
-                    st.error("❌ トレーナーが初期化されていません")
+                    st.warning("⚠️ トレーナーが初期化されていません")
         
         with col3:
-            if st.button("▶️ 再開", use_container_width=True):
+            if st.button("▶️ 再開"):
                 if st.session_state.controlled_trainer:
                     result = st.session_state.controlled_trainer.resume_training()
                     st.success(result["message"])
                 else:
-                    st.error("❌ トレーナーが初期化されていません")
+                    st.warning("⚠️ トレーナーが初期化されていません")
         
         with col4:
-            if st.button("⏹️ 停止", use_container_width=True):
+            if st.button("⏹️ 停止"):
                 if st.session_state.controlled_trainer:
                     result = st.session_state.controlled_trainer.stop_training()
                     st.warning(result["message"])
                 else:
-                    st.error("❌ トレーナーが初期化されていません")
-        
-        # チェックポイント管理
-        st.subheader("💾 チェックポイント管理")
-        
-        if st.session_state.controlled_trainer:
-            checkpoints = st.session_state.controlled_trainer.get_available_checkpoints()
-            
-            if checkpoints:
-                selected_checkpoint = st.selectbox(
-                    "チェックポイントを選択",
-                    checkpoints,
-                    key="checkpoint_select_tab4",
-                    help="読み込むチェックポイントを選択してください"
-                )
-                
-                col1, col2 = st.columns(2)
-                
-                with col1:
-                    if st.button("📥 チェックポイント読み込み", use_container_width=True):
-                        checkpoint_path = os.path.join("models", selected_checkpoint)
-                        result = st.session_state.controlled_trainer.load_checkpoint(checkpoint_path)
-                        st.success(result["message"])
-                
-                with col2:
-                    if st.button("💾 現在の状態を保存", use_container_width=True):
-                        result = st.session_state.controlled_trainer.save_checkpoint()
-                        st.success(result["message"])
-                
-                # チェックポイント一覧
-                st.write("📋 利用可能なチェックポイント:")
-                for i, checkpoint in enumerate(checkpoints[-5:]):  # 最新5個を表示
-                    st.write(f"{i+1}. {checkpoint}")
-            else:
-                st.info("ℹ️ 利用可能なチェックポイントがありません")
-        
-        # リアルタイム学習進捗
-        if st.session_state.controlled_trainer and status.get("is_training", False):
-            st.subheader("📈 リアルタイム学習進捗")
-            
-            # 学習曲線の表示
-            if status.get("train_losses"):
-                fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
-                
-                # 損失曲線
-                ax1.plot(status["train_losses"], label='Train Loss', color='blue')
-                if status.get("val_losses"):
-                    ax1.plot(status["val_losses"], label='Val Loss', color='red')
-                ax1.set_title('Training and Validation Loss')
-                ax1.set_xlabel('Epoch')
-                ax1.set_ylabel('Loss')
-                ax1.legend()
-                ax1.grid(True)
-                
-                # WER曲線
-                ax2.plot(status["train_wers"], label='Train WER', color='green')
-                if status.get("val_wers"):
-                    ax2.plot(status["val_wers"], label='Val WER', color='orange')
-                ax2.set_title('Training and Validation WER')
-                ax2.set_xlabel('Epoch')
-                ax2.set_ylabel('WER')
-                ax2.legend()
-                ax2.grid(True)
-                
-                plt.tight_layout()
-                st.pyplot(fig)
-                plt.close()
-                
-                # 最新の学習結果
-                if status["train_losses"]:
-                    latest_epoch = len(status["train_losses"])
-                    latest_loss = status["train_losses"][-1]
-                    latest_wer = status["train_wers"][-1] if status["train_wers"] else 0.0
-                    
-                    st.write(f"📊 最新の学習結果 (エポック {latest_epoch}):")
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.metric("損失", f"{latest_loss:.4f}")
-                    with col2:
-                        st.metric("WER", f"{latest_wer:.4f}")
-        
-        # 学習設定
-        st.subheader("⚙️ 学習設定")
-        
-        if st.session_state.controlled_trainer:
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.write("**現在の設定:**")
-                st.write(f"- 学習率: {st.session_state.controlled_trainer.optimizer.param_groups[0]['lr']:.6f}")
-                st.write(f"- 最大エポック数: {st.session_state.controlled_trainer.max_epochs}")
-                st.write(f"- デバイス: {st.session_state.controlled_trainer.device}")
-            
-            with col2:
-                st.write("**モデル情報:**")
-                params = sum(p.numel() for p in st.session_state.model.parameters())
-                st.write(f"- パラメータ数: {params:,}")
-                st.write(f"- モデルタイプ: {st.session_state.model.__class__.__name__}")
-                st.write(f"- 学習可能パラメータ: {sum(p.numel() for p in st.session_state.model.parameters() if p.requires_grad):,}")
+                    st.warning("⚠️ トレーナーが初期化されていません")
 
 # フッター
 st.markdown("---")
