@@ -351,15 +351,21 @@ with tab2:
                     elif st.session_state.dataset_info['type'] == 'ljspeech':
                         ljspeech_dir = "/app/datasets/ljspeech/1.1.1"
                         if os.path.exists(ljspeech_dir):
-                            train_loader, dataset_info = create_ljspeech_dataloader(
-                                data_dir=ljspeech_dir,
-                                audio_preprocessor=st.session_state.audio_preprocessor,
-                                text_preprocessor=st.session_state.text_preprocessor,
-                                batch_size=batch_size
-                            )
-                            st.success(f"✅ LJSpeechデータセット読み込み完了: {dataset_info['total_samples']}サンプル")
+                            try:
+                                train_loader, dataset_info = create_ljspeech_dataloader(
+                                    data_dir=ljspeech_dir,
+                                    audio_preprocessor=st.session_state.audio_preprocessor,
+                                    text_preprocessor=st.session_state.text_preprocessor,
+                                    batch_size=batch_size
+                                )
+                                st.success(f"✅ LJSpeechデータセット読み込み完了: {dataset_info['total_samples']}サンプル")
+                            except ValueError as e:
+                                st.error(f"❌ LJSpeechデータセットエラー: {str(e)}")
+                                st.info("ℹ️ サンプルデータを生成するか、カスタムデータをアップロードしてください")
+                                st.stop()
                         else:
                             st.error("❌ LJSpeechデータセットが見つかりません")
+                            st.info("ℹ️ サンプルデータを生成するか、カスタムデータをアップロードしてください")
                             st.stop()
                     elif st.session_state.dataset_info['type'] == 'custom':
                         # カスタムデータセットの処理

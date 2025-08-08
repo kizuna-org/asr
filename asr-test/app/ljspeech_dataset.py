@@ -95,6 +95,11 @@ class LJSpeechDataset(Dataset):
                             text = f.read().strip()
                     data_files.append((audio_path, text))
         
+        # デバッグ情報を出力
+        print(f"LJSpeech _get_data_files: データディレクトリ={self.data_dir}")
+        print(f"メタデータ: {self.metadata}")
+        print(f"取得したデータファイル数: {len(data_files)}")
+        
         return data_files
     
     def __len__(self) -> int:
@@ -176,15 +181,26 @@ class LJSpeechDataLoader:
             text_preprocessor=text_preprocessor,
             max_length=max_length
         )
+        
+        # デバッグ情報を出力
+        print(f"LJSpeechデータセット初期化: データディレクトリ={data_dir}")
+        print(f"データファイル数: {len(self.dataset.data_files)}")
+        print(f"データセットサイズ: {len(self.dataset)}")
+        if len(self.dataset.data_files) == 0:
+            print(f"ディレクトリ内容: {os.listdir(data_dir) if os.path.exists(data_dir) else 'ディレクトリが存在しません'}")
     
     def get_dataloader(self):
         """PyTorch DataLoaderを作成"""
         from torch.utils.data import DataLoader
         from app.dataset import collate_fn
         
+        # データセットのサイズをチェック
+        if len(self.dataset) == 0:
+            raise ValueError(f"データセットが空です。データディレクトリ: {self.data_dir}, データファイル数: {len(self.dataset.data_files)}")
+        
         return DataLoader(
             self.dataset,
-            batch_size=self.batch_size,
+            batch_size=min(self.batch_size, len(self.dataset)),  # バッチサイズをデータセットサイズに制限
             shuffle=True,
             collate_fn=collate_fn,
             num_workers=0,  # Docker環境では0に設定
