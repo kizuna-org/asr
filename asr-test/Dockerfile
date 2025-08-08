@@ -61,7 +61,8 @@ RUN mkdir -p /etc/alsa/conf.d && \
   echo 'ctl.!default { type null }' >> /etc/asound.conf
 
 # オーディオデバイスを無効化
-RUN ln -sf /dev/null /dev/snd/controlC0 && \
+RUN mkdir -p /dev/snd && \
+  ln -sf /dev/null /dev/snd/controlC0 && \
   ln -sf /dev/null /dev/snd/pcmC0D0p && \
   ln -sf /dev/null /dev/snd/pcmC0D0c
 
