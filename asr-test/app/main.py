@@ -94,6 +94,7 @@ with st.sidebar:
     model_type = st.selectbox(
         "モデルタイプ",
         ["FastASRModel (超軽量)", "LightweightASRModel (軽量)"],
+        key="model_type_sidebar",
         help="FastASRModelはリアルタイム推論に最適化されています"
     )
     
@@ -101,6 +102,7 @@ with st.sidebar:
     device = st.selectbox(
         "デバイス",
         ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"],
+        key="device_sidebar",
         help="GPUが利用可能な場合はcudaを選択してください"
     )
     
@@ -127,6 +129,7 @@ with st.sidebar:
     dataset_type = st.selectbox(
         "データセットタイプ",
         ["サンプルデータ", "LJSpeechデータセット", "カスタムデータ"],
+        key="dataset_type_sidebar",
         help="使用するデータセットを選択してください"
     )
     
@@ -273,6 +276,7 @@ with tab2:
     dataset_selection = st.selectbox(
         "使用するデータセットを選択",
         ["サンプルデータ", "LJSpeechデータセット", "カスタムデータ"],
+        key="dataset_selection_tab2",
         help="学習に使用するデータセットを選択してください"
     )
     
@@ -544,6 +548,7 @@ with tab3:
             selected_checkpoint = st.selectbox(
                 "チェックポイントを選択",
                 checkpoints,
+                key="checkpoint_select_tab3",
                 help="読み込むチェックポイントを選択してください"
             )
             
@@ -809,6 +814,7 @@ with tab6:
                 selected_checkpoint = st.selectbox(
                     "チェックポイントを選択",
                     checkpoints,
+                    key="checkpoint_select_tab4",
                     help="読み込むチェックポイントを選択してください"
                 )
                 
