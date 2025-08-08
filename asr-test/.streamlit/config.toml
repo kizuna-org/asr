@@ -16,3 +16,6 @@ level = "warning"
 
 [client]
 showErrorDetails = false
+
+[runner]
+magicEnabled = false
