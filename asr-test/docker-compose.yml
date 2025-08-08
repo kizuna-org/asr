@@ -1,8 +1,7 @@
 services:
-  asr-app:
-    image: asr-app # 絶対に修正しないでください。ホストサーバーの環境が特殊なため、このimage以外では動きません
+  asr-api:
+    image: asr-app
     ports:
-      - "58081:8501"  # Streamlit
       - "58080:8000"  # FastAPI
     volumes:
       - ./data:/app/data
@@ -16,4 +15,23 @@ services:
     restart: unless-stopped
     stdin_open: true
     tty: true
+    command: ["python", "-m", "uvicorn", "app.api:app", "--host", "0.0.0.0", "--port", "8000"]
+
+  asr-streamlit:
+    image: asr-app
+    ports:
+      - "58081:8501"  # Streamlit
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+      - ./app:/app/app
+      - ./static:/app/static
+      - /home/students/r03i/r03i18/temp/datasets:/app/datasets
+    environment:
+      - PYTHONPATH=/app
+      - CUDA_VISIBLE_DEVICES=0
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+    command: ["streamlit", "run", "app/main.py", "--server.port", "8501", "--server.address", "0.0.0.0", "--server.headless", "true"]
 
