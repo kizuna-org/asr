@@ -262,7 +262,22 @@ with st.sidebar:
     st.subheader("🎯 学習パラメータ")
     learning_rate = st.slider("学習率", 1e-5, 1e-2, 1e-3, format="%.5f")
     batch_size = st.slider("バッチサイズ", 1, 32, 8)
-    max_epochs = st.slider("最大エポック数", 10, 200, 50)
+    
+    # 停止するエポック数の設定
+    st.write("**🛑 停止条件**")
+    max_epochs = st.number_input(
+        "停止するエポック数",
+        min_value=1,
+        max_value=500,
+        value=50,
+        step=1,
+        help="学習を停止するエポック数を設定します（デフォルト: 50）"
+    )
+    
+    # 学習時間の推定表示
+    estimated_time_per_epoch = 2.0  # 推定値（実際の環境に応じて調整）
+    estimated_total_time = max_epochs * estimated_time_per_epoch
+    st.info(f"⏱️ 推定学習時間: 約{estimated_total_time:.0f}分（1エポックあたり約{estimated_time_per_epoch:.0f}分）")
     
     # 高度な学習パラメータ
     with st.expander("🔧 高度な設定"):
@@ -624,7 +639,7 @@ with tab2:
         st.warning("⚠️ データセットを準備してください。")
     else:
         # 学習設定の確認
-        st.write("**学習設定の確認**")
+        st.subheader("📋 学習設定の確認")
         col1, col2, col3 = st.columns(3)
         
         with col1:
@@ -632,12 +647,19 @@ with tab2:
             st.metric("バッチサイズ", batch_size)
         
         with col2:
-            st.metric("最大エポック", max_epochs)
+            st.metric("停止エポック", max_epochs)
             st.metric("隠れ層サイズ", hidden_dim)
         
         with col3:
             st.metric("デバイス", device)
-            st.metric("データセット", st.session_state.dataset_info['type'])
+            st.metric("データセット", st.session_state.dataset_info['type'] if st.session_state.dataset_info else "未設定")
+        
+        # 学習時間の推定
+        estimated_time_per_epoch = 2.0
+        estimated_total_time = max_epochs * estimated_time_per_epoch
+        st.info(f"⏱️ 推定学習時間: 約{estimated_total_time:.0f}分（1エポックあたり約{estimated_time_per_epoch:.0f}分）")
+        
+        st.markdown("---")
         
         # 学習制御ボタン
         st.write("**学習制御**")
@@ -1275,6 +1297,52 @@ with tab6:
         st.warning("⚠️ まずモデルを初期化してください。")
     else:
         st.subheader("🎛️ 学習制御パネル")
+        
+        # 停止条件の設定
+        st.subheader("🛑 停止条件の設定")
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            # 現在の設定を表示
+            if st.session_state.controlled_trainer:
+                current_status = st.session_state.controlled_trainer.get_training_status()
+                st.info(f"**現在の設定**: 最大{current_status['max_epochs']}エポック")
+            
+            # 新しい停止条件の設定
+            new_max_epochs = st.number_input(
+                "新しい停止エポック数",
+                min_value=1,
+                max_value=500,
+                value=50,
+                step=1,
+                help="学習を停止するエポック数を変更します"
+            )
+            
+            if st.button("🔄 停止条件を更新", use_container_width=True):
+                if st.session_state.controlled_trainer:
+                    # トレーナーの最大エポック数を更新
+                    st.session_state.controlled_trainer.max_epochs = new_max_epochs
+                    st.success(f"✅ 停止条件を{new_max_epochs}エポックに更新しました")
+                else:
+                    st.error("❌ トレーナーが初期化されていません")
+        
+        with col2:
+            # 学習時間の推定
+            estimated_time_per_epoch = 2.0
+            estimated_total_time = new_max_epochs * estimated_time_per_epoch
+            
+            st.metric("推定学習時間", f"{estimated_total_time:.0f}分")
+            st.metric("1エポックあたり", f"{estimated_time_per_epoch:.0f}分")
+            
+            # 現在の学習状態との比較
+            if st.session_state.controlled_trainer:
+                current_status = st.session_state.controlled_trainer.get_training_status()
+                remaining_epochs = new_max_epochs - (current_status['current_epoch'] + 1)
+                if remaining_epochs > 0:
+                    st.info(f"残りエポック数: {remaining_epochs}")
+                    st.info(f"残り推定時間: {remaining_epochs * estimated_time_per_epoch:.0f}分")
+        
+        st.markdown("---")
         
         # 学習状態の表示
         if st.session_state.controlled_trainer:
