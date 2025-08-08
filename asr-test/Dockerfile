@@ -36,7 +36,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt && \
   pip uninstall -y pyarrow arrow-cpp && \
   pip install --no-deps streamlit==1.24.0 && \
-  pip install --no-deps pandas>=2.0.0,<2.2.0
+  pip install pandas==2.1.4
 
 # ディレクトリの作成
 RUN mkdir -p data/raw data/processed models
