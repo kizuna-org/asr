@@ -1,5 +1,13 @@
 FROM python:3.11-slim
 
+ARG HTTP_PROXY=http://http-p.srv.cc.suzuka-ct.ac.jp:8080
+ARG HTTPS_PROXY=http://http-p.srv.cc.suzuka-ct.ac.jp:8080
+ARG NO_PROXY=localhost,127.0.0.1
+
+ENV HTTP_PROXY=${HTTP_PROXY}
+ENV HTTPS_PROXY=${HTTPS_PROXY}
+ENV NO_PROXY=${NO_PROXY}
+
 # システムパッケージのインストール
 RUN apt-get update && apt-get install -y \
   ffmpeg \
