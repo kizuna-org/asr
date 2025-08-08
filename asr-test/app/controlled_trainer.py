@@ -31,7 +31,7 @@ class ControlledASRTrainer:
                  patience: int = 10,
                  model_save_dir: str = 'models',
                  gradient_clip: float = 1.0,
-                 early_stopping_patience: int = 10,
+                 early_stopping_patience: Optional[int] = 10,
                  validation_split: float = 0.2):
         
         self.model = model.to(device)
@@ -258,7 +258,7 @@ class ControlledASRTrainer:
                 self.epoch_callback(epoch, train_loss, val_loss, train_wer, val_wer)
             
             # 早期停止のチェック
-            if epoch - self.best_epoch >= self.early_stopping_patience:
+            if self.early_stopping_patience is not None and epoch - self.best_epoch >= self.early_stopping_patience:
                 print(f"Early stopping at epoch {epoch + 1}")
                 break
         

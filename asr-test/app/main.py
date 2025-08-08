@@ -116,7 +116,8 @@ with st.sidebar:
     with st.expander("🔧 高度な設定"):
         weight_decay = st.slider("Weight Decay", 0.0, 0.01, 0.0001, format="%.4f")
         gradient_clip = st.slider("Gradient Clipping", 0.0, 10.0, 1.0, format="%.1f")
-        early_stopping_patience = st.slider("Early Stopping Patience", 5, 50, 10)
+        enable_early_stopping = st.checkbox("Early Stopping を有効にする", value=False)
+        early_stopping_patience = st.slider("Early Stopping Patience", 5, 50, 10, disabled=not enable_early_stopping)
         validation_split = st.slider("Validation Split", 0.1, 0.3, 0.2, format="%.1f")
     
     # モデルパラメータ
@@ -399,7 +400,7 @@ with tab2:
                         model_save_dir="models",
                         weight_decay=weight_decay,
                         gradient_clip=gradient_clip,
-                        early_stopping_patience=early_stopping_patience,
+                        early_stopping_patience=early_stopping_patience if enable_early_stopping else None,
                         validation_split=validation_split
                     )
                     
