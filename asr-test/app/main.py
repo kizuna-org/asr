@@ -10,10 +10,10 @@ from plotly.subplots import make_subplots
 import pandas as pd
 
 # ローカルモジュールのインポート
-from model import LightweightASRModel, FastASRModel, CHAR_TO_ID, ID_TO_CHAR
-from dataset import AudioPreprocessor, TextPreprocessor, ASRDataset, create_dataloader, SyntheticDataset
-from trainer import ASRTrainer, FastTrainer
-from utils import (
+from .model import LightweightASRModel, FastASRModel, CHAR_TO_ID, ID_TO_CHAR
+from .dataset import AudioPreprocessor, TextPreprocessor, ASRDataset, create_dataloader, SyntheticDataset
+from .trainer import ASRTrainer, FastTrainer
+from .utils import (
     AudioRecorder, RealTimeASR, AudioProcessor, ModelManager, 
     PerformanceMonitor, create_sample_audio_data, save_sample_dataset
 )

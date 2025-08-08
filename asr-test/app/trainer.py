@@ -11,8 +11,8 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from jiwer import wer
 
-from model import LightweightASRModel, FastASRModel, ID_TO_CHAR
-from dataset import AudioPreprocessor, TextPreprocessor, ASRDataset, create_dataloader
+from .model import LightweightASRModel, FastASRModel, ID_TO_CHAR
+from .dataset import AudioPreprocessor, TextPreprocessor, ASRDataset, create_dataloader
 
 
 class ASRTrainer:
