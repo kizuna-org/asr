@@ -137,6 +137,35 @@ def auto_load_latest_model():
         try:
             model.load_state_dict(checkpoint['model_state_dict'])
             print("モデルの状態辞書を正常に読み込みました")
+            
+            # 学習履歴を読み込み
+            if 'train_losses' in checkpoint:
+                st.session_state.training_history['loss'] = checkpoint['train_losses']
+                print(f"学習損失履歴を読み込みました: {len(checkpoint['train_losses'])}エポック")
+            
+            if 'val_losses' in checkpoint:
+                st.session_state.training_history['val_loss'] = checkpoint['val_losses']
+                print(f"検証損失履歴を読み込みました: {len(checkpoint['val_losses'])}エポック")
+            
+            if 'train_wers' in checkpoint:
+                st.session_state.training_history['wer'] = checkpoint['train_wers']
+                print(f"学習WER履歴を読み込みました: {len(checkpoint['train_wers'])}エポック")
+            
+            if 'val_wers' in checkpoint:
+                st.session_state.training_history['val_wer'] = checkpoint['val_wers']
+                print(f"検証WER履歴を読み込みました: {len(checkpoint['val_wers'])}エポック")
+            
+            # エポック情報を設定
+            if 'epoch' in checkpoint:
+                total_epochs = checkpoint['epoch']
+                st.session_state.training_history['epoch'] = list(range(1, total_epochs + 1))
+                print(f"学習エポック数: {total_epochs}")
+            
+            # ベスト損失を記録
+            if 'best_val_loss' in checkpoint:
+                st.session_state.training_history['best_val_loss'] = checkpoint['best_val_loss']
+                print(f"ベスト検証損失: {checkpoint['best_val_loss']:.4f}")
+            
         except Exception as e:
             print(f"モデルの状態辞書の読み込みに失敗: {e}")
             print("新しいモデルとして初期化します")
@@ -738,8 +767,98 @@ with tab3:
                 unsafe_allow_html=True
             )
     
+    # 学習履歴の表示（モデルロード時も含む）
+    has_training_history = False
+    
+    # セッション状態の学習履歴をチェック
+    if st.session_state.training_history and any(st.session_state.training_history.values()):
+        has_training_history = True
+        st.subheader("📈 保存された学習履歴")
+        
+        # 学習履歴の統計情報
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            if st.session_state.training_history.get('loss'):
+                epochs = len(st.session_state.training_history['loss'])
+                st.metric("学習エポック数", epochs)
+            else:
+                st.metric("学習エポック数", 0)
+        
+        with col2:
+            if st.session_state.training_history.get('best_val_loss'):
+                st.metric("ベスト検証損失", f"{st.session_state.training_history['best_val_loss']:.4f}")
+            else:
+                st.metric("ベスト検証損失", "N/A")
+        
+        with col3:
+            if st.session_state.training_history.get('loss'):
+                final_loss = st.session_state.training_history['loss'][-1]
+                st.metric("最終学習損失", f"{final_loss:.4f}")
+            else:
+                st.metric("最終学習損失", "N/A")
+        
+        with col4:
+            if st.session_state.training_history.get('wer'):
+                final_wer = st.session_state.training_history['wer'][-1]
+                st.metric("最終学習WER", f"{final_wer:.4f}")
+            else:
+                st.metric("最終学習WER", "N/A")
+        
+        # 学習曲線の表示
+        if st.session_state.training_history.get('loss'):
+            st.subheader("📊 学習曲線")
+            
+            # Plotlyを使用したインタラクティブなグラフ
+            fig = make_subplots(
+                rows=2, cols=2,
+                subplot_titles=('Training Loss', 'Validation Loss', 'Training WER', 'Validation WER'),
+                specs=[[{"secondary_y": False}, {"secondary_y": False}],
+                       [{"secondary_y": False}, {"secondary_y": False}]]
+            )
+            
+            # エポック情報
+            epochs = st.session_state.training_history.get('epoch', list(range(1, len(st.session_state.training_history['loss']) + 1)))
+            
+            # 損失曲線
+            fig.add_trace(
+                go.Scatter(x=epochs, y=st.session_state.training_history['loss'], name="Train Loss", line=dict(color='blue')),
+                row=1, col=1
+            )
+            if st.session_state.training_history.get('val_loss'):
+                fig.add_trace(
+                    go.Scatter(x=epochs, y=st.session_state.training_history['val_loss'], name="Val Loss", line=dict(color='red')),
+                    row=1, col=2
+                )
+            
+            # WER曲線
+            if st.session_state.training_history.get('wer'):
+                fig.add_trace(
+                    go.Scatter(x=epochs, y=st.session_state.training_history['wer'], name="Train WER", line=dict(color='green')),
+                    row=2, col=1
+                )
+            if st.session_state.training_history.get('val_wer'):
+                fig.add_trace(
+                    go.Scatter(x=epochs, y=st.session_state.training_history['val_wer'], name="Val WER", line=dict(color='orange')),
+                    row=2, col=2
+                )
+            
+            # グラフの設定
+            fig.update_layout(height=600, showlegend=True)
+            fig.update_xaxes(title_text="Epoch")
+            fig.update_yaxes(title_text="Loss", row=1, col=1)
+            fig.update_yaxes(title_text="Loss", row=1, col=2)
+            fig.update_yaxes(title_text="WER", row=2, col=1)
+            fig.update_yaxes(title_text="WER", row=2, col=2)
+            
+            st.plotly_chart(fig, use_container_width=True)
+    
+    # 現在の学習状態の表示
     if not st.session_state.controlled_trainer:
-        st.info("ℹ️ 学習を開始すると進捗が表示されます")
+        if not has_training_history:
+            st.info("ℹ️ 学習を開始すると進捗が表示されます")
+        else:
+            st.success("✅ 保存された学習履歴が表示されています")
     else:
         # 学習状態の表示
         status = st.session_state.controlled_trainer.get_training_status()
@@ -775,12 +894,12 @@ with tab3:
             st.metric("ベストエポック", status["best_epoch"] + 1)
         
         with col4:
-            st.metric("学習率", f"{learning_rate:.5f}")
+            st.metric("学習率", f"{status['learning_rate']:.5f}")
             st.metric("残り時間", "計算中..." if status["is_training"] else "停止中")
         
-        # リアルタイム学習曲線
-        if status["train_losses"]:
-            st.subheader("📈 学習曲線")
+        # リアルタイム学習曲線（現在の学習中の場合）
+        if status["is_training"] and status["train_losses"]:
+            st.subheader("📈 リアルタイム学習曲線")
             
             # Plotlyを使用したインタラクティブなグラフ
             fig = make_subplots(
@@ -814,7 +933,14 @@ with tab3:
                     row=2, col=2
                 )
             
+            # グラフの設定
             fig.update_layout(height=600, showlegend=True)
+            fig.update_xaxes(title_text="Epoch")
+            fig.update_yaxes(title_text="Loss", row=1, col=1)
+            fig.update_yaxes(title_text="Loss", row=1, col=2)
+            fig.update_yaxes(title_text="WER", row=2, col=1)
+            fig.update_yaxes(title_text="WER", row=2, col=2)
+            
             st.plotly_chart(fig, use_container_width=True)
         
         # チェックポイント管理
