@@ -26,7 +26,7 @@ plotly==5.17.0
 # ユーティリティ
 tqdm==4.66.1
 wandb==0.16.1
-tensorboard==2.15.0
+tensorboard>=2.13,<2.14
 
 # 音声認識関連
 phonemizer==3.2.1
