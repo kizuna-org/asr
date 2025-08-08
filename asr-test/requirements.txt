@@ -33,6 +33,3 @@ tensorboard>=2.12,<2.13
 # 音声認識関連
 phonemizer==3.2.1
 jiwer==3.0.3
-
-# PyArrow除外（メモリ問題回避）
---no-deps pyarrow
