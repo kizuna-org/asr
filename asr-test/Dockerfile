@@ -25,7 +25,6 @@ RUN echo "Acquire::http::Proxy \"${PROXY_URL}\";" > /etc/apt/apt.conf.d/01proxy 
   && apt-get update && apt-get install -y \
   ffmpeg \
   libsndfile1 \
-  portaudio19-dev \
   python3-dev \
   gcc \
   g++ \
@@ -49,11 +48,22 @@ ENV ALSA_PCM_DEVICE=0
 ENV PYTHONWARNINGS=ignore
 ENV ALSA_CONFIG_PATH=/dev/null
 ENV ALSA_PCM_NAME=null
+ENV PULSE_SERVER=unix:/tmp/pulse-socket
+ENV PULSE_COOKIE=/tmp/pulse-cookie
+ENV AUDIODEV=null
+ENV AUDIODRIVER=null
 
 # ALSA設定ファイルを作成（エラーを抑制）
 RUN mkdir -p /etc/alsa/conf.d && \
   echo 'pcm.!default { type null }' > /etc/alsa/conf.d/99-null.conf && \
-  echo 'ctl.!default { type null }' >> /etc/alsa/conf.d/99-null.conf
+  echo 'ctl.!default { type null }' >> /etc/alsa/conf.d/99-null.conf && \
+  echo 'pcm.!default { type null }' > /etc/asound.conf && \
+  echo 'ctl.!default { type null }' >> /etc/asound.conf
+
+# オーディオデバイスを無効化
+RUN ln -sf /dev/null /dev/snd/controlC0 && \
+  ln -sf /dev/null /dev/snd/pcmC0D0p && \
+  ln -sf /dev/null /dev/snd/pcmC0D0c
 
 
 # ディレクトリの作成

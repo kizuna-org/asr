@@ -16,6 +16,15 @@ os.environ['ALSA_PCM_DEVICE'] = '0'
 os.environ['ALSA_CONFIG_PATH'] = '/dev/null'
 os.environ['ALSA_PCM_NAME'] = 'null'
 os.environ['PYTHONWARNINGS'] = 'ignore'
+os.environ['PULSE_SERVER'] = 'unix:/tmp/pulse-socket'
+os.environ['PULSE_COOKIE'] = '/tmp/pulse-cookie'
+os.environ['AUDIODEV'] = 'null'
+os.environ['AUDIODRIVER'] = 'null'
+
+# オーディオライブラリの警告を抑制
+import warnings
+warnings.filterwarnings('ignore', category=UserWarning)
+warnings.filterwarnings('ignore', category=RuntimeWarning)
 
 # PyTorchの初期化を最適化
 os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128'
@@ -53,6 +62,73 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
+# 自動モデルロード機能
+def auto_load_latest_model():
+    """最新のモデルを自動的に読み込む"""
+    try:
+        # モデルディレクトリを確認
+        model_dir = "models"
+        if not os.path.exists(model_dir):
+            return False
+        
+        # 利用可能なモデルファイルを検索
+        model_files = []
+        for file in os.listdir(model_dir):
+            if file.endswith('.pth') or file.endswith('.pt'):
+                model_path = os.path.join(model_dir, file)
+                # ファイルの作成時刻を取得
+                creation_time = os.path.getctime(model_path)
+                model_files.append((model_path, creation_time))
+        
+        if not model_files:
+            return False
+        
+        # 最新のモデルを選択
+        latest_model = max(model_files, key=lambda x: x[1])[0]
+        
+        # モデル情報ファイルを確認
+        model_info_path = latest_model.replace('.pth', '_info.json').replace('.pt', '_info.json')
+        if os.path.exists(model_info_path):
+            with open(model_info_path, 'r') as f:
+                model_info = json.load(f)
+        else:
+            model_info = {'model_type': 'LightweightASRModel', 'hidden_dim': 128}
+        
+        # モデルを初期化
+        if model_info.get('model_type', '').startswith('Fast'):
+            model = FastASRModel(
+                hidden_dim=model_info.get('hidden_dim', 64),
+                num_classes=len(CHAR_TO_ID)
+            )
+        else:
+            model = LightweightASRModel(
+                hidden_dim=model_info.get('hidden_dim', 128),
+                num_layers=model_info.get('num_layers', 2),
+                num_classes=len(CHAR_TO_ID)
+            )
+        
+        # モデルを読み込み
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        checkpoint = torch.load(latest_model, map_location=device)
+        model.load_state_dict(checkpoint['model_state_dict'])
+        model.eval()
+        
+        # 前処理器を初期化
+        audio_preprocessor = AudioPreprocessor()
+        text_preprocessor = TextPreprocessor()
+        
+        # セッション状態に保存
+        st.session_state.model = model
+        st.session_state.audio_preprocessor = audio_preprocessor
+        st.session_state.text_preprocessor = text_preprocessor
+        
+        print(f"自動ロード完了: {os.path.basename(latest_model)}")
+        return True
+        
+    except Exception as e:
+        print(f"自動モデルロードエラー: {e}")
+        return False
+
 # セッション状態の初期化
 if 'model' not in st.session_state:
     st.session_state.model = None
@@ -74,6 +150,10 @@ if 'training_progress' not in st.session_state:
     st.session_state.training_progress = {'current_epoch': 0, 'current_batch': 0, 'total_batches': 0}
 if 'dataset_info' not in st.session_state:
     st.session_state.dataset_info = None
+
+# モデルが初期化されていない場合は自動ロードを試行
+if st.session_state.model is None:
+    auto_load_latest_model()
 
 # メモリ管理
 def clear_memory():
@@ -202,6 +282,12 @@ with tab2:
     
     # ステップ1: モデル初期化
     st.subheader("1️⃣ モデル初期化")
+    
+    # 自動ロードの結果を表示
+    if st.session_state.model is not None:
+        st.success("✅ モデルが自動的に読み込まれました")
+        model_params = sum(p.numel() for p in st.session_state.model.parameters())
+        st.info(f"📊 モデル情報: {st.session_state.model.__class__.__name__}, パラメータ数: {model_params:,}")
     
     col1, col2 = st.columns(2)
     
