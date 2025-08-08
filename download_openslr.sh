@@ -45,6 +45,33 @@ get_filename() {
     echo "$url" | sed 's|.*/||'
 }
 
+
+# --- Filemap (Content-Lengthキャッシュ) 機能 ---
+FILEMAP="filemap.txt"
+
+# filemap.txtを作成する関数
+generate_filemap() {
+    echo "Generating filemap.txt (URL\tContent-Length)..."
+    > "$FILEMAP"
+    local count=0
+    local total=$(wc -l < openslr-urls.txt)
+    while IFS= read -r url; do
+        [ -z "$url" ] && continue
+        count=$((count+1))
+        # Content-Length取得（リダイレクト追従＆最終レスポンスのみ抽出）
+        local cl=$(curl -sIL "$url" | grep -i "^Content-Length:" | tail -n1 | awk -F': ' '{print $2}' | tr -d '\r')
+        echo -e "$url\t$cl" >> "$FILEMAP"
+        echo "[$count/$total] $url -> $cl bytes"
+    done < openslr-urls.txt
+    echo "filemap.txt generated."
+}
+
+# filemap.txtからURLに対応するContent-Lengthを取得
+get_content_length_from_filemap() {
+    local url="$1"
+    grep -F "$url" "$FILEMAP" | awk '{print $2}'
+}
+
 # Function to check if file already exists and is valid
 file_exists_and_valid() {
     local file_path="$1"
@@ -53,8 +80,8 @@ file_exists_and_valid() {
     if [ -f "$file_path" ]; then
         # Check if file has content (not empty)
         if [ -s "$file_path" ]; then
-            # Get expected file size from server
-            local expected_size=$(curl -sI "$url" | grep -i "content-length" | awk '{print $2}' | tr -d '\r')
+            # filemap.txtからContent-Lengthを取得
+            local expected_size=$(get_content_length_from_filemap "$url")
             local actual_size=$(stat -f%z "$file_path" 2>/dev/null || stat -c%s "$file_path" 2>/dev/null || echo "0")
 
             # If we can get the expected size, validate it
@@ -81,49 +108,56 @@ file_exists_and_valid() {
     fi
     return 1  # File doesn't exist
 }
+# --- filemap.txtの存在チェックと生成 ---
+if [ ! -f "$FILEMAP" ]; then
+    generate_filemap
+fi
 
 # --- ARIA2C MODE ---
 if [ "$USE_ARIA2C" = true ]; then
     if ! command -v aria2c >/dev/null 2>&1; then
-        echo "aria2c is not installed. Please install it (e.g., brew install aria2) and rerun the script."
-        exit 1
-    fi
+        echo "aria2c is not installed. aria2cモードをスキップし、curl/並列モードでダウンロードを続行します。"
+        USE_ARIA2C=false
+    else
+        echo "Using aria2c for parallel downloads..."
+        echo "Preparing input file for aria2c..."
+        ARIA2_INPUT="aria2c_input.txt"
+        rm -f "$ARIA2_INPUT"
 
-    echo "Using aria2c for parallel downloads..."
-    echo "Preparing input file for aria2c..."
-    ARIA2_INPUT="aria2c_input.txt"
-    rm -f "$ARIA2_INPUT"
+        # Count total files for progress display
+        total_files=$(wc -l < openslr-urls.txt)
+        current_file=0
 
-    # Count total files for progress display
-    total_files=$(wc -l < openslr-urls.txt)
-    current_file=0
+        while IFS= read -r url; do
+            [ -z "$url" ] && continue
+            current_file=$((current_file + 1))
 
-    while IFS= read -r url; do
-        [ -z "$url" ] && continue
-        current_file=$((current_file + 1))
+            resource_num=$(echo "$url" | sed -n 's|.*/resources/\([0-9]*\)/.*|\1|p')
+            filename=$(echo "$url" | sed 's|.*/||')
+            dir="$BASE_DIR/$resource_num"
+            file_path="$dir/$filename"
 
-        resource_num=$(echo "$url" | sed -n 's|.*/resources/\([0-9]*\)/.*|\1|p')
-        filename=$(echo "$url" | sed 's|.*/||')
-        dir="$BASE_DIR/$resource_num"
-        file_path="$dir/$filename"
+            mkdir -p "$dir"
 
-        mkdir -p "$dir"
+            # Check if file already exists and is valid
+            if file_exists_and_valid "$file_path" "$url"; then
+                file_size=$(du -h "$file_path" 2>/dev/null | cut -f1 || echo "unknown")
+                echo "[$current_file/$total_files] Skipping: $filename (Resource $resource_num) - Already exists ($file_size)"
+            else
+                # Add to aria2c input file for download
+                echo "$url" >> "$ARIA2_INPUT"
+                echo "  dir=$dir" >> "$ARIA2_INPUT"
+                echo "  out=$filename" >> "$ARIA2_INPUT"
+                echo "[$current_file/$total_files] Queuing: $filename (Resource $resource_num)"
+            fi
+        done < openslr-urls.txt
 
-        # Check if file already exists and is valid
-        if file_exists_and_valid "$file_path" "$url"; then
-            file_size=$(du -h "$file_path" 2>/dev/null | cut -f1 || echo "unknown")
-            echo "[$current_file/$total_files] Skipping: $filename (Resource $resource_num) - Already exists ($file_size)"
-        else
-            # Add to aria2c input file for download
-            echo "$url" >> "$ARIA2_INPUT"
-            echo "  dir=$dir" >> "$ARIA2_INPUT"
-            echo "  out=$filename" >> "$ARIA2_INPUT"
-            echo "[$current_file/$total_files] Queuing: $filename (Resource $resource_num)"
-        fi
-    done < openslr-urls.txt
-
-    echo "Starting aria2c..."
-    aria2c -i "$ARIA2_INPUT" -j "$PARALLEL_DOWNLOADS" --continue=true --max-connection-per-server=4 --summary-interval=5
+        echo "Starting aria2c..."
+        aria2c -i "$ARIA2_INPUT" -j "$PARALLEL_DOWNLOADS" --continue=true --max-connection-per-server=4 --summary-interval=5
+        print_summary_and_exit 0
+# --- 共通: サマリー表示関数 ---
+print_summary_and_exit() {
+    local code=${1:-0}
     echo "Download completed!"
     echo "Files downloaded to: $BASE_DIR"
     echo ""
@@ -136,7 +170,9 @@ if [ "$USE_ARIA2C" = true ]; then
             echo "  $resource_num/ ($file_count files)"
         fi
     done
-    exit 0
+    exit $code
+}
+    fi
 fi
 
 # Function to download with retry logic
@@ -301,7 +337,6 @@ while IFS= read -r url; do
 
 done < openslr-urls.txt
 
-# Wait for all background jobs to complete if in parallel mode
 if [ "$PARALLEL_MODE" = true ]; then
     echo "Waiting for all downloads to complete..."
     wait_for_all_jobs
@@ -314,15 +349,4 @@ save_progress "$current_file"
 # Clean up progress file when complete
 rm -f "$PROGRESS_FILE"
 
-echo "Download completed!"
-echo "Files downloaded to: $BASE_DIR"
-echo ""
-echo "Directory structure:"
-echo "$BASE_DIR/"
-for dir in "$BASE_DIR"/*/; do
-    if [ -d "$dir" ]; then
-        resource_num=$(basename "$dir")
-        file_count=$(ls -1 "$dir" 2>/dev/null | wc -l)
-        echo "  $resource_num/ ($file_count files)"
-    fi
-done
+print_summary_and_exit 0
