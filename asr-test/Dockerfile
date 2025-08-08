@@ -33,7 +33,9 @@ WORKDIR /app
 
 # Python依存関係のコピーとインストール
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt && \
+  pip uninstall -y pyarrow && \
+  pip install --no-deps streamlit==1.24.0
 
 # ディレクトリの作成
 RUN mkdir -p data/raw data/processed models
@@ -44,6 +46,7 @@ COPY data/ ./data/
 COPY static/ ./static/
 COPY start_services.sh ./
 COPY start_streamlit_safe.sh ./
+COPY .streamlit/ ./.streamlit/
 
 # appディレクトリをPythonパッケージとして設定
 RUN touch app/__init__.py

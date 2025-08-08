@@ -22,6 +22,13 @@ trap 'echo "🛑 プロセス終了中..."; kill $(jobs -p) 2>/dev/null; exit' E
 # Streamlitサーバーを起動（メモリ制限付き）
 echo "📊 Streamlitサーバーを起動します..."
 ulimit -v 2097152  # 2GBメモリ制限
+STREAMLIT_SERVER_HEADLESS=true \
+STREAMLIT_SERVER_ENABLE_CORS=false \
+STREAMLIT_SERVER_ENABLE_XSRF_PROTECTION=false \
+STREAMLIT_SERVER_MAX_UPLOAD_SIZE=200 \
+STREAMLIT_SERVER_MAX_MESSAGE_SIZE=200 \
+STREAMLIT_BROWSER_GATHER_USAGE_STATS=false \
+STREAMLIT_GLOBAL_DEVELOPMENT_MODE=false \
 streamlit run app/main.py \
     --server.port 8501 \
     --server.address 0.0.0.0 \
@@ -30,6 +37,7 @@ streamlit run app/main.py \
     --server.enableXsrfProtection false \
     --server.maxUploadSize 200 \
     --server.maxMessageSize 200 \
-    --browser.gatherUsageStats false
+    --browser.gatherUsageStats false \
+    --global.developmentMode false
 
 echo "✅ Streamlitサーバーが終了しました"
