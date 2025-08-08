@@ -219,9 +219,6 @@ class ControlledASRTrainer:
             if self.should_stop:
                 break
             
-            print(f"\nEpoch {epoch + 1}/{self.max_epochs}")
-            print("-" * 50)
-            
             # 学習
             train_loss, train_wer = self._train_epoch()
             
@@ -237,21 +234,23 @@ class ControlledASRTrainer:
             self.train_wers.append(train_wer)
             self.val_wers.append(val_wer)
             
-            # 結果の表示
-            print(f"Train Loss: {train_loss:.4f}, Train WER: {train_wer:.4f}")
-            print(f"Val Loss: {val_loss:.4f}, Val WER: {val_wer:.4f}")
-            print(f"Learning Rate: {self.optimizer.param_groups[0]['lr']:.6f}")
+            # エポック結果の表示（簡潔に）
+            print(f"Epoch {epoch + 1}/{self.max_epochs} - "
+                  f"Train Loss: {train_loss:.4f}, Train WER: {train_wer:.4f}, "
+                  f"Val Loss: {val_loss:.4f}, Val WER: {val_wer:.4f}, "
+                  f"LR: {self.optimizer.param_groups[0]['lr']:.6f}")
             
             # ベストモデルの保存
             if val_loss < self.best_val_loss:
                 self.best_val_loss = val_loss
                 self.best_epoch = epoch
                 self.save_checkpoint(epoch + 1)
-                print(f"New best model saved! (Epoch {epoch + 1})")
+                print(f"  -> New best model saved! (Epoch {epoch + 1})")
             
             # 定期的なチェックポイント保存
             if (epoch + 1) % 10 == 0:
                 self.save_checkpoint(epoch + 1)
+                print(f"  -> Checkpoint saved at epoch {epoch + 1}")
             
             # エポックコールバック
             if self.epoch_callback:

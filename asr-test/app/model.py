@@ -127,44 +127,28 @@ class LightweightASRModel(nn.Module):
         """
         推論時のデコード（貪欲法）
         """
-        try:
-            print(f"デコード開始: logits形状={logits.shape}")
+        # logits: (batch_size, time_steps, num_classes)
+        if lengths is not None:
+            # 各シーケンスの実際の長さに基づいてマスク
+            mask = torch.arange(logits.size(1)).unsqueeze(0) < lengths.unsqueeze(1)
+            mask = mask.to(logits.device)
+        else:
+            mask = None
+        
+        # 最も確率の高いクラスを選択
+        predictions = torch.argmax(logits, dim=-1)
+        
+        # CTCデコード（重複除去とブランク除去）
+        decoded_sequences = []
+        for i, pred in enumerate(predictions):
+            if mask is not None:
+                pred = pred[mask[i]]
             
-            # logits: (batch_size, time_steps, num_classes)
-            if lengths is not None:
-                # 各シーケンスの実際の長さに基づいてマスク
-                mask = torch.arange(logits.size(1)).unsqueeze(0) < lengths.unsqueeze(1)
-                mask = mask.to(logits.device)
-                print(f"マスク形状: {mask.shape}")
-            else:
-                mask = None
-                print("マスクなし")
-            
-            # 最も確率の高いクラスを選択
-            predictions = torch.argmax(logits, dim=-1)
-            print(f"予測形状: {predictions.shape}")
-            print(f"予測値の範囲: {predictions.min().item()} ~ {predictions.max().item()}")
-            
-            # CTCデコード（重複除去とブランク除去）
-            decoded_sequences = []
-            for i, pred in enumerate(predictions):
-                if mask is not None:
-                    pred = pred[mask[i]]
-                    print(f"マスク適用後: {pred.shape}")
-                
-                # CTCデコード
-                decoded = self._ctc_decode(pred)
-                print(f"CTCデコード結果: {decoded}")
-                decoded_sequences.append(decoded)
-            
-            print(f"最終デコード結果: {decoded_sequences}")
-            return decoded_sequences
-            
-        except Exception as e:
-            print(f"デコードエラー: {e}")
-            import traceback
-            traceback.print_exc()
-            return [[]]  # エラーの場合は空の結果を返す
+            # CTCデコード
+            decoded = self._ctc_decode(pred)
+            decoded_sequences.append(decoded)
+        
+        return decoded_sequences
     
     def _ctc_decode(self, pred):
         """
@@ -248,21 +232,8 @@ class FastASRModel(nn.Module):
         return self.ctc_loss(logits, targets, logit_lengths, target_lengths)
     
     def decode(self, logits, lengths=None):
-        try:
-            print(f"FastASRデコード開始: logits形状={logits.shape}")
-            predictions = torch.argmax(logits, dim=-1)
-            print(f"FastASR予測形状: {predictions.shape}")
-            print(f"FastASR予測値の範囲: {predictions.min().item()} ~ {predictions.max().item()}")
-            
-            result = [self._ctc_decode(pred) for pred in predictions]
-            print(f"FastASR最終デコード結果: {result}")
-            return result
-            
-        except Exception as e:
-            print(f"FastASRデコードエラー: {e}")
-            import traceback
-            traceback.print_exc()
-            return [[]]  # エラーの場合は空の結果を返す
+        predictions = torch.argmax(logits, dim=-1)
+        return [self._ctc_decode(pred) for pred in predictions]
     
     def _ctc_decode(self, pred):
         decoded = []
