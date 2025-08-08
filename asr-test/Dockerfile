@@ -13,6 +13,9 @@ ENV PYTHONUNBUFFERED=1
 ENV MALLOC_TRIM_THRESHOLD_=131072
 ENV MALLOC_MMAP_THRESHOLD_=131072
 ENV MALLOC_MMAP_MAX_=65536
+ENV PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128
+ENV OMP_NUM_THREADS=1
+ENV MKL_NUM_THREADS=1
 
 # システムパッケージのインストール
 ARG PROXY_URL=http://http-p.srv.cc.suzuka-ct.ac.jp:8080/
@@ -33,8 +36,9 @@ WORKDIR /app
 
 # Python依存関係のコピーとインストール
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt && \
-  pip install pandas==2.1.4
+RUN pip install --no-cache-dir torch==2.0.1+cpu torchvision==0.15.2+cpu torchaudio==2.0.2+cpu -f https://download.pytorch.org/whl/torch_stable.html && \
+    pip install --no-cache-dir -r requirements.txt && \
+    pip install pandas==2.1.4
 
 # ディレクトリの作成
 RUN mkdir -p data/raw data/processed models

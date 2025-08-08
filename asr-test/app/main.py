@@ -1,14 +1,29 @@
 import streamlit as st
-import torch
-import numpy as np
+import gc
 import os
 import time
 import json
-import gc
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 import pandas as pd
+
+# PyTorchの初期化を最適化
+os.environ['PYTORCH_CUDA_ALLOC_CONF'] = 'max_split_size_mb:128'
+os.environ['OMP_NUM_THREADS'] = '1'
+os.environ['MKL_NUM_THREADS'] = '1'
+
+# PyTorchのインポート（メモリ効率化）
+try:
+    import torch
+    torch.set_num_threads(1)
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+except ImportError as e:
+    st.error(f"PyTorchのインポートエラー: {e}")
+    st.stop()
+
+import numpy as np
 
 # ローカルモジュールのインポート
 from app.model import LightweightASRModel, FastASRModel, CHAR_TO_ID, ID_TO_CHAR
