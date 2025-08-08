@@ -1,0 +1,658 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>リアルタイム音声認識</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            margin: 0;
+            font-size: 2.5em;
+            font-weight: 300;
+        }
+
+        .header p {
+            margin: 10px 0 0 0;
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+
+        .content {
+            padding: 30px;
+        }
+
+        .control-panel {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .panel {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            border: 1px solid #e9ecef;
+        }
+
+        .panel h3 {
+            margin: 0 0 15px 0;
+            color: #495057;
+            font-size: 1.2em;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 1em;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            margin: 5px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+
+        .btn:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn.recording {
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+            100% { transform: scale(1); }
+        }
+
+        .status {
+            padding: 15px;
+            border-radius: 8px;
+            margin: 10px 0;
+            font-weight: 500;
+        }
+
+        .status.connected {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status.disconnected {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .status.processing {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+
+        .recognition-area {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin-top: 20px;
+            min-height: 200px;
+        }
+
+        .recognition-text {
+            font-size: 1.5em;
+            font-weight: 500;
+            color: #495057;
+            margin-bottom: 10px;
+            min-height: 1.5em;
+        }
+
+        .recognition-history {
+            max-height: 300px;
+            overflow-y: auto;
+            border-top: 1px solid #dee2e6;
+            padding-top: 15px;
+        }
+
+        .history-item {
+            padding: 8px 0;
+            border-bottom: 1px solid #f1f3f4;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .history-text {
+            flex: 1;
+            font-weight: 500;
+        }
+
+        .history-time {
+            color: #6c757d;
+            font-size: 0.9em;
+        }
+
+        .performance-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .stat-card {
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            text-align: center;
+            border: 1px solid #e9ecef;
+        }
+
+        .stat-value {
+            font-size: 1.8em;
+            font-weight: bold;
+            color: #495057;
+        }
+
+        .stat-label {
+            color: #6c757d;
+            font-size: 0.9em;
+            margin-top: 5px;
+        }
+
+        .visualizer {
+            width: 100%;
+            height: 100px;
+            background: #000;
+            border-radius: 8px;
+            margin: 15px 0;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .audio-wave {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(transparent, #00f2fe);
+        }
+
+        .loading {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #3498db;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .error {
+            background: #f8d7da;
+            color: #721c24;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            border: 1px solid #f5c6cb;
+        }
+
+        .success {
+            background: #d4edda;
+            color: #155724;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            border: 1px solid #c3e6cb;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎤 リアルタイム音声認識</h1>
+            <p>ブラウザからマイク音声を取得してリアルタイムで認識します</p>
+        </div>
+
+        <div class="content">
+            <!-- 接続状態 -->
+            <div class="panel">
+                <h3>🔗 接続状態</h3>
+                <div id="connectionStatus" class="status disconnected">
+                    <span id="statusText">未接続</span>
+                </div>
+                <button id="connectBtn" class="btn">接続開始</button>
+                <button id="disconnectBtn" class="btn" disabled>接続切断</button>
+            </div>
+
+            <!-- 音声認識制御 -->
+            <div class="panel">
+                <h3>🎙️ 音声認識</h3>
+                <button id="startRecordingBtn" class="btn" disabled>録音開始</button>
+                <button id="stopRecordingBtn" class="btn" disabled>録音停止</button>
+                <div class="visualizer">
+                    <canvas id="audioVisualizer" width="800" height="100"></canvas>
+                </div>
+            </div>
+
+            <!-- 認識結果 -->
+            <div class="recognition-area">
+                <h3>📝 認識結果</h3>
+                <div id="currentRecognition" class="recognition-text">
+                    音声を話してください...
+                </div>
+                <div class="recognition-history">
+                    <h4>履歴</h4>
+                    <div id="recognitionHistory"></div>
+                </div>
+            </div>
+
+            <!-- パフォーマンス統計 -->
+            <div class="panel">
+                <h3>⚡ パフォーマンス統計</h3>
+                <div class="performance-stats">
+                    <div class="stat-card">
+                        <div id="inferenceTime" class="stat-value">-</div>
+                        <div class="stat-label">推論時間 (ms)</div>
+                    </div>
+                    <div class="stat-card">
+                        <div id="realtimeRatio" class="stat-value">-</div>
+                        <div class="stat-label">リアルタイム比</div>
+                    </div>
+                    <div class="stat-card">
+                        <div id="totalInferences" class="stat-value">0</div>
+                        <div class="stat-label">総推論回数</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class RealTimeASR {
+            constructor() {
+                this.websocket = null;
+                this.mediaRecorder = null;
+                this.audioContext = null;
+                this.analyser = null;
+                this.isRecording = false;
+                this.isConnected = false;
+                this.audioChunks = [];
+                this.visualizationId = null;
+                
+                this.initializeElements();
+                this.bindEvents();
+            }
+
+            initializeElements() {
+                this.connectBtn = document.getElementById('connectBtn');
+                this.disconnectBtn = document.getElementById('disconnectBtn');
+                this.startRecordingBtn = document.getElementById('startRecordingBtn');
+                this.stopRecordingBtn = document.getElementById('stopRecordingBtn');
+                this.connectionStatus = document.getElementById('connectionStatus');
+                this.statusText = document.getElementById('statusText');
+                this.currentRecognition = document.getElementById('currentRecognition');
+                this.recognitionHistory = document.getElementById('recognitionHistory');
+                this.audioVisualizer = document.getElementById('audioVisualizer');
+                this.inferenceTime = document.getElementById('inferenceTime');
+                this.realtimeRatio = document.getElementById('realtimeRatio');
+                this.totalInferences = document.getElementById('totalInferences');
+            }
+
+            bindEvents() {
+                this.connectBtn.addEventListener('click', () => this.connect());
+                this.disconnectBtn.addEventListener('click', () => this.disconnect());
+                this.startRecordingBtn.addEventListener('click', () => this.startRecording());
+                this.stopRecordingBtn.addEventListener('click', () => this.stopRecording());
+            }
+
+            async connect() {
+                try {
+                    this.updateStatus('接続中...', 'processing');
+                    
+                    // WebSocket接続
+                    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                    const wsUrl = `${protocol}//${window.location.host}/ws/recognize`;
+                    
+                    this.websocket = new WebSocket(wsUrl);
+                    
+                    this.websocket.onopen = () => {
+                        this.isConnected = true;
+                        this.updateStatus('接続済み', 'connected');
+                        this.connectBtn.disabled = true;
+                        this.disconnectBtn.disabled = false;
+                        this.startRecordingBtn.disabled = false;
+                        this.showMessage('WebSocket接続が確立されました', 'success');
+                    };
+                    
+                    this.websocket.onmessage = (event) => {
+                        const message = JSON.parse(event.data);
+                        this.handleWebSocketMessage(message);
+                    };
+                    
+                    this.websocket.onclose = () => {
+                        this.isConnected = false;
+                        this.updateStatus('切断されました', 'disconnected');
+                        this.connectBtn.disabled = false;
+                        this.disconnectBtn.disabled = true;
+                        this.startRecordingBtn.disabled = true;
+                        this.stopRecording();
+                        this.showMessage('WebSocket接続が切断されました', 'error');
+                    };
+                    
+                    this.websocket.onerror = (error) => {
+                        this.showMessage('WebSocket接続エラー: ' + error, 'error');
+                    };
+                    
+                } catch (error) {
+                    this.showMessage('接続エラー: ' + error.message, 'error');
+                    this.updateStatus('接続エラー', 'disconnected');
+                }
+            }
+
+            disconnect() {
+                if (this.websocket) {
+                    this.websocket.close();
+                }
+                this.stopRecording();
+            }
+
+            async startRecording() {
+                try {
+                    if (!this.isConnected) {
+                        this.showMessage('WebSocketに接続してください', 'error');
+                        return;
+                    }
+
+                    // マイクアクセス
+                    const stream = await navigator.mediaDevices.getUserMedia({ 
+                        audio: {
+                            sampleRate: 16000,
+                            channelCount: 1,
+                            echoCancellation: true,
+                            noiseSuppression: true
+                        } 
+                    });
+
+                    this.mediaRecorder = new MediaRecorder(stream, {
+                        mimeType: 'audio/webm;codecs=opus'
+                    });
+
+                    this.audioContext = new AudioContext({ sampleRate: 16000 });
+                    const source = this.audioContext.createMediaStreamSource(stream);
+                    this.analyser = this.audioContext.createAnalyser();
+                    this.analyser.fftSize = 256;
+                    source.connect(this.analyser);
+
+                    this.audioChunks = [];
+                    this.isRecording = true;
+
+                    this.mediaRecorder.ondataavailable = (event) => {
+                        if (event.data.size > 0) {
+                            this.audioChunks.push(event.data);
+                        }
+                    };
+
+                    this.mediaRecorder.onstop = () => {
+                        this.processAudioChunks();
+                    };
+
+                    // 音声データを定期的に送信
+                    this.mediaRecorder.start(1000); // 1秒ごとにデータを取得
+                    
+                    // 音声可視化開始
+                    this.startVisualization();
+                    
+                    this.startRecordingBtn.disabled = true;
+                    this.stopRecordingBtn.disabled = false;
+                    this.startRecordingBtn.classList.add('recording');
+                    
+                    this.showMessage('録音を開始しました', 'success');
+                    
+                } catch (error) {
+                    this.showMessage('マイクアクセスエラー: ' + error.message, 'error');
+                }
+            }
+
+            stopRecording() {
+                if (this.mediaRecorder && this.isRecording) {
+                    this.mediaRecorder.stop();
+                    this.isRecording = false;
+                    
+                    if (this.mediaRecorder.stream) {
+                        this.mediaRecorder.stream.getTracks().forEach(track => track.stop());
+                    }
+                    
+                    this.stopVisualization();
+                    
+                    this.startRecordingBtn.disabled = false;
+                    this.stopRecordingBtn.disabled = true;
+                    this.startRecordingBtn.classList.remove('recording');
+                    
+                    this.showMessage('録音を停止しました', 'success');
+                }
+            }
+
+            async processAudioChunks() {
+                if (this.audioChunks.length === 0) return;
+
+                try {
+                    const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
+                    const arrayBuffer = await audioBlob.arrayBuffer();
+                    
+                    // WebMをデコードしてPCMに変換
+                    const audioContext = new AudioContext({ sampleRate: 16000 });
+                    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+                    const channelData = audioBuffer.getChannelData(0);
+                    
+                    // Float32ArrayをBase64にエンコード
+                    const base64Audio = this.arrayBufferToBase64(channelData.buffer);
+                    
+                    // WebSocketで音声データを送信
+                    if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
+                        this.websocket.send(JSON.stringify({
+                            type: 'audio',
+                            audio: base64Audio,
+                            sample_rate: 16000
+                        }));
+                    }
+                    
+                    this.audioChunks = [];
+                    
+                } catch (error) {
+                    console.error('音声処理エラー:', error);
+                }
+            }
+
+            arrayBufferToBase64(buffer) {
+                const bytes = new Uint8Array(buffer);
+                let binary = '';
+                for (let i = 0; i < bytes.byteLength; i++) {
+                    binary += String.fromCharCode(bytes[i]);
+                }
+                return btoa(binary);
+            }
+
+            handleWebSocketMessage(message) {
+                switch (message.type) {
+                    case 'recognition_result':
+                        this.displayRecognitionResult(message.data);
+                        break;
+                    case 'error':
+                        this.showMessage('認識エラー: ' + message.message, 'error');
+                        break;
+                    case 'pong':
+                        // 接続確認応答
+                        break;
+                }
+            }
+
+            displayRecognitionResult(data) {
+                if (data.error) {
+                    this.showMessage('認識エラー: ' + data.error, 'error');
+                    return;
+                }
+
+                const text = data.text;
+                const inferenceTime = data.inference_time;
+                const realtimeRatio = data.realtime_ratio;
+
+                // 現在の認識結果を更新
+                if (text.trim()) {
+                    this.currentRecognition.textContent = text;
+                    
+                    // 履歴に追加
+                    this.addToHistory(text, inferenceTime);
+                    
+                    // パフォーマンス統計を更新
+                    this.updatePerformanceStats(inferenceTime, realtimeRatio);
+                }
+            }
+
+            addToHistory(text, inferenceTime) {
+                const historyItem = document.createElement('div');
+                historyItem.className = 'history-item';
+                
+                const time = new Date().toLocaleTimeString();
+                historyItem.innerHTML = `
+                    <span class="history-text">${text}</span>
+                    <span class="history-time">${time} (${(inferenceTime * 1000).toFixed(1)}ms)</span>
+                `;
+                
+                this.recognitionHistory.insertBefore(historyItem, this.recognitionHistory.firstChild);
+                
+                // 履歴が多すぎる場合は古いものを削除
+                if (this.recognitionHistory.children.length > 10) {
+                    this.recognitionHistory.removeChild(this.recognitionHistory.lastChild);
+                }
+            }
+
+            updatePerformanceStats(inferenceTime, realtimeRatio) {
+                this.inferenceTime.textContent = (inferenceTime * 1000).toFixed(1);
+                this.realtimeRatio.textContent = realtimeRatio.toFixed(2) + 'x';
+                
+                const currentCount = parseInt(this.totalInferences.textContent) || 0;
+                this.totalInferences.textContent = currentCount + 1;
+            }
+
+            startVisualization() {
+                const canvas = this.audioVisualizer;
+                const ctx = canvas.getContext('2d');
+                const bufferLength = this.analyser.frequencyBinCount;
+                const dataArray = new Uint8Array(bufferLength);
+
+                const draw = () => {
+                    if (!this.isRecording) return;
+
+                    this.visualizationId = requestAnimationFrame(draw);
+                    
+                    this.analyser.getByteFrequencyData(dataArray);
+                    
+                    ctx.fillStyle = 'rgb(0, 0, 0)';
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+                    
+                    const barWidth = (canvas.width / bufferLength) * 2.5;
+                    let barHeight;
+                    let x = 0;
+                    
+                    for (let i = 0; i < bufferLength; i++) {
+                        barHeight = dataArray[i] / 2;
+                        
+                        const gradient = ctx.createLinearGradient(0, 0, 0, canvas.height);
+                        gradient.addColorStop(0, '#00f2fe');
+                        gradient.addColorStop(1, '#4facfe');
+                        
+                        ctx.fillStyle = gradient;
+                        ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);
+                        
+                        x += barWidth + 1;
+                    }
+                };
+                
+                draw();
+            }
+
+            stopVisualization() {
+                if (this.visualizationId) {
+                    cancelAnimationFrame(this.visualizationId);
+                    this.visualizationId = null;
+                }
+                
+                // キャンバスをクリア
+                const canvas = this.audioVisualizer;
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = 'rgb(0, 0, 0)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+
+            updateStatus(text, className) {
+                this.statusText.textContent = text;
+                this.connectionStatus.className = `status ${className}`;
+            }
+
+            showMessage(message, type) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = type;
+                messageDiv.textContent = message;
+                
+                document.querySelector('.content').insertBefore(messageDiv, document.querySelector('.content').firstChild);
+                
+                // 3秒後に自動削除
+                setTimeout(() => {
+                    if (messageDiv.parentNode) {
+                        messageDiv.parentNode.removeChild(messageDiv);
+                    }
+                }, 3000);
+            }
+        }
+
+        // アプリケーション初期化
+        document.addEventListener('DOMContentLoaded', () => {
+            const asr = new RealTimeASR();
+            
+            // グローバル変数として保存（デバッグ用）
+            window.asr = asr;
+        });
+    </script>
+</body>
+</html>

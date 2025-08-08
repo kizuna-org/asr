@@ -26,15 +26,27 @@ git clone <repository-url>
 cd asr-test
 
 # Docker Composeで起動
-docker-compose up --build
+sudo docker compose up --build
 ```
 
 ## 使用方法
 
+### リアルタイム音声認識（推奨）
+1. ブラウザで `http://localhost:8000/static/index.html` にアクセス
+2. 「接続開始」ボタンをクリック
+3. 「録音開始」ボタンをクリックしてマイクアクセスを許可
+4. 音声を話すとリアルタイムで認識結果が表示されます
+
+### モデル学習（Streamlit）
 1. ブラウザで `http://localhost:8501` にアクセス
 2. 音声データをアップロードまたはマイクで録音
 3. モデルの学習を開始
 4. リアルタイムで推論結果を確認
+
+### API使用
+- API ドキュメント: `http://localhost:8000/docs`
+- ヘルスチェック: `http://localhost:8000/health`
+- モデル情報: `http://localhost:8000/model_info`
 
 ## ディレクトリ構造
 

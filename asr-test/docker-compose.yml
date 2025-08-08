@@ -1,12 +1,14 @@
 services:
   asr-app:
-    image: asr-app
+    build: .
     ports:
       - "8501:8501"  # Streamlit
+      - "8000:8000"  # FastAPI
     volumes:
       - ./data:/app/data
       - ./models:/app/models
       - ./app:/app/app
+      - ./static:/app/static
     environment:
       - PYTHONPATH=/app
       - CUDA_VISIBLE_DEVICES=0
