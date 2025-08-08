@@ -52,8 +52,8 @@ ENV ALSA_PCM_NAME=null
 
 # ALSA設定ファイルを作成（エラーを抑制）
 RUN mkdir -p /etc/alsa/conf.d && \
-    echo 'pcm.!default { type null }' > /etc/alsa/conf.d/99-null.conf && \
-    echo 'ctl.!default { type null }' >> /etc/alsa/conf.d/99-null.conf
+  echo 'pcm.!default { type null }' > /etc/alsa/conf.d/99-null.conf && \
+  echo 'ctl.!default { type null }' >> /etc/alsa/conf.d/99-null.conf
 
 
 # ディレクトリの作成
