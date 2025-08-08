@@ -286,6 +286,7 @@ with tab2:
         else:
             st.error("❌ LJSpeechデータセットが見つかりません")
             st.info("ℹ️ サンプルデータを生成するか、カスタムデータをアップロードしてください")
+            st.session_state.dataset_info = None
     elif dataset_selection == "カスタムデータ":
         if not st.session_state.dataset_info or st.session_state.dataset_info['type'] != 'custom':
             st.warning("⚠️ カスタムデータをアップロードしてください")
@@ -294,15 +295,17 @@ with tab2:
             st.info("ℹ️ サンプルデータを生成してください")
     
     # データセット情報の表示
-    if st.session_state.dataset_info:
+    if st.session_state.dataset_info and isinstance(st.session_state.dataset_info, dict):
         st.info(f"📊 現在のデータセット: {st.session_state.dataset_info['type']} ({st.session_state.dataset_info['samples']}サンプル)")
+    elif st.session_state.dataset_info:
+        st.warning("⚠️ データセット情報が不正です")
     
     # ステップ3: 学習実行
     st.subheader("3️⃣ 学習実行")
     
     if not st.session_state.model:
         st.warning("⚠️ まずモデルを初期化してください。")
-    elif not st.session_state.dataset_info:
+    elif not st.session_state.dataset_info or not isinstance(st.session_state.dataset_info, dict):
         st.warning("⚠️ データセットを準備してください。")
     else:
         # 学習設定の確認
@@ -351,7 +354,10 @@ with tab2:
                             st.stop()
                     elif st.session_state.dataset_info['type'] == 'custom':
                         # カスタムデータセットの処理
-                        custom_path = st.session_state.dataset_info.get('path', 'data/custom')
+                        if isinstance(st.session_state.dataset_info, dict):
+                            custom_path = st.session_state.dataset_info.get('path', 'data/custom')
+                        else:
+                            custom_path = 'data/custom'
                         if os.path.exists(custom_path):
                             dataset = ASRDataset(
                                 data_dir=custom_path,
