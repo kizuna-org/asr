@@ -130,7 +130,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/ruff-action@0c50076f12c38c3d0115b7b519b54a91cb9cf0ad # v3.5.0
+      - uses: astral-sh/ruff-action@57714a7c8a2e59f32539362ba31877a1957dded1 # v3.5.1
       - name: Lint check
         run: ruff check
 
@@ -149,7 +149,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/ruff-action@0c50076f12c38c3d0115b7b519b54a91cb9cf0ad # v3.5.0
+      - uses: astral-sh/ruff-action@57714a7c8a2e59f32539362ba31877a1957dded1 # v3.5.1
       - name: Format check
         run: ruff format --check
 
@@ -168,7 +168,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@e92bafb6253dcd438e0484186d7669ea7a8ca1cc # v6.4.3
+      - uses: astral-sh/setup-uv@d9e0f98d3fc6adb07d1e3d37f3043649ddad06a1 # v6.5.0
         with:
           activate-environment: true
           working-directory: ${{ matrix.project.path }}
@@ -219,7 +219,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: checkmarx/kics-github-action@cd1f3774406f7818e3f79b77b093fe2ebaaf5c1d # v2.1.12
+      - uses: checkmarx/kics-github-action@71454548efb714daa457caae25c01d64cc0be9d2 # v2.1.13
         with:
           path: .
 
@@ -229,7 +229,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Run ansible-lint
-        uses: ansible/ansible-lint@c12178f18510b0f5e03a3b330bc1c369bd006795 # v25.8.0
+        uses: ansible/ansible-lint@1080d91d521d909ad79b868131e7ed7c6c708c77 # v25.8.1
         with:
           working_directory: "infra/ansible"
           requirements_file: "requirements.yml"
