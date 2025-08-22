@@ -1,0 +1,22 @@
+FROM ubuntu:24.04
+
+RUN apt-get update && \
+    apt-get install --no-install-recommends -y cifs-utils=2:7.0-2ubuntu0.2 && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN mkdir -p /mnt/samba
+
+COPY mount.sh /mount.sh
+RUN chmod +x /mount.sh
+
+COPY file_fetcher.py /file_fetcher.py
+COPY main.py /main.py
+
+RUN useradd -m -s /bin/bash dataset-manager && \
+    chown -R dataset-manager:dataset-manager /mnt/samba
+USER dataset-manager
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+  CMD test -d /mnt/samba/ || exit 1
+
+ENTRYPOINT ["sh", "-c", "/mount.sh && python3 /main.py"]
