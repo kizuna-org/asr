@@ -9,6 +9,19 @@ Dockerで動作する軽量な音声認識モデルの学習システムです�
 - 🎯 軽量なCTCベースのモデル
 - 📊 リアルタイム学習進捗表示
 - 🎤 マイク入力でのリアルタイム推論
+- 🎮 **CUDA対応でGPU高速化**
+
+## システム要件
+
+### GPU要件（推奨）
+- NVIDIA GPU with CUDA support
+- CUDA 12.3.2
+- cuDNN 9
+- Docker with NVIDIA Container Runtime
+
+### CPU要件（最小）
+- 4GB RAM
+- 2 CPU cores
 
 ## アーキテクチャ
 
@@ -16,17 +29,39 @@ Dockerで動作する軽量な音声認識モデルの学習システムです�
 - **バックエンド**: FastAPI (推論API)
 - **モデル**: 軽量CNN + LSTM + CTC
 - **音声処理**: librosa + torchaudio
-- **学習**: PyTorch
+- **学習**: PyTorch with CUDA support
 
 ## セットアップ
+
+### GPU環境での実行（推奨）
 
 ```bash
 # プロジェクトのクローン
 git clone <repository-url>
 cd asr-test
 
-# Docker Composeで起動
+# NVIDIA Container Runtimeの確認
+nvidia-smi
+
+# Docker Composeで起動（GPU対応）
 sudo docker compose up --build
+```
+
+### CPU環境での実行
+
+```bash
+# CPU版のDockerfileを使用
+sudo docker build -f Dockerfile.cpu -t asr-app-cpu .
+sudo docker run -p 58080:8000 -p 58081:8501 asr-app-cpu
+```
+
+## GPU環境の確認
+
+ビルド時に自動的にGPU環境がチェックされます：
+
+```bash
+# 手動でGPU環境をチェック
+sudo docker run --gpus all asr-app python gpu_check.py
 ```
 
 ## 使用方法
@@ -55,6 +90,7 @@ asr-test/
 ├── docker-compose.yml
 ├── Dockerfile
 ├── requirements.txt
+├── gpu_check.py          # GPU環境チェックスクリプト
 ├── app/
 │   ├── main.py
 │   ├── model.py
@@ -66,6 +102,26 @@ asr-test/
 │   └── processed/
 └── models/
 ```
+
+## トラブルシューティング
+
+### GPU関連の問題
+
+1. **nvidia-smiが動作しない**
+   ```bash
+   # NVIDIAドライバーの確認
+   nvidia-smi
+   ```
+
+2. **DockerでGPUが認識されない**
+   ```bash
+   # NVIDIA Container Runtimeの確認
+   docker run --rm --gpus all nvidia/cuda:12.3.2-base-ubuntu22.04 nvidia-smi
+   ```
+
+3. **CUDA out of memory**
+   - バッチサイズを小さくする
+   - モデルサイズを調整する
 
 ## ライセンス
 

@@ -26,6 +26,10 @@ services:
           memory: 2G
         reservations:
           memory: 1G
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   asr-streamlit:
     image: asr-app
@@ -63,4 +67,8 @@ services:
           memory: 4G
         reservations:
           memory: 2G
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
