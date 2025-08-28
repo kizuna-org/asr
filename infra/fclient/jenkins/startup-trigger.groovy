@@ -21,4 +21,4 @@ try {
     }
 } catch (Exception e) {
     println "Error triggering seed job: ${e.getMessage()}"
-} 
+}

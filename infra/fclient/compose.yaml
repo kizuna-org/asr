@@ -37,11 +37,11 @@ services:
   #     PASS: $SAMBA_PASS
   #   restart: always
 
-  frpc:
-    image: snowdreamtech/frpc:latest@sha256:f484536eda0f5c9a367ba9a366b5e1506324b9a31da9edbd4baa75005ded9d9c
-    container_name: frpc
+  fclient:
+    image: fclient
+    container_name: fclient
     volumes:
-      - ./frpc/frpc.toml:/etc/frp/frpc.toml
+      - ./fclient/fclient.toml:/etc/fclient.toml
     networks:
       - ci-network
     depends_on:
