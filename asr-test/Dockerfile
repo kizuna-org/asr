@@ -153,6 +153,17 @@ RUN chmod +x start_streamlit_minimal.sh
 # Run GPU check during build (continue even if it fails)
 RUN python gpu_check.py || echo "GPU check completed (warnings are OK)" || true
 
+# Add NVIDIA Container Runtime check
+RUN echo "=== NVIDIA Container Runtime Check ===" && \
+  echo "Checking if we're running in NVIDIA container..." && \
+  if [ -f /proc/driver/nvidia/version ]; then \
+  echo "✅ NVIDIA driver detected in container"; \
+  cat /proc/driver/nvidia/version; \
+  else \
+  echo "⚠️  NVIDIA driver not detected in container (this is normal during build)"; \
+  fi && \
+  echo "Container GPU check completed"
+
 # ポートの公開
 EXPOSE 8501 8000
 

@@ -10,6 +10,30 @@ import pandas as pd
 import librosa
 import soundfile as sf
 
+# マルチページアプリケーションの設定
+st.set_page_config(
+    page_title="リアルタイム音声認識モデル学習",
+    page_icon="🎤",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# ページが見つからない場合のフォールバック
+if 'page' not in st.session_state:
+    st.session_state.page = 'main'
+
+# メインページのタイトル
+st.title("🚀 リアルタイム音声認識モデル学習システム")
+st.markdown("### 光速でほぼリアルタイム動作する音声認識システム")
+
+# ナビゲーション情報
+st.info("""
+📱 **ナビゲーション**: 左側のサイドバーから各機能ページにアクセスできます
+- 🎤 **音声認識**: リアルタイム音声認識機能
+- 📊 **モデル学習**: モデル学習設定と実行  
+- ⚙️ **設定**: アプリケーション設定とモデル管理
+""")
+
 # ALSAエラーを抑制
 os.environ['ALSA_PCM_CARD'] = '0'
 os.environ['ALSA_PCM_DEVICE'] = '0'
@@ -50,17 +74,11 @@ from app.trainer import ASRTrainer, FastTrainer
 from app.controlled_trainer import ControlledASRTrainer
 from app.ljspeech_dataset import create_ljspeech_dataloader
 from app.utils import (
-    AudioRecorder, RealTimeASR, AudioProcessor, ModelManager, 
+    AudioRecorder, RealTimeASR, AudioProcessor, 
     PerformanceMonitor, create_sample_audio_data, save_sample_dataset
 )
 
-# ページ設定
-st.set_page_config(
-    page_title="リアルタイム音声認識モデル学習",
-    page_icon="🎤",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+# ページ設定（重複を削除）
 
 # 自動モデルロード機能
 def auto_load_latest_model():
@@ -330,8 +348,8 @@ with tab1:
     with col2:
         st.subheader("📈 パフォーマンス")
         if st.session_state.performance_monitor:
-            stats = st.session_state.performance_monitor.get_statistics()
-            if stats:
+            stats = st.session_state.performance_monitor.get_stats()
+            if stats and stats['total_inferences'] > 0:
                 st.metric("平均推論時間", f"{stats['avg_inference_time']:.4f}s")
                 st.metric("リアルタイム比", f"{stats['avg_realtime_ratio']:.2f}x")
                 st.metric("総推論回数", stats['total_inferences'])
@@ -999,7 +1017,6 @@ with tab4:
         with col1:
             if st.button("🎵 デモ音声生成", help="テスト用の音声データを生成します"):
                 try:
-                    from app.utils import create_sample_audio_data
                     samples = create_sample_audio_data(num_samples=1, duration=3.0)
                     audio_data = samples[0][0]  # 最初のサンプルの音声データ
                     
@@ -1159,27 +1176,23 @@ with tab5:
     with col2:
         st.subheader("⚡ パフォーマンス統計")
         
-        stats = st.session_state.performance_monitor.get_statistics()
-        if stats:
+        stats = st.session_state.performance_monitor.get_stats()
+        if stats and stats['total_inferences'] > 0:
             # パフォーマンス指標の表示
             st.metric("総推論回数", stats['total_inferences'])
             st.metric("平均推論時間", f"{stats['avg_inference_time']:.4f}s")
-            st.metric("推論時間標準偏差", f"{stats['std_inference_time']:.4f}s")
+            st.metric("平均音声時間", f"{stats['avg_audio_duration']:.4f}s")
             st.metric("平均リアルタイム比", f"{stats['avg_realtime_ratio']:.2f}x")
-            st.metric("最小リアルタイム比", f"{stats['min_realtime_ratio']:.2f}x")
-            st.metric("最大リアルタイム比", f"{stats['max_realtime_ratio']:.2f}x")
             
-            # パフォーマンス詳細ボタン
-            if st.button("📊 詳細統計を表示"):
-                st.session_state.performance_monitor.print_statistics()
+            # パフォーマンス詳細情報
+            st.subheader("📊 詳細統計")
+            st.json(stats)
         else:
             st.info("ℹ️ パフォーマンスデータがありません。リアルタイム認識を実行してください。")
     
     # モデル情報
     if st.session_state.model:
         st.subheader("🤖 モデル情報")
-        
-        model_manager = ModelManager()
         
         col1, col2 = st.columns(2)
         
@@ -1194,13 +1207,17 @@ with tab5:
         
         with col2:
             # 保存されたモデルの一覧
-            saved_models = model_manager.list_models()
-            if saved_models:
-                st.write("💾 保存されたモデル:")
-                for model_file in saved_models:
-                    st.write(f"- {model_file}")
+            model_dir = "models"
+            if os.path.exists(model_dir):
+                saved_models = [f for f in os.listdir(model_dir) if f.endswith(('.pth', '.pt'))]
+                if saved_models:
+                    st.write("💾 保存されたモデル:")
+                    for model_file in saved_models:
+                        st.write(f"- {model_file}")
+                else:
+                    st.info("ℹ️ 保存されたモデルがありません。")
             else:
-                st.info("ℹ️ 保存されたモデルがありません。")
+                st.info("ℹ️ モデルディレクトリが存在しません。")
 
 with tab6:
     st.header("🚀 学習制御")
@@ -1431,6 +1448,7 @@ st.markdown(
     """
     <div style='text-align: center; color: #666;'>
         <p>🚀 リアルタイム音声認識モデル学習システム | 光速でほぼリアルタイム動作</p>
+        <p>📱 左側のサイドバーから各機能ページにアクセスできます</p>
     </div>
     """,
     unsafe_allow_html=True

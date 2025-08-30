@@ -42,6 +42,68 @@ class AudioPreprocessor:
         
         # 対数変換
         self.log_transform = torchaudio.transforms.AmplitudeToDB()
+        
+        # スペクトログラム正規化
+        self.spec_norm = torchaudio.transforms.Spectrogram(
+            n_fft=n_fft,
+            hop_length=hop_length,
+            win_length=win_length
+        )
+    
+    def _apply_noise_reduction(self, waveform: torch.Tensor) -> torch.Tensor:
+        """
+        簡易ノイズ除去
+        """
+        # スペクトログラムに変換
+        spec = self.spec_norm(waveform)
+        
+        # 低エネルギー部分をマスク（ノイズ除去）
+        energy_threshold = spec.mean() * 0.1
+        mask = spec > energy_threshold
+        spec = spec * mask
+        
+        # 逆変換
+        griffin_lim = torchaudio.transforms.GriffinLim(
+            n_fft=self.n_fft,
+            hop_length=self.hop_length,
+            win_length=self.win_length
+        )
+        denoised_waveform = griffin_lim(spec)
+        
+        return denoised_waveform
+    
+    def _apply_audio_enhancement(self, waveform: torch.Tensor) -> torch.Tensor:
+        """
+        音声品質向上
+        """
+        # 音量正規化
+        if waveform.abs().max() > 0:
+            waveform = waveform / waveform.abs().max()
+        
+        # 高周波強調（プリエンファシス）
+        preemphasis = 0.97
+        emphasized = torch.cat([
+            waveform[..., :1],
+            waveform[..., 1:] - preemphasis * waveform[..., :-1]
+        ], dim=-1)
+        
+        return emphasized
+    
+    def _apply_silence_removal(self, waveform: torch.Tensor, threshold=0.01) -> torch.Tensor:
+        """
+        無音部分の除去
+        """
+        # エネルギーベースの無音検出
+        energy = torch.mean(waveform ** 2, dim=0)
+        non_silent = energy > threshold
+        
+        # 無音部分を除去
+        if non_silent.sum() > 0:
+            start_idx = non_silent.nonzero(as_tuple=True)[0][0]
+            end_idx = non_silent.nonzero(as_tuple=True)[0][-1] + 1
+            waveform = waveform[..., start_idx:end_idx]
+        
+        return waveform
     
     def preprocess_audio(self, audio_path: str) -> torch.Tensor:
         """
@@ -59,34 +121,62 @@ class AudioPreprocessor:
             resampler = torchaudio.transforms.Resample(sample_rate, self.sample_rate)
             waveform = resampler(waveform)
         
+        # 音声品質向上
+        waveform = self._apply_audio_enhancement(waveform)
+        
+        # 無音除去
+        waveform = self._apply_silence_removal(waveform)
+        
+        # ノイズ除去（オプション）
+        if waveform.shape[-1] > self.sample_rate * 0.5:  # 0.5秒以上の場合のみ
+            try:
+                waveform = self._apply_noise_reduction(waveform)
+            except:
+                pass  # ノイズ除去に失敗した場合はスキップ
+        
         # メルスペクトログラムに変換
         mel_spec = self.mel_transform(waveform)
         
         # 対数変換
         log_mel_spec = self.log_transform(mel_spec)
         
-        # 正規化
-        log_mel_spec = (log_mel_spec - log_mel_spec.mean()) / (log_mel_spec.std() + 1e-8)
+        # 正規化（より安定した方法）
+        if log_mel_spec.numel() > 0:
+            mean = log_mel_spec.mean()
+            std = log_mel_spec.std()
+            if std > 1e-8:
+                log_mel_spec = (log_mel_spec - mean) / std
+            else:
+                log_mel_spec = log_mel_spec - mean
         
         return log_mel_spec.squeeze(0).transpose(0, 1)  # (time, features)
     
     def preprocess_audio_from_array(self, audio_array: np.ndarray, sample_rate: int) -> torch.Tensor:
         """
-        numpy配列から音声を前処理
+        numpy配列から音声を前処理（改善版）
         """
         # テンソルに変換
         waveform = torch.from_numpy(audio_array).float()
         if len(waveform.shape) == 1:
             waveform = waveform.unsqueeze(0)
         
-        # 音声の正規化
-        if waveform.abs().max() > 0:
-            waveform = waveform / waveform.abs().max()
+        # 音声品質向上
+        waveform = self._apply_audio_enhancement(waveform)
+        
+        # 無音除去
+        waveform = self._apply_silence_removal(waveform)
         
         # サンプリングレートの統一
         if sample_rate != self.sample_rate:
             resampler = torchaudio.transforms.Resample(sample_rate, self.sample_rate)
             waveform = resampler(waveform)
+        
+        # ノイズ除去（オプション）
+        if waveform.shape[-1] > self.sample_rate * 0.5:  # 0.5秒以上の場合のみ
+            try:
+                waveform = self._apply_noise_reduction(waveform)
+            except:
+                pass  # ノイズ除去に失敗した場合はスキップ
         
         # メルスペクトログラムに変換
         mel_spec = self.mel_transform(waveform)
@@ -124,11 +214,12 @@ class TextPreprocessor:
         return ids
     
     def ids_to_text(self, ids: List[int]) -> str:
-        """ID列をテキストに変換"""
+        """ID列をテキストに変換（改善版）"""
         text = ""
         for id_val in ids:
             if id_val in self.id_to_char and self.id_to_char[id_val] != '<blank>':
                 text += self.id_to_char[id_val]
+        
         return text
 
 
@@ -204,47 +295,34 @@ class ASRDataset(Dataset):
         
         # テキストの前処理
         text_ids = self.text_preprocessor.text_to_ids(text)
+        text_tensor = torch.tensor(text_ids, dtype=torch.long)
         
         # 長さの制限
-        if audio_features.shape[0] > self.max_length:
+        if audio_features.size(0) > self.max_length:
             audio_features = audio_features[:self.max_length]
         
-        if len(text_ids) > self.max_length // 4:  # テキストは音声より短い
-            text_ids = text_ids[:self.max_length // 4]
-        
-        return (
-            audio_features,
-            torch.tensor(text_ids, dtype=torch.long),
-            audio_features.shape[0],
-            len(text_ids)
-        )
+        return audio_features, text_tensor, audio_features.size(0), len(text_ids)
 
 
 def collate_fn(batch):
-    """バッチ処理用のコラテーション関数"""
-    audio_features, text_ids, audio_lengths, text_lengths = zip(*batch)
+    """バッチ処理用の関数"""
+    audio_features, text_tensors, audio_lengths, text_lengths = zip(*batch)
     
     # 音声特徴量のパディング
     max_audio_length = max(audio_lengths)
-    padded_audio = []
-    for audio in audio_features:
-        if audio.shape[0] < max_audio_length:
-            padding = torch.zeros(max_audio_length - audio.shape[0], audio.shape[1])
-            audio = torch.cat([audio, padding], dim=0)
-        padded_audio.append(audio)
+    padded_audio = torch.zeros(len(audio_features), max_audio_length, audio_features[0].size(1))
+    for i, (audio, length) in enumerate(zip(audio_features, audio_lengths)):
+        padded_audio[i, :length] = audio
     
-    # テキストIDのパディング
+    # テキストのパディング
     max_text_length = max(text_lengths)
-    padded_text = []
-    for text in text_ids:
-        if text.shape[0] < max_text_length:
-            padding = torch.zeros(max_text_length - text.shape[0], dtype=torch.long)
-            text = torch.cat([text, padding], dim=0)
-        padded_text.append(text)
+    padded_text = torch.zeros(len(text_tensors), max_text_length, dtype=torch.long)
+    for i, (text, length) in enumerate(zip(text_tensors, text_lengths)):
+        padded_text[i, :length] = text
     
     return (
-        torch.stack(padded_audio),
-        torch.stack(padded_text),
+        padded_audio,
+        padded_text,
         torch.tensor(audio_lengths),
         torch.tensor(text_lengths)
     )

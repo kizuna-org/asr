@@ -12,6 +12,10 @@ export STREAMLIT_BROWSER_GATHER_USAGE_STATS=false
 export STREAMLIT_GLOBAL_DEVELOPMENT_MODE=false
 export STREAMLIT_RUNNER_MAGIC_ENABLED=false
 
+# PyTorchとCUDAの設定
+export PYTORCH_CUDA_ALLOC_CONF=max_split_size_mb:128
+export CUDA_LAUNCH_BLOCKING=1
+
 # ALSAエラー抑制の環境変数
 export ALSA_PCM_CARD=0
 export ALSA_PCM_DEVICE=0
@@ -29,8 +33,9 @@ ln -sf /dev/null /dev/snd/controlC0 2>/dev/null || true
 ln -sf /dev/null /dev/snd/pcmC0D0p 2>/dev/null || true
 ln -sf /dev/null /dev/snd/pcmC0D0c 2>/dev/null || true
 
-# メモリ制限を緩和
-ulimit -v 4194304  # 4GBメモリ制限
+# メモリ制限を緩和（8GB）
+ulimit -v 8388608  # 8GBメモリ制限
+ulimit -m unlimited  # メモリ制限を無効化
 
 # プロセス管理
 trap 'echo "🛑 プロセス終了中..."; kill $(jobs -p) 2>/dev/null; exit' EXIT
@@ -44,6 +49,7 @@ python -m streamlit.web.cli run app/main.py \
     --server.enableCORS false \
     --server.enableXsrfProtection false \
     --browser.gatherUsageStats false \
-    --global.developmentMode false
+    --global.developmentMode false \
+    --server.runOnSave true
 
 echo "✅ Streamlitサーバーが終了しました"

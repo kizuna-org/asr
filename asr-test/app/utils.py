@@ -75,70 +75,50 @@ class AudioRecorder:
     def start_recording(self):
         """録音開始"""
         if self.audio is None:
-            print("PyAudioが初期化されていません")
             return False
-            
+        
         try:
-            # ALSAエラーを強力に抑制
-            import os
-            import contextlib
-            os.environ['ALSA_PCM_CARD'] = '0'
-            os.environ['ALSA_PCM_DEVICE'] = '0'
-            os.environ['ALSA_CONFIG_PATH'] = '/dev/null'
-            os.environ['ALSA_PCM_NAME'] = 'null'
-            
+            self.stream = self.audio.open(
+                format=self.format,
+                channels=self.channels,
+                rate=self.sample_rate,
+                input=True,
+                frames_per_buffer=self.chunk_size,
+                stream_callback=self._audio_callback
+            )
             self.is_recording = True
-            
-            # エラー出力を抑制してストリームを開く
-            with open(os.devnull, 'w') as devnull:
-                with contextlib.redirect_stderr(devnull):
-                    self.stream = self.audio.open(
-                        format=self.format,
-                        channels=self.channels,
-                        rate=self.sample_rate,
-                        input=True,
-                        frames_per_buffer=self.chunk_size,
-                        stream_callback=self._audio_callback
-                    )
-                    self.stream.start_stream()
-            
-            print("Recording started...")
+            self.stream.start_stream()
             return True
-        except OSError as e:
-            print(f"マイクアクセスエラー: {e}")
-            print("Dockerコンテナ内ではマイクアクセスが制限されています")
-            return False
         except Exception as e:
             print(f"録音開始エラー: {e}")
             return False
     
-    def stop_recording(self):
-        """録音停止"""
-        self.is_recording = False
-        if self.stream:
-            self.stream.stop_stream()
-            self.stream.close()
-        print("Recording stopped.")
-    
     def _audio_callback(self, in_data, frame_count, time_info, status):
         """音声データのコールバック"""
         if self.is_recording:
-            audio_data = np.frombuffer(in_data, dtype=np.float32)
-            self.audio_queue.put(audio_data)
-        if pyaudio is not None:
-            return (in_data, pyaudio.paContinue)
-        else:
-            return (in_data, 0)  # paContinueの値
+            try:
+                # バイトデータをfloat32に変換
+                audio_data = np.frombuffer(in_data, dtype=np.float32)
+                self.audio_queue.put(audio_data)
+            except Exception as e:
+                print(f"音声データ処理エラー: {e}")
+        return (None, pyaudio.paContinue)
     
-    def get_audio_data(self, duration_seconds: float) -> np.ndarray:
-        """指定時間の音声データを取得"""
-        audio_chunks = []
-        start_time = time.time()
+    def get_audio_data(self, duration: float) -> np.ndarray:
+        """指定時間分の音声データを取得"""
+        if not self.is_recording:
+            return np.array([])
         
-        while time.time() - start_time < duration_seconds:
+        target_samples = int(duration * self.sample_rate)
+        audio_chunks = []
+        total_samples = 0
+        
+        # 指定時間分のデータを収集
+        while total_samples < target_samples and self.is_recording:
             try:
                 chunk = self.audio_queue.get(timeout=0.1)
                 audio_chunks.append(chunk)
+                total_samples += len(chunk)
             except queue.Empty:
                 break
         
@@ -147,15 +127,22 @@ class AudioRecorder:
         else:
             return np.array([])
     
+    def stop_recording(self):
+        """録音停止"""
+        self.is_recording = False
+        if self.stream:
+            self.stream.stop_stream()
+            self.stream.close()
+    
     def close(self):
-        """リソースの解放"""
+        """リソース解放"""
         self.stop_recording()
-        if self.audio is not None:
+        if self.audio:
             self.audio.terminate()
 
 
 class RealTimeASR:
-    """リアルタイム音声認識クラス"""
+    """リアルタイム音声認識クラス（改善版）"""
     
     def __init__(self, 
                  model,
@@ -163,20 +150,90 @@ class RealTimeASR:
                  text_preprocessor,
                  device='cpu',
                  buffer_duration=3.0,
-                 overlap_duration=1.0):
+                 overlap_duration=1.0,
+                 min_confidence=0.1):
         self.model = model.to(device)
         self.audio_preprocessor = audio_preprocessor
         self.text_preprocessor = text_preprocessor
         self.device = device
         self.buffer_duration = buffer_duration
         self.overlap_duration = overlap_duration
+        self.min_confidence = min_confidence
         
         # 音声バッファ
         self.audio_buffer = np.array([])
         self.sample_rate = audio_preprocessor.sample_rate
         
+        # 認識結果の履歴
+        self.recognition_history = []
+        self.max_history = 10
+        
         # 録音機
         self.recorder = AudioRecorder(sample_rate=self.sample_rate)
+    
+    def _apply_voice_activity_detection(self, audio_data: np.ndarray) -> bool:
+        """
+        音声活動検出（VAD）
+        """
+        if len(audio_data) == 0:
+            return False
+        
+        # エネルギーベースのVAD
+        energy = np.mean(audio_data ** 2)
+        threshold = 0.001  # 調整可能
+        
+        # ゼロクロスレートベースのVAD
+        zero_crossings = np.sum(np.diff(np.sign(audio_data)) != 0)
+        zcr_threshold = len(audio_data) * 0.1  # 調整可能
+        
+        is_speech = energy > threshold and zero_crossings > zcr_threshold
+        
+        return is_speech
+    
+    def _apply_confidence_filtering(self, text: str, logits: torch.Tensor) -> bool:
+        """
+        信頼度フィルタリング
+        """
+        if not text.strip():
+            return False
+        
+        # ロジットの最大確率を信頼度として使用
+        probs = torch.softmax(logits, dim=-1)
+        max_probs = torch.max(probs, dim=-1)[0]
+        avg_confidence = torch.mean(max_probs).item()
+        
+        return avg_confidence > self.min_confidence
+    
+    def _apply_result_smoothing(self, text: str) -> str:
+        """
+        認識結果の平滑化
+        """
+        if not text.strip():
+            return ""
+        
+        # 履歴に追加
+        self.recognition_history.append(text)
+        if len(self.recognition_history) > self.max_history:
+            self.recognition_history.pop(0)
+        
+        # 履歴が少ない場合はそのまま返す
+        if len(self.recognition_history) < 3:
+            return text
+        
+        # 最近の結果を比較して、一貫性をチェック
+        recent_results = self.recognition_history[-3:]
+        
+        # 最も頻繁に出現する結果を選択
+        from collections import Counter
+        counter = Counter(recent_results)
+        most_common = counter.most_common(1)[0]
+        
+        # 信頼度が高い場合のみ平滑化を適用
+        if most_common[1] >= 2:  # 3回中2回以上同じ結果
+            smoothed_text = most_common[0]
+            return smoothed_text
+        
+        return text
     
     def start_realtime_recognition(self):
         """リアルタイム認識開始"""
@@ -188,10 +245,15 @@ class RealTimeASR:
                 audio_data = self.recorder.get_audio_data(self.buffer_duration)
                 
                 if len(audio_data) > 0:
-                    # 音声認識を実行
-                    text = self.recognize_audio(audio_data)
-                    if text.strip():
-                        print(f"Recognized: {text}")
+                    # 音声活動検出
+                    if self._apply_voice_activity_detection(audio_data):
+                        # 音声認識を実行
+                        text = self.recognize_audio(audio_data)
+                        if text.strip():
+                            # 信頼度フィルタリングと平滑化
+                            if self._apply_confidence_filtering(text, self.model.last_logits):
+                                smoothed_text = self._apply_result_smoothing(text)
+                                print(f"Recognized: {smoothed_text}")
                 
                 # オーバーラップ部分を保持
                 overlap_samples = int(self.overlap_duration * self.sample_rate)
@@ -206,7 +268,7 @@ class RealTimeASR:
             self.recorder.close()
     
     def recognize_audio(self, audio_data: np.ndarray) -> str:
-        """音声データを認識"""
+        """音声データを認識（改善版）"""
         if len(audio_data) == 0:
             return ""
         
@@ -215,18 +277,10 @@ class RealTimeASR:
             print("⚠️ 警告: モデルが学習されていません。認識結果は不正確です。")
             return "[未学習モデル]"
         
-        # デバッグ情報を追加
-        print(f"Audio Debug - Input shape: {audio_data.shape}")
-        print(f"Audio Debug - Input range: [{audio_data.min():.4f}, {audio_data.max():.4f}]")
-        print(f"Audio Debug - Input mean: {audio_data.mean():.4f}")
-        
         # 音声の前処理
         audio_features = self.audio_preprocessor.preprocess_audio_from_array(
             audio_data, self.sample_rate
         )
-        
-        print(f"Audio Debug - Features shape: {audio_features.shape}")
-        print(f"Audio Debug - Features range: [{audio_features.min():.4f}, {audio_features.max():.4f}]")
         
         # バッチ次元を追加
         audio_features = audio_features.unsqueeze(0).to(self.device)
@@ -234,14 +288,14 @@ class RealTimeASR:
         # 推論
         with torch.no_grad():
             logits = self.model(audio_features)
+            # ロジットを保存（信頼度計算用）
+            self.model.last_logits = logits
             decoded_sequences = self.model.decode(logits)
         
         # テキストに変換
         if decoded_sequences:
             text_ids = decoded_sequences[0]
             text = self.text_preprocessor.ids_to_text(text_ids)
-            print(f"Audio Debug - Decoded IDs: {text_ids}")
-            print(f"Audio Debug - Final text: '{text}'")
             return text
         
         return ""
@@ -251,98 +305,59 @@ class AudioProcessor:
     """音声処理ユーティリティ"""
     
     @staticmethod
-    def load_audio(file_path: str, target_sr: int = 16000) -> Tuple[np.ndarray, int]:
-        """音声ファイルを読み込み"""
-        try:
-            audio, sr = librosa.load(file_path, sr=target_sr)
-            return audio, sr
-        except Exception as e:
-            print(f"Error loading audio file {file_path}: {e}")
-            return np.array([]), target_sr
-    
-    @staticmethod
-    def save_audio(audio: np.ndarray, file_path: str, sr: int = 16000):
-        """音声ファイルを保存"""
-        try:
-            sf.write(file_path, audio, sr)
-            print(f"Audio saved to {file_path}")
-        except Exception as e:
-            print(f"Error saving audio file {file_path}: {e}")
-    
-    @staticmethod
     def normalize_audio(audio: np.ndarray) -> np.ndarray:
         """音声の正規化"""
         if len(audio) == 0:
             return audio
         
-        # RMS正規化
-        rms = np.sqrt(np.mean(audio ** 2))
-        if rms > 0:
-            audio = audio / rms * 0.1
+        # 最大値で正規化
+        max_val = np.max(np.abs(audio))
+        if max_val > 0:
+            audio = audio / max_val
         
         return audio
     
     @staticmethod
-    def trim_silence(audio: np.ndarray, threshold_db: float = -40) -> np.ndarray:
+    def apply_preemphasis(audio: np.ndarray, coefficient: float = 0.97) -> np.ndarray:
+        """プリエンファシスフィルタ"""
+        if len(audio) < 2:
+            return audio
+        
+        emphasized = np.zeros_like(audio)
+        emphasized[0] = audio[0]
+        for i in range(1, len(audio)):
+            emphasized[i] = audio[i] - coefficient * audio[i-1]
+        
+        return emphasized
+    
+    @staticmethod
+    def remove_silence(audio: np.ndarray, threshold: float = 0.01) -> np.ndarray:
         """無音部分の除去"""
         if len(audio) == 0:
             return audio
         
-        # デシベルに変換
-        db = 20 * np.log10(np.abs(audio) + 1e-10)
+        # エネルギーベースの無音検出
+        energy = np.mean(audio ** 2)
+        if energy < threshold:
+            return np.array([])
         
-        # 閾値以上の部分を検出
-        mask = db > threshold_db
+        # 無音部分の検出と除去
+        frame_length = 1024
+        hop_length = 512
         
-        # 開始と終了位置を検出
-        start = np.argmax(mask)
-        end = len(audio) - np.argmax(mask[::-1])
+        non_silent_frames = []
+        for i in range(0, len(audio) - frame_length, hop_length):
+            frame = audio[i:i + frame_length]
+            frame_energy = np.mean(frame ** 2)
+            if frame_energy > threshold:
+                non_silent_frames.append(i)
         
-        return audio[start:end]
-
-
-class ModelManager:
-    """モデル管理クラス"""
-    
-    def __init__(self, model_dir: str = "models"):
-        self.model_dir = model_dir
-        os.makedirs(model_dir, exist_ok=True)
-    
-    def save_model_info(self, model, model_name: str, info: dict):
-        """モデル情報を保存"""
-        info_path = os.path.join(self.model_dir, f"{model_name}_info.json")
+        if non_silent_frames:
+            start_idx = non_silent_frames[0]
+            end_idx = non_silent_frames[-1] + frame_length
+            return audio[start_idx:end_idx]
         
-        model_info = {
-            "model_name": model_name,
-            "parameters": sum(p.numel() for p in model.parameters()),
-            "trainable_parameters": sum(p.numel() for p in model.parameters() if p.requires_grad),
-            "model_size_mb": sum(p.numel() * p.element_size() for p in model.parameters()) / (1024 * 1024),
-            "created_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-            **info
-        }
-        
-        with open(info_path, 'w') as f:
-            json.dump(model_info, f, indent=2)
-        
-        print(f"Model info saved to {info_path}")
-    
-    def load_model_info(self, model_name: str) -> dict:
-        """モデル情報を読み込み"""
-        info_path = os.path.join(self.model_dir, f"{model_name}_info.json")
-        
-        if os.path.exists(info_path):
-            with open(info_path, 'r') as f:
-                return json.load(f)
-        else:
-            return {}
-    
-    def list_models(self) -> List[str]:
-        """保存されたモデルの一覧を取得"""
-        models = []
-        for file in os.listdir(self.model_dir):
-            if file.endswith('.pth'):
-                models.append(file)
-        return models
+        return audio
 
 
 class PerformanceMonitor:
@@ -350,50 +365,43 @@ class PerformanceMonitor:
     
     def __init__(self):
         self.inference_times = []
-        self.audio_lengths = []
+        self.audio_durations = []
+        self.realtime_ratios = []
+        self.max_history = 100
     
-    def record_inference(self, inference_time: float, audio_length: float):
+    def record_inference(self, inference_time: float, audio_duration: float):
         """推論時間を記録"""
         self.inference_times.append(inference_time)
-        self.audio_lengths.append(audio_length)
-    
-    def get_statistics(self) -> dict:
-        """統計情報を取得"""
-        if not self.inference_times:
-            return {}
-        
-        inference_times = np.array(self.inference_times)
-        audio_lengths = np.array(self.audio_lengths)
+        self.audio_durations.append(audio_duration)
         
         # リアルタイム比を計算
-        realtime_ratios = audio_lengths / inference_times
+        if inference_time > 0:
+            realtime_ratio = audio_duration / inference_time
+            self.realtime_ratios.append(realtime_ratio)
+        
+        # 履歴を制限
+        if len(self.inference_times) > self.max_history:
+            self.inference_times.pop(0)
+            self.audio_durations.pop(0)
+            if self.realtime_ratios:
+                self.realtime_ratios.pop(0)
+    
+    def get_stats(self) -> dict:
+        """統計情報を取得"""
+        if not self.inference_times:
+            return {
+                "avg_inference_time": 0.0,
+                "avg_audio_duration": 0.0,
+                "avg_realtime_ratio": 0.0,
+                "total_inferences": 0
+            }
         
         return {
-            "total_inferences": len(self.inference_times),
-            "avg_inference_time": np.mean(inference_times),
-            "std_inference_time": np.std(inference_times),
-            "min_inference_time": np.min(inference_times),
-            "max_inference_time": np.max(inference_times),
-            "avg_realtime_ratio": np.mean(realtime_ratios),
-            "min_realtime_ratio": np.min(realtime_ratios),
-            "max_realtime_ratio": np.max(realtime_ratios)
+            "avg_inference_time": np.mean(self.inference_times),
+            "avg_audio_duration": np.mean(self.audio_durations),
+            "avg_realtime_ratio": np.mean(self.realtime_ratios) if self.realtime_ratios else 0.0,
+            "total_inferences": len(self.inference_times)
         }
-    
-    def print_statistics(self):
-        """統計情報を表示"""
-        stats = self.get_statistics()
-        if not stats:
-            print("No inference data recorded.")
-            return
-        
-        print("\n=== Performance Statistics ===")
-        print(f"Total inferences: {stats['total_inferences']}")
-        print(f"Average inference time: {stats['avg_inference_time']:.4f}s")
-        print(f"Inference time std: {stats['std_inference_time']:.4f}s")
-        print(f"Inference time range: {stats['min_inference_time']:.4f}s - {stats['max_inference_time']:.4f}s")
-        print(f"Average real-time ratio: {stats['avg_realtime_ratio']:.2f}x")
-        print(f"Real-time ratio range: {stats['min_realtime_ratio']:.2f}x - {stats['max_realtime_ratio']:.2f}x")
-        print("=" * 30)
 
 
 def create_sample_audio_data(num_samples: int = 10, duration: float = 3.0) -> List[Tuple[np.ndarray, str]]:

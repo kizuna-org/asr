@@ -86,6 +86,12 @@ ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo doc
 echo "コンテナを起動します。"
 ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker compose up -d"
 
+echo "NVIDIA Container Runtimeの設定を確認します..."
+ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && ./check_nvidia_runtime.sh"
+
+echo "コンテナ内でGPUチェックを実行します..."
+ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker compose exec asr-api python gpu_check.py"
+
 echo "デプロイが完了しました。"
 echo ""
 

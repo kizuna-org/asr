@@ -15,7 +15,7 @@ developmentMode = false
 level = "warning"
 
 [client]
-showErrorDetails = false
+showErrorDetails = "none"
 
 [runner]
 magicEnabled = false

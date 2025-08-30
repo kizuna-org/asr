@@ -68,33 +68,43 @@ def initialize_model(model_type: str = "FastASRModel", hidden_dim: int = 64):
     """モデルの初期化"""
     global model, audio_preprocessor, text_preprocessor, device
     
-    # デバイス設定
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    logger.info(f"使用デバイス: {device}")
-    
-    # 前処理器の初期化
-    audio_preprocessor = AudioPreprocessor()
-    text_preprocessor = TextPreprocessor()
-    
-    # モデルの初期化
-    if model_type.startswith("Fast"):
-        model = FastASRModel(
-            hidden_dim=hidden_dim,
-            num_classes=len(CHAR_TO_ID)
-        )
-    else:
-        model = LightweightASRModel(
-            hidden_dim=hidden_dim,
-            num_layers=2,
-            num_classes=len(CHAR_TO_ID)
-        )
-    
-    model = model.to(device)
-    model.eval()
-    
-    # パラメータ数をログ出力
-    params = sum(p.numel() for p in model.parameters())
-    logger.info(f"モデル初期化完了: {params:,}パラメータ")
+    try:
+        # デバイス設定
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        logger.info(f"使用デバイス: {device}")
+        
+        # 前処理器の初期化
+        audio_preprocessor = AudioPreprocessor()
+        text_preprocessor = TextPreprocessor()
+        
+        # モデルの初期化
+        if model_type.startswith("Fast"):
+            model = FastASRModel(
+                hidden_dim=hidden_dim,
+                num_classes=len(CHAR_TO_ID)
+            )
+        else:
+            model = LightweightASRModel(
+                hidden_dim=hidden_dim,
+                num_layers=2,
+                num_classes=len(CHAR_TO_ID)
+            )
+        
+        model = model.to(device)
+        model.eval()
+        
+        # パラメータ数をログ出力
+        params = sum(p.numel() for p in model.parameters())
+        logger.info(f"モデル初期化完了: {params:,}パラメータ")
+        
+    except Exception as e:
+        logger.error(f"モデル初期化エラー: {e}")
+        import traceback
+        logger.error(f"詳細エラー: {traceback.format_exc()}")
+        # エラー時はNoneを設定
+        model = None
+        audio_preprocessor = None
+        text_preprocessor = None
 
 def load_model(model_path: str):
     """保存されたモデルの読み込み"""
@@ -110,7 +120,7 @@ def load_model(model_path: str):
         return False
 
 def recognize_audio(audio_data: np.ndarray, sample_rate: int = 16000) -> Dict[str, Any]:
-    """音声認識の実行"""
+    """音声認識の実行（改善版）"""
     global model, audio_preprocessor, text_preprocessor, performance_monitor
     
     if model is None:
@@ -118,6 +128,16 @@ def recognize_audio(audio_data: np.ndarray, sample_rate: int = 16000) -> Dict[st
     
     try:
         start_time = time.time()
+        
+        # 入力データの安全チェック
+        if audio_data is None or len(audio_data) == 0:
+            return {
+                "text": "",
+                "error": "空の音声データが入力されました",
+                "inference_time": 0.0,
+                "audio_duration": 0.0,
+                "realtime_ratio": 0.0
+            }
         
         # モデルが学習済みかチェック
         if hasattr(model, 'is_trained') and not model.is_trained():
@@ -130,37 +150,66 @@ def recognize_audio(audio_data: np.ndarray, sample_rate: int = 16000) -> Dict[st
                 "realtime_ratio": 0.0
             }
         
-        # デバッグ情報を追加
-        print(f"API Debug - Input shape: {audio_data.shape}")
-        print(f"API Debug - Sample rate: {sample_rate}")
-        print(f"API Debug - Model type: {type(model).__name__}")
-        
         # 音声の前処理
-        audio_features = audio_preprocessor.preprocess_audio_from_array(
-            audio_data, sample_rate
-        )
-        
-        print(f"API Debug - Features shape: {audio_features.shape}")
+        try:
+            audio_features = audio_preprocessor.preprocess_audio_from_array(
+                audio_data, sample_rate
+            )
+        except Exception as e:
+            logger.error(f"音声前処理エラー: {e}")
+            return {
+                "text": "",
+                "error": f"音声前処理に失敗しました: {str(e)}",
+                "inference_time": 0.0,
+                "audio_duration": len(audio_data) / sample_rate,
+                "realtime_ratio": 0.0
+            }
         
         # バッチ次元を追加
         audio_features = audio_features.unsqueeze(0).to(device)
         
         # 推論
-        with torch.no_grad():
-            logits = model(audio_features)
-            decoded_sequences = model.decode(logits)
+        try:
+            with torch.no_grad():
+                logits = model(audio_features)
+                # 複数のデコード方法を試行
+                decoded_sequences = model.decode(logits, beam_size=5)
+                
+                # ビームサーチが失敗した場合は貪欲法を試行
+                if not decoded_sequences or not decoded_sequences[0]:
+                    decoded_sequences = model.decode(logits, beam_size=1)
+        except Exception as e:
+            logger.error(f"推論エラー: {e}")
+            return {
+                "text": "",
+                "error": f"推論に失敗しました: {str(e)}",
+                "inference_time": 0.0,
+                "audio_duration": len(audio_data) / sample_rate,
+                "realtime_ratio": 0.0
+            }
         
         inference_time = time.time() - start_time
         
         # テキストに変換
-        if decoded_sequences:
-            text_ids = decoded_sequences[0]
-            text = text_preprocessor.ids_to_text(text_ids)
-            print(f"API Debug - Decoded IDs: {text_ids}")
-            print(f"API Debug - Final text: '{text}'")
-        else:
+        try:
+            if decoded_sequences and len(decoded_sequences) > 0:
+                text_ids = decoded_sequences[0]
+                if text_ids is None or len(text_ids) == 0:
+                    text = ""
+                else:
+                    text = text_preprocessor.ids_to_text(text_ids)
+                    
+                    # 信頼度計算
+                    probs = torch.softmax(logits, dim=-1)
+                    max_probs = torch.max(probs, dim=-1)[0]
+                    avg_confidence = torch.mean(max_probs).item()
+                    
+                    # 信頼度が低い場合は警告
+                    if avg_confidence < 0.3:
+                        text += " [低信頼度]"
+        except Exception as e:
+            logger.error(f"テキスト変換エラー: {e}")
             text = ""
-            print("API Debug - No decoded sequences")
         
         # パフォーマンス記録
         audio_duration = len(audio_data) / sample_rate
@@ -170,12 +219,21 @@ def recognize_audio(audio_data: np.ndarray, sample_rate: int = 16000) -> Dict[st
             "text": text,
             "inference_time": inference_time,
             "audio_duration": audio_duration,
-            "realtime_ratio": audio_duration / inference_time if inference_time > 0 else 0
+            "realtime_ratio": audio_duration / inference_time if inference_time > 0 else 0,
+            "confidence": avg_confidence if 'avg_confidence' in locals() else 0.0
         }
     
     except Exception as e:
         logger.error(f"音声認識エラー: {e}")
-        return {"error": str(e)}
+        import traceback
+        logger.error(f"詳細エラー: {traceback.format_exc()}")
+        return {
+            "text": "",
+            "error": f"音声認識に失敗しました: {str(e)}",
+            "inference_time": 0.0,
+            "audio_duration": len(audio_data) / sample_rate if audio_data is not None else 0.0,
+            "realtime_ratio": 0.0
+        }
 
 @app.on_event("startup")
 async def startup_event():
@@ -186,8 +244,23 @@ async def startup_event():
 
 @app.get("/")
 async def get_root():
-    """ルートエンドポイント"""
-    return {"message": "リアルタイム音声認識API", "status": "running"}
+    """ルートエンドポイント - メインページを提供"""
+    try:
+        with open("static/index.html", "r", encoding="utf-8") as f:
+            html_content = f.read()
+        return HTMLResponse(content=html_content)
+    except FileNotFoundError:
+        return {"message": "リアルタイム音声認識API", "status": "running", "note": "static/index.html not found"}
+
+@app.get("/main")
+async def get_main_page():
+    """メインページの提供"""
+    try:
+        with open("static/index.html", "r", encoding="utf-8") as f:
+            html_content = f.read()
+        return HTMLResponse(content=html_content)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="メインページが見つかりません")
 
 @app.get("/health")
 async def health_check():
@@ -306,7 +379,7 @@ async def websocket_recognize(websocket: WebSocket):
 @app.get("/performance")
 async def get_performance_stats():
     """パフォーマンス統計の取得"""
-    stats = performance_monitor.get_statistics()
+    stats = performance_monitor.get_stats()
     return {
         "performance": stats,
         "model_info": {

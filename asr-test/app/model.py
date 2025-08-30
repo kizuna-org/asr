@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import CTCLoss
 import math
+import numpy as np
 
 
 class LightweightASRModel(nn.Module):
@@ -140,9 +141,9 @@ class LightweightASRModel(nn.Module):
         
         return self.ctc_loss(logits, targets, logit_lengths, target_lengths)
     
-    def decode(self, logits, lengths=None):
+    def decode(self, logits, lengths=None, beam_size=5):
         """
-        推論時のデコード（貪欲法）
+        推論時のデコード（ビームサーチ + 貪欲法）
         """
         # logits: (batch_size, time_steps, num_classes)
         if lengths is not None:
@@ -152,41 +153,71 @@ class LightweightASRModel(nn.Module):
         else:
             mask = None
         
-        # 最も確率の高いクラスを選択
-        predictions = torch.argmax(logits, dim=-1)
-        
-        # デバッグ情報を追加
-        print(f"Debug - Logits shape: {logits.shape}")
-        print(f"Debug - Predictions shape: {predictions.shape}")
-        print(f"Debug - First few predictions: {predictions[0][:10].tolist()}")
-        print(f"Debug - Logits stats - min: {logits.min():.4f}, max: {logits.max():.4f}, mean: {logits.mean():.4f}")
-        
-        # CTCデコード（重複除去とブランク除去）
+        # ビームサーチでデコード
         decoded_sequences = []
-        for i, pred in enumerate(predictions):
+        for i in range(logits.size(0)):
             if mask is not None:
-                pred = pred[mask[i]]
+                seq_logits = logits[i][mask[i]]
+            else:
+                seq_logits = logits[i]
             
-            # CTCデコード
-            decoded = self._ctc_decode(pred)
+            # ビームサーチでデコード
+            decoded = self._beam_search_decode(seq_logits, beam_size)
             decoded_sequences.append(decoded)
         
         return decoded_sequences
     
+    def _beam_search_decode(self, logits, beam_size=5):
+        """
+        ビームサーチによるCTCデコード
+        """
+        # logits: (time_steps, num_classes)
+        time_steps, num_classes = logits.shape
+        
+        # 確率に変換
+        probs = F.softmax(logits, dim=-1)
+        
+        # ビームサーチの初期化
+        beams = [([], 0.0)]  # (sequence, score)
+        
+        for t in range(time_steps):
+            new_beams = []
+            
+            for beam_seq, beam_score in beams:
+                # 現在の時刻での各クラスの確率
+                for class_id in range(num_classes):
+                    if class_id == 0:  # blank
+                        # ブランクの場合はシーケンスを変更しない
+                        new_score = beam_score + torch.log(probs[t, class_id])
+                        new_beams.append((beam_seq, new_score))
+                    else:
+                        # 非ブランクの場合
+                        if not beam_seq or beam_seq[-1] != class_id:
+                            # 前の文字と異なる場合のみ追加
+                            new_seq = beam_seq + [class_id]
+                            new_score = beam_score + torch.log(probs[t, class_id])
+                            new_beams.append((new_seq, new_score))
+            
+            # 上位beam_size個のビームを選択
+            new_beams.sort(key=lambda x: x[1], reverse=True)
+            beams = new_beams[:beam_size]
+        
+        # 最良のビームを返す
+        if beams:
+            best_sequence = beams[0][0]
+            return best_sequence
+        else:
+            return []
+    
     def _ctc_decode(self, pred):
         decoded = []
         prev = None
-        
-        # デバッグ情報を追加
-        print(f"CTC Debug - Raw predictions: {pred[:20].tolist()}")
-        print(f"CTC Debug - Prediction stats - min: {pred.min()}, max: {pred.max()}, unique: {torch.unique(pred).tolist()}")
         
         for p in pred:
             if p != prev and p != 0:
                 decoded.append(p.item())
             prev = p
         
-        print(f"CTC Debug - Decoded IDs: {decoded}")
         return decoded
 
 
@@ -272,74 +303,152 @@ class FastASRModel(nn.Module):
         logits = F.log_softmax(logits, dim=-1)
         return self.ctc_loss(logits, targets, logit_lengths, target_lengths)
     
-    def decode(self, logits, lengths=None):
-        # デバッグ情報を追加
-        print(f"FastASR Debug - Logits shape: {logits.shape}")
-        print(f"FastASR Debug - Logits stats - min: {logits.min():.4f}, max: {logits.max():.4f}, mean: {logits.mean():.4f}")
-        
-        predictions = torch.argmax(logits, dim=-1)
-        print(f"FastASR Debug - First few predictions: {predictions[0][:10].tolist()}")
-        
-        # 標準的なCTCデコードを試行
-        decoded_sequences = [self._ctc_decode(pred) for pred in predictions]
-        
-        # 結果が空の場合は、より柔軟なデコードを試行
-        for i, decoded in enumerate(decoded_sequences):
-            if not decoded:
-                print(f"CTC Debug - Empty result for sequence {i}, trying flexible decode...")
-                decoded_sequences[i] = self._flexible_ctc_decode(predictions[i])
-        
-        return decoded_sequences
+    def decode(self, logits, lengths=None, beam_size=3):
+        """
+        改善されたデコード処理
+        """
+        try:
+            # ビームサーチでデコード
+            decoded_sequences = []
+            for i in range(logits.size(0)):
+                if lengths is not None:
+                    seq_logits = logits[i][:lengths[i]]
+                else:
+                    seq_logits = logits[i]
+                
+                # ビームサーチでデコード
+                decoded = self._beam_search_decode(seq_logits, beam_size)
+                if not decoded:
+                    # ビームサーチが失敗した場合は貪欲法を試行
+                    decoded = self._greedy_decode(seq_logits)
+                decoded_sequences.append(decoded)
+            
+            return decoded_sequences
+        except Exception as e:
+            return [[]]
+    
+    def _beam_search_decode(self, logits, beam_size=3):
+        """
+        軽量ビームサーチによるCTCデコード
+        """
+        try:
+            # logits: (time_steps, num_classes)
+            time_steps, num_classes = logits.shape
+            
+            # 確率に変換
+            probs = F.softmax(logits, dim=-1)
+            
+            # ビームサーチの初期化
+            beams = [([], 0.0)]  # (sequence, score)
+            
+            for t in range(time_steps):
+                new_beams = []
+                
+                for beam_seq, beam_score in beams:
+                    # 現在の時刻での各クラスの確率
+                    for class_id in range(num_classes):
+                        if class_id == 0:  # blank
+                            # ブランクの場合はシーケンスを変更しない
+                            new_score = beam_score + torch.log(probs[t, class_id] + 1e-8)
+                            new_beams.append((beam_seq, new_score))
+                        else:
+                            # 非ブランクの場合
+                            if not beam_seq or beam_seq[-1] != class_id:
+                                # 前の文字と異なる場合のみ追加
+                                new_seq = beam_seq + [class_id]
+                                new_score = beam_score + torch.log(probs[t, class_id] + 1e-8)
+                                new_beams.append((new_seq, new_score))
+                
+                # 上位beam_size個のビームを選択
+                new_beams.sort(key=lambda x: x[1], reverse=True)
+                beams = new_beams[:beam_size]
+            
+            # 最良のビームを返す
+            if beams:
+                best_sequence = beams[0][0]
+                return best_sequence
+            else:
+                return []
+        except Exception as e:
+            return []
+    
+    def _greedy_decode(self, logits):
+        """
+        貪欲法によるCTCデコード
+        """
+        try:
+            # 最も確率の高いクラスを選択
+            predictions = torch.argmax(logits, dim=-1)
+            
+            # CTCデコード（重複除去とブランク除去）
+            decoded = []
+            prev = None
+            
+            for p in predictions:
+                if p != prev and p != 0:  # 0はブランク
+                    decoded.append(p.item())
+                prev = p
+            
+            return decoded
+        except Exception as e:
+            return []
     
     def _flexible_ctc_decode(self, pred):
         """より柔軟なCTCデコード（ブランクの扱いを緩和）"""
-        decoded = []
-        prev = None
-        
-        # 非ブランクの予測をカウント
-        non_blank_count = (pred != 0).sum().item()
-        total_count = len(pred)
-        
-        print(f"Flexible CTC Debug - Non-blank ratio: {non_blank_count}/{total_count} = {non_blank_count/total_count:.3f}")
-        
-        # 非ブランクの割合が低すぎる場合は、最も頻繁に出現する非ブランク文字を選択
-        if non_blank_count / total_count < 0.1:
-            non_blank_preds = pred[pred != 0]
-            if len(non_blank_preds) > 0:
-                # 最も頻繁に出現する文字を選択
-                unique, counts = torch.unique(non_blank_preds, return_counts=True)
-                most_common = unique[counts.argmax()]
-                decoded = [most_common.item()]
-                print(f"Flexible CTC Debug - Using most common non-blank: {most_common.item()}")
+        try:
+            decoded = []
+            prev = None
+            
+            # 安全なチェック
+            if pred.numel() == 0:
+                return [1]  # デフォルトで'a'
+            
+            # 非ブランクの予測をカウント
+            non_blank_count = (pred != 0).sum().item()
+            total_count = len(pred)
+            
+            # 非ブランクの割合が低すぎる場合は、最も頻繁に出現する非ブランク文字を選択
+            if non_blank_count / total_count < 0.1:
+                non_blank_preds = pred[pred != 0]
+                if len(non_blank_preds) > 0:
+                    # 最も頻繁に出現する文字を選択
+                    unique, counts = torch.unique(non_blank_preds, return_counts=True)
+                    if len(unique) > 0:
+                        most_common = unique[counts.argmax()]
+                        decoded = [most_common.item()]
+                    else:
+                        decoded = [1]  # デフォルトで'a'
+                else:
+                    # 全てブランクの場合は、安全なデフォルト値を選択
+                    decoded = [1]  # デフォルトで'a'
             else:
-                # 全てブランクの場合は、最も確率の高い文字を選択
-                decoded = [pred[0].item() if pred[0] != 0 else 1]  # デフォルトで'a'
-                print(f"Flexible CTC Debug - All blank, using default: {decoded[0]}")
-        else:
-            # 通常のCTCデコード
+                # 通常のCTCデコード
+                for p in pred:
+                    if p != prev and p != 0:
+                        decoded.append(p.item())
+                    prev = p
+            
+            return decoded
+        except Exception as e:
+            return [1]  # エラー時はデフォルトで'a'
+    
+    def _ctc_decode(self, pred):
+        try:
+            decoded = []
+            prev = None
+            
+            # 安全なチェック
+            if pred.numel() == 0:
+                return []
+            
             for p in pred:
                 if p != prev and p != 0:
                     decoded.append(p.item())
                 prev = p
-        
-        print(f"Flexible CTC Debug - Final decoded: {decoded}")
-        return decoded
-    
-    def _ctc_decode(self, pred):
-        decoded = []
-        prev = None
-        
-        # デバッグ情報を追加
-        print(f"CTC Debug - Raw predictions: {pred[:20].tolist()}")
-        print(f"CTC Debug - Prediction stats - min: {pred.min()}, max: {pred.max()}, unique: {torch.unique(pred).tolist()}")
-        
-        for p in pred:
-            if p != prev and p != 0:
-                decoded.append(p.item())
-            prev = p
-        
-        print(f"CTC Debug - Decoded IDs: {decoded}")
-        return decoded
+            
+            return decoded
+        except Exception as e:
+            return []
 
 
 # 文字マッピング

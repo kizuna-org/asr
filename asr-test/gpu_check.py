@@ -22,6 +22,18 @@ def check_cuda_installation():
         print(f"❌ CUDA directory not found: {cuda_home}")
         return False
     
+    # Check CUDA version
+    try:
+        result = subprocess.run([f'{cuda_home}/bin/nvcc', '--version'], capture_output=True, text=True, timeout=10)
+        if result.returncode == 0:
+            print("✅ CUDA compiler (nvcc) is available")
+            print(f"CUDA Version: {result.stdout.split('release ')[1].split(',')[0]}")
+        else:
+            print("❌ CUDA compiler (nvcc) failed")
+            print(f"Error: {result.stderr}")
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        print("⚠️  CUDA compiler (nvcc) not found or timeout")
+    
     # Check nvidia-smi
     try:
         result = subprocess.run(['nvidia-smi'], capture_output=True, text=True, timeout=10)

@@ -44,6 +44,7 @@ streamlit run app/main.py \
     --server.maxUploadSize 200 \
     --server.maxMessageSize 200 \
     --browser.gatherUsageStats false \
-    --global.developmentMode false
+    --global.developmentMode false \
+    --server.runOnSave true
 
 echo "✅ Streamlitサーバーが終了しました"
