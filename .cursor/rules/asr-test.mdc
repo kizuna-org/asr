@@ -1,0 +1,8 @@
+---
+description:
+globs:
+alwaysApply: false
+---
+
+`./asr-test`はこのホストとは別のSSH先のGPUサーバーで実行されています。そのため、デバッグはユーザーに委ねてください。
+**ローカル環境ではpythonコマンドやdockerコマンドをぜったいにたたかないでください。**
