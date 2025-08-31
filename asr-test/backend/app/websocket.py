@@ -1,5 +1,5 @@
-# backend/app/websocket.py
 import json
+import asyncio
 from typing import List, Dict
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
@@ -8,6 +8,11 @@ router = APIRouter()
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
+        try:
+            self.loop = asyncio.get_running_loop()
+        except RuntimeError:
+            self.loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(self.loop)
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -21,6 +26,13 @@ class ConnectionManager:
         for connection in self.active_connections:
             await connection.send_text(json.dumps(message))
 
+    def broadcast_sync(self, message: Dict):
+        """同期関数からブロードキャストを実行するためのラッパー"""
+        if self.loop.is_running():
+            asyncio.run_coroutine_threadsafe(self.broadcast(message), self.loop)
+        else:
+            self.loop.run_until_complete(self.broadcast(message))
+
 # ConnectionManagerのインスタンスを作成
 manager = ConnectionManager()
 
@@ -31,6 +43,6 @@ async def websocket_endpoint(websocket: WebSocket):
     try:
         while True:
             # クライアントからのメッセージを待機（現在は使わない）
-            data = await websocket.receive_text()
+            await websocket.receive_text()
     except WebSocketDisconnect:
         manager.disconnect(websocket)
