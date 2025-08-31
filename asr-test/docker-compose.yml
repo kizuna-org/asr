@@ -1,1 +1,34 @@
 services:
+  asr-api:
+    image: asr-app # run.sh の `docker build . -t asr-app` でビルドされることを想定
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+    ports:
+      - "58081:8000"
+    volumes:
+      - ./data:/app/data
+      - ./checkpoints:/app/checkpoints
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  frontend:
+    # run.sh の `docker build` コマンドは backend (asr-api) のみを対象とします。
+    # こちらの frontend サービスは `docker compose up` 時に自動でビルドされます。
+    build:
+      context: . # プロジェクトルート
+      dockerfile: frontend/Dockerfile # frontend/Dockerfile を指定
+    command: streamlit run app.py --server.port 8501 --server.address 0.0.0.0
+    ports:
+      - "58080:8501"
+    depends_on:
+      - asr-api
+
+volumes:
+  data:
+    driver: local
+  checkpoints:
+    driver: local
