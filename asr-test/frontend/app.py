@@ -5,10 +5,39 @@ import asyncio
 import websockets
 import json
 from typing import Dict, Any
+import traceback
+import os
 
 # --- 設定 ---
-BACKEND_URL = "http://asr-api:8000/api"
-WEBSOCKET_URL = "ws://asr-api:8000/ws"
+# 環境変数からバックエンドURLを取得、デフォルトはローカルホスト
+BACKEND_HOST = os.getenv("BACKEND_HOST", "localhost")
+BACKEND_PORT = os.getenv("BACKEND_PORT", "58081")
+BACKEND_URL = f"http://{BACKEND_HOST}:{BACKEND_PORT}/api"
+WEBSOCKET_URL = f"ws://{BACKEND_HOST}:{BACKEND_PORT}/ws"
+
+# プロキシ設定
+HTTP_PROXY = os.getenv("HTTP_PROXY")
+HTTPS_PROXY = os.getenv("HTTPS_PROXY")
+NO_PROXY = os.getenv("NO_PROXY", "localhost,127.0.0.1,asr-api")
+
+# プロキシ設定を辞書形式で準備
+proxies = {}
+if HTTP_PROXY:
+    proxies["http"] = HTTP_PROXY
+if HTTPS_PROXY:
+    proxies["https"] = HTTPS_PROXY
+
+# NO_PROXYの処理（簡易版）
+def should_use_proxy(url):
+    """URLがプロキシを使用すべきかどうかを判定"""
+    if not proxies:
+        return False
+    
+    no_proxy_hosts = [host.strip() for host in NO_PROXY.split(",")]
+    for host in no_proxy_hosts:
+        if host in url:
+            return False
+    return True
 
 # --- 状態管理の初期化 ---
 def init_session_state():
@@ -29,32 +58,93 @@ def init_session_state():
         if key not in st.session_state:
             st.session_state[key] = value
 
+# --- 詳細エラーログ関数 ---
+def log_detailed_error(operation: str, error: Exception, response=None):
+    """詳細なエラー情報をログに記録"""
+    error_msg = f"❌ {operation} エラー:"
+    
+    # 基本エラー情報
+    error_msg += f"\n   - エラータイプ: {type(error).__name__}"
+    error_msg += f"\n   - エラーメッセージ: {str(error)}"
+    
+    # レスポンス情報がある場合
+    if response is not None:
+        error_msg += f"\n   - ステータスコード: {response.status_code}"
+        error_msg += f"\n   - レスポンスヘッダー: {dict(response.headers)}"
+        try:
+            error_msg += f"\n   - レスポンスボディ: {response.text}"
+        except:
+            error_msg += f"\n   - レスポンスボディ: 読み取り不可"
+    
+    # 接続エラーの詳細
+    if isinstance(error, requests.exceptions.ConnectionError):
+        error_msg += f"\n   - 接続先: {BACKEND_URL}"
+        error_msg += f"\n   - 接続エラー詳細: バックエンドサービスに接続できません"
+        error_msg += f"\n   - 確認事項:"
+        error_msg += f"\n     * バックエンドサービスが起動しているか"
+        error_msg += f"\n     * Dockerコンテナが正常に動作しているか"
+        error_msg += f"\n     * ネットワーク設定が正しいか"
+    elif isinstance(error, requests.exceptions.Timeout):
+        error_msg += f"\n   - タイムアウト詳細: リクエストがタイムアウトしました"
+    elif isinstance(error, requests.exceptions.HTTPError):
+        error_msg += f"\n   - HTTPエラー詳細: HTTPステータスエラー"
+    
+    # スタックトレース（開発用）
+    error_msg += f"\n   - スタックトレース: {traceback.format_exc()}"
+    
+    st.session_state.logs.append(error_msg)
+
 # --- バックエンドAPI通信 ---
 def get_config():
     """設定情報を取得"""
     try:
-        response = requests.get(f"{BACKEND_URL}/config")
+        st.session_state.logs.append(f"🔍 設定情報を取得中... URL: {BACKEND_URL}/config")
+        
+        # プロキシ設定を適用
+        request_proxies = proxies if should_use_proxy(BACKEND_URL) else None
+        response = requests.get(f"{BACKEND_URL}/config", timeout=10, proxies=request_proxies)
+        
         if response.status_code == 200:
             config = response.json()
             st.session_state.available_models = config.get("available_models", [])
             st.session_state.available_datasets = config.get("available_datasets", [])
-            st.session_state.logs.append("設定情報を取得しました")
+            st.session_state.logs.append("✅ 設定情報を取得しました")
         else:
-            st.session_state.logs.append(f"設定取得エラー: {response.status_code}")
+            log_detailed_error("設定取得", Exception(f"HTTP {response.status_code}"), response)
+            
+    except requests.exceptions.ConnectionError as e:
+        log_detailed_error("設定取得", e)
+    except requests.exceptions.Timeout as e:
+        log_detailed_error("設定取得", e)
+    except requests.exceptions.RequestException as e:
+        log_detailed_error("設定取得", e)
     except Exception as e:
-        st.session_state.logs.append(f"設定取得エラー: {str(e)}")
+        log_detailed_error("設定取得", e)
 
 def get_status():
     """現在のステータスを取得"""
     try:
-        response = requests.get(f"{BACKEND_URL}/status")
+        st.session_state.logs.append(f"🔍 ステータスを取得中... URL: {BACKEND_URL}/status")
+        
+        # プロキシ設定を適用
+        request_proxies = proxies if should_use_proxy(BACKEND_URL) else None
+        response = requests.get(f"{BACKEND_URL}/status", timeout=10, proxies=request_proxies)
+        
         if response.status_code == 200:
             status = response.json()
             st.session_state.is_training = status.get("is_training", False)
+            st.session_state.logs.append("✅ ステータスを取得しました")
         else:
-            st.session_state.logs.append(f"ステータス取得エラー: {response.status_code}")
+            log_detailed_error("ステータス取得", Exception(f"HTTP {response.status_code}"), response)
+            
+    except requests.exceptions.ConnectionError as e:
+        log_detailed_error("ステータス取得", e)
+    except requests.exceptions.Timeout as e:
+        log_detailed_error("ステータス取得", e)
+    except requests.exceptions.RequestException as e:
+        log_detailed_error("ステータス取得", e)
     except Exception as e:
-        st.session_state.logs.append(f"ステータス取得エラー: {str(e)}")
+        log_detailed_error("ステータス取得", e)
 
 def start_training(model_name: str, dataset_name: str, epochs: int, batch_size: int):
     """学習を開始"""
@@ -65,43 +155,85 @@ def start_training(model_name: str, dataset_name: str, epochs: int, batch_size: 
             "epochs": epochs,
             "batch_size": batch_size
         }
-        response = requests.post(f"{BACKEND_URL}/train/start", json=params)
+        st.session_state.logs.append(f"🚀 学習開始リクエスト送信中... URL: {BACKEND_URL}/train/start")
+        
+        # プロキシ設定を適用
+        request_proxies = proxies if should_use_proxy(BACKEND_URL) else None
+        response = requests.post(f"{BACKEND_URL}/train/start", json=params, timeout=30, proxies=request_proxies)
+        
         if response.status_code == 200:
             st.session_state.is_training = True
-            st.session_state.logs.append("学習を開始しました")
+            st.session_state.logs.append("✅ 学習を開始しました")
             return True
         else:
-            st.session_state.logs.append(f"学習開始エラー: {response.status_code}")
+            log_detailed_error("学習開始", Exception(f"HTTP {response.status_code}"), response)
             return False
+            
+    except requests.exceptions.ConnectionError as e:
+        log_detailed_error("学習開始", e)
+        return False
+    except requests.exceptions.Timeout as e:
+        log_detailed_error("学習開始", e)
+        return False
+    except requests.exceptions.RequestException as e:
+        log_detailed_error("学習開始", e)
+        return False
     except Exception as e:
-        st.session_state.logs.append(f"学習開始エラー: {str(e)}")
+        log_detailed_error("学習開始", e)
         return False
 
 def stop_training():
     """学習を停止"""
     try:
-        response = requests.post(f"{BACKEND_URL}/train/stop")
+        st.session_state.logs.append(f"🛑 学習停止リクエスト送信中... URL: {BACKEND_URL}/train/stop")
+        
+        # プロキシ設定を適用
+        request_proxies = proxies if should_use_proxy(BACKEND_URL) else None
+        response = requests.post(f"{BACKEND_URL}/train/stop", timeout=10, proxies=request_proxies)
+        
         if response.status_code == 200:
             st.session_state.is_training = False
-            st.session_state.logs.append("学習を停止しました")
+            st.session_state.logs.append("✅ 学習を停止しました")
             return True
         else:
-            st.session_state.logs.append(f"学習停止エラー: {response.status_code}")
+            log_detailed_error("学習停止", Exception(f"HTTP {response.status_code}"), response)
             return False
+            
+    except requests.exceptions.ConnectionError as e:
+        log_detailed_error("学習停止", e)
+        return False
+    except requests.exceptions.Timeout as e:
+        log_detailed_error("学習停止", e)
+        return False
+    except requests.exceptions.RequestException as e:
+        log_detailed_error("学習停止", e)
+        return False
     except Exception as e:
-        st.session_state.logs.append(f"学習停止エラー: {str(e)}")
+        log_detailed_error("学習停止", e)
         return False
 
 # --- WebSocketリスナー ---
 async def websocket_listener():
     """WebSocketでリアルタイム更新を受信"""
     try:
+        st.session_state.logs.append(f"🔌 WebSocket接続試行中... URL: {WEBSOCKET_URL}")
+        
+        # WebSocket接続の設定
+        # プロキシ経由でWebSocketに接続する必要がある場合は、
+        # websocketsライブラリのプロキシサポートを確認する必要があります
+        # 現在は直接接続を試行
         async with websockets.connect(WEBSOCKET_URL) as websocket:
+            st.session_state.logs.append("✅ WebSocket接続確立")
             async for message in websocket:
                 data = json.loads(message)
                 handle_ws_message(data)
     except Exception as e:
-        st.session_state.logs.append(f"WebSocket接続エラー: {str(e)}")
+        error_msg = f"❌ WebSocket接続エラー:"
+        error_msg += f"\n   - エラータイプ: {type(e).__name__}"
+        error_msg += f"\n   - エラーメッセージ: {str(e)}"
+        error_msg += f"\n   - 接続先: {WEBSOCKET_URL}"
+        error_msg += f"\n   - スタックトレース: {traceback.format_exc()}"
+        st.session_state.logs.append(error_msg)
 
 def handle_ws_message(data: Dict[str, Any]):
     type = data.get("type")

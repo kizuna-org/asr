@@ -20,6 +20,10 @@ services:
     command: streamlit run app.py --server.port 8501 --server.address 0.0.0.0
     ports:
       - "58080:8501"
+    environment:
+      - BACKEND_HOST=asr-api
+      - BACKEND_PORT=8000
+      - NO_PROXY=asr-api,localhost,127.0.0.1
     depends_on:
       - asr-api
 
