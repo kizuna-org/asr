@@ -148,6 +148,20 @@
 }
 ```
 
+#### 検証結果 (`validation_result`)
+
+各エポックの検証完了時に送信されます。
+
+```json
+{
+  "type": "validation_result",
+  "payload": {
+    "epoch": 1,
+    "val_loss": 0.0876
+  }
+}
+```
+
 #### 学習完了 (`status`)
 
 ```json

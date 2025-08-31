@@ -12,7 +12,7 @@ PORTS_TO_FORWARD=(58080 58081)
 
 # マスターセッションを開始する関数
 start_ssh_master_session() {
-    echo "SSHマスターセッションを開始します..."
+    echo "🔗 SSHマスターセッションを開始します..."
     # -f: バックグラウンド実行, -n:標準入力をリダイレクトしない, -N:リモートコマンドを実行しない
     # -M: マスターモード, -S: コントロールソケットのパス
     ssh -f -n -N -M -S "${CONTROL_PATH}" "${SSH_HOST}"
@@ -29,7 +29,7 @@ start_ssh_master_session() {
 # ポート転送を実行する関数
 forward_port() {
     local port=$1
-    echo "ポート${port}の転送を開始します..."
+    echo "🌐 ポート${port}の転送を開始します..."
     # -O forward: 既存のマスターセッションを使ってポート転送を追加
     ssh -S "${CONTROL_PATH}" -O forward -L "${port}:localhost:${port}" "${SSH_HOST}"
     
@@ -44,21 +44,21 @@ forward_port() {
 
 # クリーンアップ関数
 cleanup() {
-    echo "クリーンアップを実行しています..."
+    echo "🧹 クリーンアップを実行しています..."
     # マスター接続が存在すれば終了させる
     if ssh -S "${CONTROL_PATH}" -O check "${SSH_HOST}" >/dev/null 2>&1; then
-        echo "SSHマスターセッションを終了します..."
+        echo "🔌 SSHマスターセッションを終了します..."
         ssh -S "${CONTROL_PATH}" -O exit "${SSH_HOST}"
     fi
 
     # lsofでポートを強制的に解放 (念のため)
     for port in "${PORTS_TO_FORWARD[@]}"; do
         if lsof -ti:"${port}" > /dev/null 2>&1; then
-            echo "ポート${port}のプロセスを終了します..."
+            echo "🔄 ポート${port}のプロセスを終了します..."
             lsof -ti:"${port}" | xargs kill -9 2>/dev/null || true
         fi
     done
-    echo "クリーンアップが完了しました。"
+    echo "✅ クリーンアップが完了しました。"
 }
 
 # --- メイン処理 ---
@@ -71,28 +71,31 @@ cleanup
 sleep 1
 
 # [STEP 1] rsync, docker build, up などのデプロイ処理
-echo "rsyncでファイルをサーバーにコピーします。"
+echo "📁 rsyncでファイルをサーバーにコピーします。"
 rsync -avz \
   --exclude='__pycache__/' \
   --exclude='models/' \
   ./ ${SSH_HOST}:/home/students/r03i/r03i18/asr-test/asr/asr-test
 
-echo "コンテナを停止します。"
+echo "🛑 コンテナを停止します。"
 ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker compose down"
 
-echo "イメージをビルドします。"
-ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker build . -t asr-app"
+echo "🔨 バックエンドイメージをビルドします。"
+ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker build -f backend/Dockerfile . -t asr-app"
 
-echo "コンテナを起動します。"
+echo "🔨 フロントエンドイメージをビルドします。"
+ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker build -f frontend/Dockerfile . -t asr-frontend"
+
+echo "🚀 コンテナを起動します。"
 ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker compose up -d"
 
-echo "NVIDIA Container Runtimeの設定を確認します..."
+echo "🔍 NVIDIA Container Runtimeの設定を確認します..."
 ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && ./check_nvidia_runtime.sh"
 
-echo "コンテナ内でGPUチェックを実行します..."
+echo "🎮 コンテナ内でGPUチェックを実行します..."
 ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker compose exec asr-api python gpu_check.py"
 
-echo "デプロイが完了しました。"
+echo "✅ デプロイが完了しました。"
 echo ""
 
 # [STEP 2] SSHマスターセッションを開始
@@ -104,16 +107,16 @@ for port in "${PORTS_TO_FORWARD[@]}"; do
 done
 
 echo ""
-echo "全てのポート転送が完了しました。"
-echo "アプリケーションにアクセスする準備ができました。"
-echo "このスクリプトを終了する（Ctrl+C）と、ポート転送も自動的に停止します。"
+echo "🎉 全てのポート転送が完了しました。"
+echo "🌐 アプリケーションにアクセスする準備ができました。"
+echo "💡 このスクリプトを終了する（Ctrl+C）と、ポート転送も自動的に停止します。"
 echo ""
 
 # マスターセッションが終了するまで待機
-echo "ポート転送を実行中です。停止するには Ctrl+C を押してください..."
+echo "⏳ ポート転送を実行中です。停止するには Ctrl+C を押してください..."
 # -O check でマスター接続が生きているか監視
 while ssh -S "${CONTROL_PATH}" -O check "${SSH_HOST}" >/dev/null 2>&1; do
     sleep 5
 done
 
-echo "ポート転送セッションが終了しました。"
+echo "🔚 ポート転送セッションが終了しました。"

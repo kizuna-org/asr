@@ -5,17 +5,9 @@ import torchaudio
 
 from . import trainer, config_loader
 from .models.interface import BaseASRModel
+from .state import training_status, _model_cache
 
 router = APIRouter()
-
-# --- グローバルな状態管理 ---
-training_status = {
-    "is_training": False,
-}
-
-# --- モデルのキャッシュ ---
-# PoCのため、グローバル変数でモデルを保持
-_model_cache: Dict[str, BaseASRModel] = {}
 
 def get_model_for_inference(model_name: str) -> BaseASRModel:
     """推論用のモデルをロードまたはキャッシュから取得する"""

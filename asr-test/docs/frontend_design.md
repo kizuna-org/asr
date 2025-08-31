@@ -39,14 +39,19 @@ if 'is_training' not in st.session_state:
 if 'logs' not in st.session_state:
     st.session_state.logs = []
 if 'progress_df' not in st.session_state:
-    st.session_state.progress_df = pd.DataFrame(columns=['step', 'loss', 'lr'])
+    # 訓練の進捗（ステップごと）
+    st.session_state.progress_df = pd.DataFrame(columns=['step', 'loss', 'lr', 'epoch'])
+if 'validation_df' not in st.session_state:
+    # 検証結果（エポックごと）
+    st.session_state.validation_df = pd.DataFrame(columns=['epoch', 'val_loss'])
 if 'ws_client' not in st.session_state:
     st.session_state.ws_client = None
 ```
 
 -   `is_training` (bool): 学習が実行中かどうか。UIの有効/無効を切り替えるために使用。
 -   `logs` (list[str]): バックエンドから受信したログメッセージのリスト。
--   `progress_df` (pd.DataFrame): グラフ描画用のデータ。`step`, `loss`, `lr` などのカラムを持つ。
+-   `progress_df` (pd.DataFrame): 訓練ロスなどをステップごとに記録するデータフレーム。
+-   `validation_df` (pd.DataFrame): 検証ロスをエポックごとに記録するデータフレーム。
 -   `ws_client` (WebSocketClient): WebSocketクライアントのインスタンス。接続管理に使用。
 
 ## 3. バックエンドとの通信フロー
@@ -101,6 +106,8 @@ async def websocket_listener():
 def handle_ws_message(data):
     if data['type'] == 'progress':
         # st.session_state.progress_df にデータを追加
+    elif data['type'] == 'validation_result':
+        # st.session_state.validation_df にデータを追加
     elif data['type'] == 'log':
         # st.session_state.logs にメッセージを追加
     elif data['type'] == 'status' and data['payload']['status'] in ['completed', 'stopped']:

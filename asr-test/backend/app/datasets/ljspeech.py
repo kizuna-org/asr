@@ -5,32 +5,58 @@ from datasets import load_dataset
 from transformers import T5Tokenizer
 from typing import Dict, Any
 
+import torch
+import torchaudio
+from datasets import load_dataset
+from transformers import T5Tokenizer
+from typing import Dict, Any
+from torch.utils.data import Subset
+
 from .interface import BaseASRDataset
 
 class LJSpeechDataset(BaseASRDataset):
-    """LJSpeechデータセットを扱うクラス"""
+    """LJSpeechデータセットを扱うクラス。訓練/検証スプリットを自動で作成する。"""
 
     def __init__(self, config: Dict[str, Any], split: str = 'train'):
         self.tokenizer = T5Tokenizer.from_pretrained("google/flan-t5-base")
-        super().__init__(config, split)
+        self.config = config
+        self.split = split
+        self._prepare_data()
 
-    def _load_data(self):
-        """Hugging Faceのdatasetsライブラリを使ってデータをロードする"""
-        # LJSpeechはデフォルトでtrainスプリットしかないので、split引数は無視する
-        dataset = load_dataset("ljspeech", split='train')
-        # デバッグ用に小さなサブセットを使う場合は以下を有効化
-        # return dataset.select(range(100))
-        return dataset
+    def _prepare_data(self):
+        """データをロードし、指定されたsplitに応じてデータセットを準備する"""
+        full_dataset = load_dataset("ljspeech", split='train')
+        
+        # 検証セットの割合と乱数シードを設定
+        val_size = self.config.get("validation_size", 0.05)
+        random_seed = self.config.get("random_seed", 42)
+
+        # 訓練セットと検証セットに分割
+        train_len = int(len(full_dataset) * (1.0 - val_size))
+        val_len = len(full_dataset) - train_len
+        train_subset, val_subset = torch.utils.data.random_split(
+            full_dataset, 
+            [train_len, val_len],
+            generator=torch.Generator().manual_seed(random_seed)
+        )
+
+        if self.split == 'train':
+            self.data = train_subset
+        else: # validation
+            self.data = val_subset
 
     def __len__(self) -> int:
         return len(self.data)
 
     def __getitem__(self, idx: int) -> Dict:
-        item = self.data[idx]
+        # Subsetから元のアイテムを取得
+        item = self.data.dataset[self.data.indices[idx]]
+        
         waveform = torch.tensor(item["audio"]["array"], dtype=torch.float32)
         sample_rate = item["audio"]["sampling_rate"]
 
-        # 1. 音声の前処理
+        # ... (以降の処理は変更なし) ...
+
         waveform = self._preprocess_audio(waveform, sample_rate)
 
         # 2. テキストの前処理
