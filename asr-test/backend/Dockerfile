@@ -15,7 +15,7 @@ ENV HTTPS_PROXY=${HTTPS_PROXY}
 ENV NO_PROXY=${NO_PROXY}
 
 RUN echo "Acquire::http::Proxy \"${HTTP_PROXY}\";" > /etc/apt/apt.conf.d/01proxy \
-    && echo "Acquire::https::Proxy \"${PROXY_URL}\";" >> /etc/apt/apt.conf.d/01proxy
+    && echo "Acquire::https::Proxy "${HTTPS_PROXY}";" >> /etc/apt/apt.conf.d/01proxy
 
 # Pythonとpipをインストール
 RUN apt-get update && apt-get install -y \
