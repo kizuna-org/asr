@@ -19,12 +19,14 @@ PORT_BACKEND=58081
 DO_BUILD=1
 DO_PULL=0
 DO_DOWN=1
+USE_PROXY=0
 
 print_usage() {
-    echo "Usage: $0 [--no-build] [--pull] [--no-down] [--help]"
+    echo "Usage: $0 [--no-build] [--pull] [--no-down] [--use-proxy] [--help]"
     echo "  --no-build  Skip docker build steps"
     echo "  --pull      Run 'docker compose pull' before up"
     echo "  --no-down   Do not run 'docker compose down' before up"
+    echo "  --use-proxy Pass HTTP(S)_PROXY/NO_PROXY as build-args"
     echo "  --help      Show this help"
 }
 
@@ -38,6 +40,9 @@ for arg in "$@"; do
             ;;
         --no-down)
             DO_DOWN=0
+            ;;
+        --use-proxy)
+            USE_PROXY=1
             ;;
         --help|-h)
             print_usage
@@ -78,9 +83,11 @@ if [ "${DO_DOWN}" -eq 1 ]; then
 fi
 
 BUILD_ARGS=()
-if [ -n "${HTTP_PROXY:-}" ]; then BUILD_ARGS+=(--build-arg "HTTP_PROXY=${HTTP_PROXY}"); fi
-if [ -n "${HTTPS_PROXY:-}" ]; then BUILD_ARGS+=(--build-arg "HTTPS_PROXY=${HTTPS_PROXY}"); fi
-if [ -n "${NO_PROXY:-}" ]; then BUILD_ARGS+=(--build-arg "NO_PROXY=${NO_PROXY}"); fi
+if [ "${USE_PROXY}" -eq 1 ]; then
+    if [ -n "${HTTP_PROXY:-}" ]; then BUILD_ARGS+=(--build-arg "HTTP_PROXY=${HTTP_PROXY}"); fi
+    if [ -n "${HTTPS_PROXY:-}" ]; then BUILD_ARGS+=(--build-arg "HTTPS_PROXY=${HTTPS_PROXY}"); fi
+    if [ -n "${NO_PROXY:-}" ]; then BUILD_ARGS+=(--build-arg "NO_PROXY=${NO_PROXY}"); fi
+fi
 
 if [ "${DO_BUILD}" -eq 1 ]; then
     echo "🔨 Building backend image: ${IMAGE_BACKEND}"
@@ -119,8 +126,9 @@ echo "🌐 Frontend:  http://localhost:${PORT_FRONTEND}"
 echo "🔗 Backend:   http://localhost:${PORT_BACKEND}/docs"
 echo ""
 echo "💡 Notes:"
-echo "- This setup uses the CUDA base image for backend. It may run without GPU, but GPU features will be unavailable."
-echo "- If you have NVIDIA GPU and runtime installed, Docker may utilize it automatically via compose settings."
+echo "- Default build does NOT pass host proxy. Use --use-proxy to forward HTTP(S)_PROXY/NO_PROXY."
+echo "- Backend uses CUDA base image. It can run without GPU, but GPU features will be unavailable."
+echo "- If you have NVIDIA runtime installed, Compose may utilize it automatically."
 echo ""
 echo "✅ Done. Use 'docker compose -f ${COMPOSE_FILE} logs -f' to tail logs."
 

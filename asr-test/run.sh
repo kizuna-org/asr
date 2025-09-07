@@ -81,10 +81,10 @@ echo "🛑 コンテナを停止します。"
 ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker compose down"
 
 echo "🔨 バックエンドイメージをビルドします。"
-ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker build -f backend/Dockerfile . -t asr-app"
+ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker build -f backend/Dockerfile . -t asr-app --build-arg HTTP_PROXY=\"http://http-p.srv.cc.suzuka-ct.ac.jp:8080\" --build-arg HTTPS_PROXY=\"http://http-p.srv.cc.suzuka-ct.ac.jp:8080\" --build-arg NO_PROXY=\"localhost,127.0.0.1,asr-api\""
 
 echo "🔨 フロントエンドイメージをビルドします。"
-ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker build -f frontend/Dockerfile . -t asr-frontend"
+ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker build -f frontend/Dockerfile . -t asr-frontend --build-arg HTTP_PROXY=\"http://http-p.srv.cc.suzuka-ct.ac.jp:8080\" --build-arg HTTPS_PROXY=\"http://http-p.srv.cc.suzuka-ct.ac.jp:8080\" --build-arg NO_PROXY=\"localhost,127.0.0.1,asr-api\""
 
 echo "🚀 コンテナを起動します。"
 ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker compose up -d"
