@@ -78,7 +78,7 @@ rsync -avz \
   ./ ${SSH_HOST}:/home/students/r03i/r03i18/asr-test/asr/asr-test
 
 echo "🛑 コンテナを停止します。"
-ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker compose down"
+ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker compose -f docker-compose.yml -f docker-compose.gpu.yml down"
 
 echo "🔨 バックエンドイメージをビルドします。"
 ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker build -f backend/Dockerfile . -t asr-app --build-arg HTTP_PROXY=\"http://http-p.srv.cc.suzuka-ct.ac.jp:8080\" --build-arg HTTPS_PROXY=\"http://http-p.srv.cc.suzuka-ct.ac.jp:8080\" --build-arg NO_PROXY=\"localhost,127.0.0.1,asr-api\""
@@ -87,13 +87,13 @@ echo "🔨 フロントエンドイメージをビルドします。"
 ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker build -f frontend/Dockerfile . -t asr-frontend --build-arg HTTP_PROXY=\"http://http-p.srv.cc.suzuka-ct.ac.jp:8080\" --build-arg HTTPS_PROXY=\"http://http-p.srv.cc.suzuka-ct.ac.jp:8080\" --build-arg NO_PROXY=\"localhost,127.0.0.1,asr-api\""
 
 echo "🚀 コンテナを起動します。"
-ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker compose up -d"
+ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d"
 
 echo "🔍 NVIDIA Container Runtimeの設定を確認します..."
 ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && ./check_nvidia_runtime.sh"
 
 echo "🎮 コンテナ内でGPUチェックを実行します..."
-ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker compose exec asr-api python gpu_check.py"
+ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker compose -f docker-compose.yml -f docker-compose.gpu.yml exec asr-api python gpu_check.py"
 
 echo "✅ デプロイが完了しました。"
 echo ""

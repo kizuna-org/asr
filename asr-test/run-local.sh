@@ -9,6 +9,7 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 COMPOSE_FILE="${PROJECT_DIR}/docker-compose.yml"
+COMPOSE_GPU_FILE="${PROJECT_DIR}/docker-compose.gpu.yml"
 
 IMAGE_BACKEND="asr-app"
 IMAGE_FRONTEND="asr-frontend"
@@ -20,13 +21,15 @@ DO_BUILD=1
 DO_PULL=0
 DO_DOWN=1
 USE_PROXY=0
+USE_GPU=0
 
 print_usage() {
-    echo "Usage: $0 [--no-build] [--pull] [--no-down] [--use-proxy] [--help]"
+    echo "Usage: $0 [--no-build] [--pull] [--no-down] [--use-proxy] [--gpu] [--help]"
     echo "  --no-build  Skip docker build steps"
     echo "  --pull      Run 'docker compose pull' before up"
     echo "  --no-down   Do not run 'docker compose down' before up"
     echo "  --use-proxy Pass HTTP(S)_PROXY/NO_PROXY as build-args"
+    echo "  --gpu       Force GPU mode (use docker-compose.gpu.yml)"
     echo "  --help      Show this help"
 }
 
@@ -43,6 +46,9 @@ for arg in "$@"; do
             ;;
         --use-proxy)
             USE_PROXY=1
+            ;;
+        --gpu)
+            USE_GPU=1
             ;;
         --help|-h)
             print_usage
@@ -77,9 +83,35 @@ if [ ! -f "${COMPOSE_FILE}" ]; then
     exit 1
 fi
 
+# GPU環境の自動検出
+if [ "${USE_GPU}" -eq 0 ]; then
+    if command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi >/dev/null 2>&1; then
+        echo "🔍 NVIDIA GPU detected, enabling GPU mode"
+        USE_GPU=1
+    elif docker info 2>/dev/null | grep -q "nvidia"; then
+        echo "🔍 NVIDIA Container Runtime detected, enabling GPU mode"
+        USE_GPU=1
+    else
+        echo "💻 No GPU detected, running in CPU mode"
+    fi
+fi
+
+# Composeファイルの選択
+if [ "${USE_GPU}" -eq 1 ]; then
+    if [ ! -f "${COMPOSE_GPU_FILE}" ]; then
+        echo "❌ docker-compose.gpu.yml not found at ${COMPOSE_GPU_FILE}" >&2
+        exit 1
+    fi
+    COMPOSE_FILES="-f ${COMPOSE_FILE} -f ${COMPOSE_GPU_FILE}"
+    echo "🚀 Using GPU-enabled compose configuration"
+else
+    COMPOSE_FILES="-f ${COMPOSE_FILE}"
+    echo "🚀 Using CPU-only compose configuration"
+fi
+
 if [ "${DO_DOWN}" -eq 1 ]; then
     echo "🛑 Stopping existing containers (if any)..."
-    docker compose -f "${COMPOSE_FILE}" down --remove-orphans || true
+    docker compose ${COMPOSE_FILES} down --remove-orphans || true
 fi
 
 BUILD_ARGS=()
@@ -109,17 +141,17 @@ fi
 
 if [ "${DO_PULL}" -eq 1 ]; then
     echo "📥 Pulling service images as requested..."
-    docker compose -f "${COMPOSE_FILE}" pull
+    docker compose ${COMPOSE_FILES} pull
 fi
 
 echo "🚀 Starting services with Docker Compose..."
-docker compose -f "${COMPOSE_FILE}" up -d
+docker compose ${COMPOSE_FILES} up -d
 
 echo "⏳ Waiting for containers to become healthy (best-effort)..."
 sleep 2
 
 echo "📋 Current service status:"
-docker compose -f "${COMPOSE_FILE}" ps
+docker compose ${COMPOSE_FILES} ps
 
 echo ""
 echo "🌐 Frontend:  http://localhost:${PORT_FRONTEND}"
@@ -127,9 +159,9 @@ echo "🔗 Backend:   http://localhost:${PORT_BACKEND}/docs"
 echo ""
 echo "💡 Notes:"
 echo "- Default build does NOT pass host proxy. Use --use-proxy to forward HTTP(S)_PROXY/NO_PROXY."
+echo "- GPU mode is auto-detected. Use --gpu to force GPU mode or run without GPU detection."
 echo "- Backend uses CUDA base image. It can run without GPU, but GPU features will be unavailable."
-echo "- If you have NVIDIA runtime installed, Compose may utilize it automatically."
 echo ""
-echo "✅ Done. Use 'docker compose -f ${COMPOSE_FILE} logs -f' to tail logs."
+echo "✅ Done. Use 'docker compose ${COMPOSE_FILES} logs -f' to tail logs."
 
 

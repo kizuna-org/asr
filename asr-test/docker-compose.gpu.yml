@@ -7,7 +7,13 @@ services:
     volumes:
       - ./data:/app/data
       - ./checkpoints:/app/checkpoints
-      # GPU設定は docker-compose.gpu.yml で上書き
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   frontend:
     image: asr-frontend # run.sh の `docker build -f frontend/Dockerfile . -t asr-frontend` でビルドされることを想定
