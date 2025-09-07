@@ -8,6 +8,7 @@ from .models.interface import BaseASRModel
 from .state import training_status, _model_cache
 
 router = APIRouter()
+print(f"DEBUG: API router created")  # デバッグ用
 
 def get_model_for_inference(model_name: str) -> BaseASRModel:
     """推論用のモデルをロードまたはキャッシュから取得する"""
@@ -82,3 +83,14 @@ def get_config():
 def get_status():
     """現在の学習ステータスを返す"""
     return {"is_training": training_status["is_training"]}
+
+@router.get("/progress", summary="学習進捗を取得")
+def get_progress():
+    """現在の学習進捗を返す"""
+    print(f"DEBUG: /progress endpoint called, training_status: {training_status}")  # デバッグ用
+    return training_status
+
+@router.get("/test", summary="テスト用エンドポイント")
+def test_endpoint():
+    """テスト用のエンドポイント"""
+    return {"message": "Test endpoint is working", "endpoints": ["/config", "/status", "/progress", "/train/start", "/train/stop"]}

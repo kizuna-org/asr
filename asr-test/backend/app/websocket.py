@@ -28,10 +28,15 @@ class ConnectionManager:
 
     def broadcast_sync(self, message: Dict):
         """同期関数からブロードキャストを実行するためのラッパー"""
-        if self.loop.is_running():
-            asyncio.run_coroutine_threadsafe(self.broadcast(message), self.loop)
-        else:
-            self.loop.run_until_complete(self.broadcast(message))
+        try:
+            if self.loop.is_running():
+                asyncio.run_coroutine_threadsafe(self.broadcast(message), self.loop)
+            else:
+                self.loop.run_until_complete(self.broadcast(message))
+        except Exception as e:
+            # エラーが発生しても学習プロセスを継続する
+            print(f"WebSocket broadcast error: {e}")
+            pass
 
 # ConnectionManagerのインスタンスを作成
 manager = ConnectionManager()

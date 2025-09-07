@@ -7,6 +7,7 @@ import json
 from typing import Dict, Any
 import traceback
 import os
+import threading
 
 # --- 設定 ---
 # 環境変数からバックエンドURLを取得、デフォルトはローカルホスト
@@ -51,7 +52,7 @@ def init_session_state():
         "available_datasets": [],
         "current_progress": 0,
         "progress_text": "待機中",
-        "websocket_task": None,
+        "last_progress_update": 0,
         "initial_load": False
     }
     for key, value in defaults.items():
@@ -212,41 +213,84 @@ def stop_training():
         log_detailed_error("学習停止", e)
         return False
 
-# --- WebSocketリスナー ---
-async def websocket_listener():
-    """WebSocketでリアルタイム更新を受信"""
+# --- 進捗取得関数 ---
+def get_training_progress():
+    """バックエンドから学習進捗を取得"""
     try:
-        st.session_state.logs.append(f"🔌 WebSocket接続試行中... URL: {WEBSOCKET_URL}")
+        # プロキシ設定を適用
+        request_proxies = proxies if should_use_proxy(BACKEND_URL) else None
+        response = requests.get(f"{BACKEND_URL}/progress", timeout=5, proxies=request_proxies)
         
-        # WebSocket接続の設定
-        # プロキシ経由でWebSocketに接続する必要がある場合は、
-        # websocketsライブラリのプロキシサポートを確認する必要があります
-        # 現在は直接接続を試行
-        async with websockets.connect(WEBSOCKET_URL) as websocket:
-            st.session_state.logs.append("✅ WebSocket接続確立")
-            async for message in websocket:
-                data = json.loads(message)
-                handle_ws_message(data)
+        if response.status_code == 200:
+            progress_data = response.json()
+            return progress_data
+        elif response.status_code == 404:
+            # 404エラーの場合は進捗エンドポイントが存在しない可能性
+            st.session_state.logs.append(f"⚠️ 進捗エンドポイントが見つかりません: {response.status_code}")
+            return None
+        else:
+            st.session_state.logs.append(f"⚠️ 進捗取得エラー: HTTP {response.status_code}")
+            return None
+    except requests.exceptions.ConnectionError as e:
+        st.session_state.logs.append(f"❌ バックエンド接続エラー: {e}")
+        return None
+    except requests.exceptions.Timeout as e:
+        st.session_state.logs.append(f"❌ 進捗取得タイムアウト: {e}")
+        return None
     except Exception as e:
-        error_msg = f"❌ WebSocket接続エラー:"
-        error_msg += f"\n   - エラータイプ: {type(e).__name__}"
-        error_msg += f"\n   - エラーメッセージ: {str(e)}"
-        error_msg += f"\n   - 接続先: {WEBSOCKET_URL}"
-        error_msg += f"\n   - スタックトレース: {traceback.format_exc()}"
-        st.session_state.logs.append(error_msg)
+        st.session_state.logs.append(f"❌ 進捗取得エラー: {e}")
+        return None
 
-def handle_ws_message(data: Dict[str, Any]):
-    type = data.get("type")
-    payload = data.get("payload", {})
-    if type == "log":
-        st.session_state.logs.append(f"[BACKEND] {payload.get('message')}")
-    elif type == "progress":
-        st.session_state.progress_df.loc[len(st.session_state.progress_df)] = {"epoch": payload["epoch"], "step": payload["step"], "loss": payload["loss"]}
-        st.session_state.lr_df.loc[len(st.session_state.lr_df)] = {"step": payload["step"], "learning_rate": payload["learning_rate"]}
-        st.session_state.current_progress = payload['step'] / payload['total_steps']
-        st.session_state.progress_text = f"Epoch {payload['epoch']}/{payload['total_epochs']}, Step {payload['step']}/{payload['total_steps']}"
-    elif type == "validation_result":
-        st.session_state.validation_df.loc[len(st.session_state.validation_df)] = payload
+def update_progress_from_backend():
+    """バックエンドから進捗を取得して更新"""
+    progress_data = get_training_progress()
+    if progress_data:
+        # 進捗データを更新
+        if "current_epoch" in progress_data and "current_step" in progress_data:
+            st.session_state.current_progress = progress_data.get("progress", 0)
+            st.session_state.progress_text = f"Epoch {progress_data['current_epoch']}/{progress_data.get('total_epochs', '?')}, Step {progress_data['current_step']}/{progress_data.get('total_steps', '?')}"
+        
+        # ロスデータを更新（重複を避ける）
+        if "current_loss" in progress_data and progress_data.get("current_step", 0) > 0:
+            current_step = progress_data.get("current_step", 0)
+            # 既に同じステップのデータがあるかチェック
+            if not st.session_state.progress_df.empty:
+                last_step = st.session_state.progress_df.iloc[-1]["step"]
+                if current_step > last_step:
+                    st.session_state.progress_df.loc[len(st.session_state.progress_df)] = {
+                        "epoch": progress_data.get("current_epoch", 0),
+                        "step": current_step,
+                        "loss": progress_data["current_loss"]
+                    }
+            else:
+                st.session_state.progress_df.loc[len(st.session_state.progress_df)] = {
+                    "epoch": progress_data.get("current_epoch", 0),
+                    "step": current_step,
+                    "loss": progress_data["current_loss"]
+                }
+        
+        # 学習率データを更新（重複を避ける）
+        if "current_learning_rate" in progress_data and progress_data.get("current_step", 0) > 0:
+            current_step = progress_data.get("current_step", 0)
+            # 既に同じステップのデータがあるかチェック
+            if not st.session_state.lr_df.empty:
+                last_step = st.session_state.lr_df.iloc[-1]["step"]
+                if current_step > last_step:
+                    st.session_state.lr_df.loc[len(st.session_state.lr_df)] = {
+                        "step": current_step,
+                        "learning_rate": progress_data["current_learning_rate"]
+                    }
+            else:
+                st.session_state.lr_df.loc[len(st.session_state.lr_df)] = {
+                    "step": current_step,
+                    "learning_rate": progress_data["current_learning_rate"]
+                }
+        
+        # ログメッセージを更新
+        if "latest_logs" in progress_data:
+            for log in progress_data["latest_logs"]:
+                if log not in st.session_state.logs:
+                    st.session_state.logs.append(log)
 
 # --- UI描画 ---
 st.set_page_config(layout="wide")
@@ -331,6 +375,17 @@ with log_container:
     for log in st.session_state.logs[-50:]:  # 最新50件を表示
         st.text(log)
 
-# 自動更新
+# 学習中の進捗更新
 if st.session_state.is_training:
+    # 進捗更新の頻度を制限（5秒ごと）
+    import time
+    current_time = time.time()
+    if "last_progress_update" not in st.session_state:
+        st.session_state.last_progress_update = 0
+    
+    if current_time - st.session_state.last_progress_update >= 5:
+        update_progress_from_backend()
+        st.session_state.last_progress_update = current_time
+    
+    # 学習中は定期的に更新
     st.rerun()
