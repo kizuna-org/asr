@@ -67,15 +67,17 @@ def init_session_state():
             st.session_state[key] = value
 
 # --- 推論API呼び出し ---
-def run_inference(file_bytes: bytes, filename: str, model_name: str) -> str:
-    """音声ファイルをアップロードして推論を実行し、文字起こしを返す"""
+def run_inference(file_bytes: bytes, filename: str, model_name: str) -> Dict[str, Any]:
+    """音声ファイルをアップロードして推論を実行し、結果と推論時間(ms)を返す"""
     try:
+        import time
         st.session_state.logs.append(f"🧪 推論リクエスト送信中... URL: {BACKEND_URL}/inference")
         request_proxies = proxies if should_use_proxy(BACKEND_URL) else None
         files = {
             "file": (filename, file_bytes, "application/octet-stream"),
         }
         params = {"model_name": model_name} if model_name else None
+        start_time = time.perf_counter()
         response = requests.post(
             f"{BACKEND_URL}/inference",
             files=files,
@@ -83,17 +85,21 @@ def run_inference(file_bytes: bytes, filename: str, model_name: str) -> str:
             timeout=120,
             proxies=request_proxies,
         )
+        elapsed_ms = (time.perf_counter() - start_time) * 1000.0
         response.raise_for_status()
         data = response.json()
         transcription = data.get("transcription", "")
-        st.session_state.logs.append("✅ 推論が完了しました")
-        return transcription
+        # バックエンドが時間を返している場合は優先
+        server_elapsed_ms = data.get("inference_time_ms") or data.get("elapsed_ms")
+        total_ms = float(server_elapsed_ms) if server_elapsed_ms is not None else elapsed_ms
+        st.session_state.logs.append(f"✅ 推論が完了しました (⏱ {total_ms:.0f} ms)")
+        return {"transcription": transcription, "inference_time_ms": total_ms}
     except requests.exceptions.RequestException as e:
         log_detailed_error("推論実行", e, getattr(e, "response", None))
-        return ""
+        return {"transcription": "", "inference_time_ms": None}
     except Exception as e:
         log_detailed_error("推論実行", e)
-        return ""
+        return {"transcription": "", "inference_time_ms": None}
 
 # --- 詳細エラーログ関数 ---
 def log_detailed_error(operation: str, error: Exception, response=None):
@@ -506,9 +512,13 @@ with inf_col2:
             st.warning("音声ファイルを選択してください")
         else:
             with st.spinner("推論を実行中..."):
-                transcription = run_inference(uploaded.getvalue(), uploaded.name, model_name)
+                result = run_inference(uploaded.getvalue(), uploaded.name, model_name)
+                transcription = result.get("transcription", "")
+                infer_ms = result.get("inference_time_ms")
                 if transcription:
                     st.success("推論完了")
+                    if infer_ms is not None:
+                        st.metric(label="推論時間", value=f"{infer_ms:.0f} ms")
                     st.text_area("文字起こし結果", value=transcription, height=120)
                 else:
                     st.error("推論に失敗しました。ログを確認してください。")
