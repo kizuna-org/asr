@@ -161,7 +161,7 @@ def get_status():
         log_detailed_error("ステータス取得", e)
         st.session_state.consecutive_errors += 1
 
-def start_training(model_name: str, dataset_name: str, epochs: int, batch_size: int):
+def start_training(model_name: str, dataset_name: str, epochs: int, batch_size: int, lightweight: bool = False, limit_samples: int = 0):
     """学習を開始"""
     try:
         params = {
@@ -170,6 +170,11 @@ def start_training(model_name: str, dataset_name: str, epochs: int, batch_size: 
             "epochs": epochs,
             "batch_size": batch_size
         }
+        # 軽量モード/サンプル制限の付与
+        if lightweight:
+            params["lightweight"] = True
+        if isinstance(limit_samples, int) and limit_samples > 0:
+            params["limit_samples"] = int(limit_samples)
         st.session_state.logs.append(f"🚀 学習開始リクエスト送信中... URL: {BACKEND_URL}/train/start")
         
         # プロキシ設定を適用
@@ -431,13 +436,15 @@ with st.sidebar:
     # 学習パラメータ
     epochs = st.number_input("エポック数", min_value=1, value=10)
     batch_size = st.number_input("バッチサイズ", min_value=1, value=4)
+    lightweight = st.checkbox("軽量(先頭10件)でテスト実行", value=False)
+    limit_samples = st.number_input("使用サンプル数を制限 (0で無効)", min_value=0, value=0)
     
     # 学習開始/停止ボタン
     col1, col2 = st.columns(2)
     with col1:
         if st.button("学習開始", disabled=st.session_state.is_training):
             if model_name and dataset_name:
-                success = start_training(model_name, dataset_name, epochs, batch_size)
+                success = start_training(model_name, dataset_name, epochs, batch_size, lightweight=lightweight, limit_samples=limit_samples)
                 if not success:
                     st.error("学習の開始に失敗しました。ログを確認してください。")
             else:

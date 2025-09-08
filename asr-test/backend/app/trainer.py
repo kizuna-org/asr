@@ -103,8 +103,20 @@ def start_training(params: Dict):
         ModelClass = getattr(importlib.import_module(f".models.{model_name}", "app"), f"{model_name.capitalize()}ASRModel")
         collate_fn = getattr(importlib.import_module(f".datasets.{dataset_name}", "app"), "collate_fn")
 
-        train_dataset = DatasetClass(dataset_config, split='train')
-        valid_dataset = DatasetClass(dataset_config, split='validation')
+        # 軽量実行フラグ/サンプル制限の反映
+        # params: { lightweight: bool, limit_samples: int }
+        dataset_overrides = {}
+        if params.get("lightweight"):
+            dataset_overrides["max_samples"] = 10
+        if isinstance(params.get("limit_samples"), int) and params.get("limit_samples") > 0:
+            dataset_overrides["max_samples"] = params.get("limit_samples")
+
+        # 設定をコピーしてオーバーライド（検証は常に同数で十分軽いので同じ制限を適用）
+        train_ds_conf = {**dataset_config, **dataset_overrides}
+        valid_ds_conf = {**dataset_config, **dataset_overrides}
+
+        train_dataset = DatasetClass(train_ds_conf, split='train')
+        valid_dataset = DatasetClass(valid_ds_conf, split='validation')
         train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=training_config['batch_size'], shuffle=True, collate_fn=collate_fn)
         valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=training_config['batch_size'], shuffle=False, collate_fn=collate_fn)
 

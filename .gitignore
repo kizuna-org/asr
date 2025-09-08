@@ -185,3 +185,5 @@ scripts/datasets/
 scripts/outputs/
 *.tfrecord-*
 data/
+
+checkpoints/

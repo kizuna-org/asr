@@ -70,6 +70,11 @@ class LJSpeechDataset(BaseASRDataset):
         else:
             chosen = [entries[i] for i in indices[split_idx:]]
 
+        # 軽量テスト用: 先頭から最大 max_samples 件に制限
+        max_samples = self.config.get("max_samples") or self.config.get("limit_samples")
+        if isinstance(max_samples, int) and max_samples > 0:
+            chosen = chosen[:max_samples]
+
         return chosen
 
     def __len__(self) -> int:
