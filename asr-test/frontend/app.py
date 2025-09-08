@@ -223,6 +223,35 @@ def stop_training():
         log_detailed_error("学習停止", e)
         return False
 
+def download_dataset(dataset_name: str):
+    """データセットをダウンロード"""
+    try:
+        st.session_state.logs.append(f"📥 データセットダウンロード開始: {dataset_name}")
+        
+        # プロキシ設定を適用
+        request_proxies = proxies if should_use_proxy(BACKEND_URL) else None
+        response = requests.post(f"{BACKEND_URL}/dataset/download", json={"dataset_name": dataset_name}, timeout=300, proxies=request_proxies)
+        
+        if response.status_code == 200:
+            st.session_state.logs.append(f"✅ データセット '{dataset_name}' のダウンロードが完了しました")
+            return True
+        else:
+            log_detailed_error("データセットダウンロード", Exception(f"HTTP {response.status_code}"), response)
+            return False
+            
+    except requests.exceptions.ConnectionError as e:
+        log_detailed_error("データセットダウンロード", e)
+        return False
+    except requests.exceptions.Timeout as e:
+        log_detailed_error("データセットダウンロード", e)
+        return False
+    except requests.exceptions.RequestException as e:
+        log_detailed_error("データセットダウンロード", e)
+        return False
+    except Exception as e:
+        log_detailed_error("データセットダウンロード", e)
+        return False
+
 # --- 進捗取得関数 ---
 def get_training_progress():
     """バックエンドから学習進捗を取得"""
@@ -359,6 +388,20 @@ with st.sidebar:
         index=0 if st.session_state.available_datasets else None
     )
     
+    # データセットダウンロードボタン
+    if st.button("データセットをダウンロード", disabled=st.session_state.is_training):
+        if dataset_name:
+            with st.spinner(f"データセット '{dataset_name}' をダウンロード中..."):
+                success = download_dataset(dataset_name)
+                if success:
+                    st.success(f"データセット '{dataset_name}' のダウンロードが完了しました")
+                    # 設定を再取得して最新の状態を反映
+                    get_config()
+                else:
+                    st.error(f"データセット '{dataset_name}' のダウンロードに失敗しました")
+        else:
+            st.error("データセットを選択してください")
+    
     # 学習パラメータ
     epochs = st.number_input("エポック数", min_value=1, value=10)
     batch_size = st.number_input("バッチサイズ", min_value=1, value=32)
@@ -368,7 +411,9 @@ with st.sidebar:
     with col1:
         if st.button("学習開始", disabled=st.session_state.is_training):
             if model_name and dataset_name:
-                start_training(model_name, dataset_name, epochs, batch_size)
+                success = start_training(model_name, dataset_name, epochs, batch_size)
+                if not success:
+                    st.error("学習の開始に失敗しました。ログを確認してください。")
             else:
                 st.error("モデルとデータセットを選択してください")
     

@@ -34,9 +34,15 @@ def start_training(params: Dict, background_tasks: BackgroundTasks):
         raise HTTPException(status_code=409, detail="Training is already in progress.")
     
     model_name = params.get("model_name")
+    dataset_name = params.get("dataset_name")
+    
     if not model_name or not config_loader.get_model_config(model_name):
         raise HTTPException(status_code=400, detail=f"Model '{model_name}' is not a valid model name.")
+    
+    if not dataset_name or not config_loader.get_dataset_config(dataset_name):
+        raise HTTPException(status_code=400, detail=f"Dataset '{dataset_name}' is not a valid dataset name.")
 
+    print(f"DEBUG: Starting training with params: {params}")
     background_tasks.add_task(trainer.start_training, params)
     return {"message": "Training started in background."}
 
@@ -90,7 +96,38 @@ def get_progress():
     print(f"DEBUG: /progress endpoint called, training_status: {training_status}")  # デバッグ用
     return training_status
 
+@router.post("/dataset/download", summary="データセットダウンロード")
+def download_dataset(params: Dict):
+    """指定されたデータセットをダウンロードする"""
+    dataset_name = params.get("dataset_name")
+    try:
+        if dataset_name == "ljspeech":
+            # LJSpeechデータセットのダウンロード処理
+            import subprocess
+            import os
+            
+            data_dir = "/app/data"
+            ljspeech_dir = os.path.join(data_dir, "ljspeech")
+            
+            if not os.path.exists(ljspeech_dir):
+                os.makedirs(ljspeech_dir, exist_ok=True)
+            
+            # ダウンロードスクリプトを実行
+            download_script = "/app/download_ljspeech.py"
+            if os.path.exists(download_script):
+                result = subprocess.run(["python3", download_script], capture_output=True, text=True, cwd=data_dir)
+                if result.returncode == 0:
+                    return {"message": f"Dataset '{dataset_name}' downloaded successfully"}
+                else:
+                    raise HTTPException(status_code=500, detail=f"Download failed: {result.stderr}")
+            else:
+                raise HTTPException(status_code=404, detail="Download script not found")
+        else:
+            raise HTTPException(status_code=400, detail=f"Dataset '{dataset_name}' is not supported for download")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @router.get("/test", summary="テスト用エンドポイント")
 def test_endpoint():
     """テスト用のエンドポイント"""
-    return {"message": "Test endpoint is working", "endpoints": ["/config", "/status", "/progress", "/train/start", "/train/stop"]}
+    return {"message": "Test endpoint is working", "endpoints": ["/config", "/status", "/progress", "/train/start", "/train/stop", "/dataset/download"]}

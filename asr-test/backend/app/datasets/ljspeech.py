@@ -21,11 +21,11 @@ class LJSpeechDataset(BaseASRDataset):
         self.tokenizer = T5Tokenizer.from_pretrained("google/flan-t5-base")
         self.config = config
         self.split = split
-        self._prepare_data()
+        super().__init__(config, split)
 
-    def _prepare_data(self):
+    def _load_data(self):
         """データをロードし、指定されたsplitに応じてデータセットを準備する"""
-        full_dataset = load_dataset("ljspeech", split='train')
+        full_dataset = load_dataset("lj_speech", split='train')
         
         # 検証セットの割合と乱数シードを設定
         val_size = self.config.get("validation_size", 0.05)
@@ -41,9 +41,9 @@ class LJSpeechDataset(BaseASRDataset):
         )
 
         if self.split == 'train':
-            self.data = train_subset
+            return train_subset
         else: # validation
-            self.data = val_subset
+            return val_subset
 
     def __len__(self) -> int:
         return len(self.data)

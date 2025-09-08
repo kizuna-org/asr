@@ -184,3 +184,4 @@ results.json
 scripts/datasets/
 scripts/outputs/
 *.tfrecord-*
+data/

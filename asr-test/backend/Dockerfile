@@ -24,6 +24,9 @@ RUN if [ -n "$HTTP_PROXY" ] || [ -n "$HTTPS_PROXY" ]; then \
 RUN apt-get update && apt-get install -y \
     python3 \
     python3-pip \
+    curl \
+    file \
+    bsdutils \
     && rm -rf /var/lib/apt/lists/*
 
 # python3 -> python, pip3 -> pip のシンボリックリンクを作成
@@ -40,6 +43,8 @@ RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 # アプリケーションのソースコードをコピー
 COPY backend/app /app/app
 COPY backend/config.yaml /app/config.yaml
+COPY backend/download_ljspeech.py /app/download_ljspeech.py
+RUN chmod +x /app/download_ljspeech.py
 
 # ポートを開放 (ドキュメント用、実際にはcomposeでマッピング)
 EXPOSE 8000

@@ -75,7 +75,12 @@ def start_training(params: Dict):
         training_config['num_epochs'] = epochs
         training_config['batch_size'] = batch_size
 
-        DatasetClass = getattr(importlib.import_module(f".datasets.{dataset_name}", "app"), f"{dataset_name.capitalize()}Dataset")
+        # データセット名に応じてクラス名を適切に設定
+        if dataset_name == "ljspeech":
+            class_name = "LJSpeechDataset"
+        else:
+            class_name = f"{dataset_name.capitalize()}Dataset"
+        DatasetClass = getattr(importlib.import_module(f".datasets.{dataset_name}", "app"), class_name)
         ModelClass = getattr(importlib.import_module(f".models.{model_name}", "app"), f"{model_name.capitalize()}ASRModel")
         collate_fn = getattr(importlib.import_module(f".datasets.{dataset_name}", "app"), "collate_fn")
 
@@ -146,7 +151,12 @@ def start_training(params: Dict):
             websocket_manager.broadcast_sync({"type": "status", "payload": {"status": "completed", "message": "学習が正常に完了しました。"}})
 
     except Exception as e:
-        websocket_manager.broadcast_sync({"type": "error", "payload": {"message": f"学習中にエラーが発生しました: {e}"}})
+        import traceback
+        error_msg = f"学習中にエラーが発生しました: {e}"
+        error_traceback = traceback.format_exc()
+        print(f"ERROR: {error_msg}")
+        print(f"TRACEBACK: {error_traceback}")
+        websocket_manager.broadcast_sync({"type": "error", "payload": {"message": error_msg, "traceback": error_traceback}})
     finally:
         training_status["is_training"] = False
         # 学習終了時に進捗情報をクリア

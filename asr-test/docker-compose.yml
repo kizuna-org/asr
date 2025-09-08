@@ -1,6 +1,8 @@
 services:
   asr-api:
-    image: asr-app # run.sh の `docker build . -t asr-app` でビルドされることを想定
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
     ports:
       - "58081:8000"
@@ -10,7 +12,9 @@ services:
       # GPU設定は docker-compose.gpu.yml で上書き
 
   frontend:
-    image: asr-frontend # run.sh の `docker build -f frontend/Dockerfile . -t asr-frontend` でビルドされることを想定
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
     command: streamlit run app.py --server.port 8501 --server.address 0.0.0.0
     ports:
       - "58080:8501"
