@@ -66,6 +66,35 @@ def init_session_state():
         if key not in st.session_state:
             st.session_state[key] = value
 
+# --- 推論API呼び出し ---
+def run_inference(file_bytes: bytes, filename: str, model_name: str) -> str:
+    """音声ファイルをアップロードして推論を実行し、文字起こしを返す"""
+    try:
+        st.session_state.logs.append(f"🧪 推論リクエスト送信中... URL: {BACKEND_URL}/inference")
+        request_proxies = proxies if should_use_proxy(BACKEND_URL) else None
+        files = {
+            "file": (filename, file_bytes, "application/octet-stream"),
+        }
+        params = {"model_name": model_name} if model_name else None
+        response = requests.post(
+            f"{BACKEND_URL}/inference",
+            files=files,
+            params=params,
+            timeout=120,
+            proxies=request_proxies,
+        )
+        response.raise_for_status()
+        data = response.json()
+        transcription = data.get("transcription", "")
+        st.session_state.logs.append("✅ 推論が完了しました")
+        return transcription
+    except requests.exceptions.RequestException as e:
+        log_detailed_error("推論実行", e, getattr(e, "response", None))
+        return ""
+    except Exception as e:
+        log_detailed_error("推論実行", e)
+        return ""
+
 # --- 詳細エラーログ関数 ---
 def log_detailed_error(operation: str, error: Exception, response=None):
     """詳細なエラー情報をログに記録"""
@@ -298,9 +327,8 @@ def get_training_progress():
             st.session_state.logs.append(f"⚠️ 進捗取得エラー: HTTP {response.status_code}")
             return None
     except requests.exceptions.ConnectionError as e:
-        # 接続エラーの場合は学習状態を停止に設定
+        # 一時的な接続エラーでは学習状態は変更しない
         st.session_state.logs.append(f"❌ バックエンド接続エラー: {e}")
-        st.session_state.is_training = False
         return None
     except requests.exceptions.Timeout as e:
         # タイムアウトの場合はログに記録するが、学習状態は維持
@@ -318,6 +346,9 @@ def update_progress_from_backend():
         return False
     
     progress_data = get_training_progress()
+    # ポーリング時刻を記録（可視化用）
+    import time
+    st.session_state["last_poll_at"] = time.time()
     if progress_data:
         # 進捗データを更新
         if "current_epoch" in progress_data and "current_step" in progress_data:
@@ -462,6 +493,26 @@ with st.sidebar:
 # メインコンテンツ
 col1, col2 = st.columns(2)
 
+# 推論テストセクション
+st.header("推論テスト（音声アップロード）")
+inf_col1, inf_col2 = st.columns([2, 1])
+with inf_col1:
+    uploaded = st.file_uploader("音声ファイルを選択 (WAV/FLACなど)", type=["wav", "flac", "mp3", "m4a", "ogg"])
+    if uploaded is not None:
+        st.audio(uploaded, format="audio/wav")
+with inf_col2:
+    if st.button("推論を実行", disabled=uploaded is None):
+        if uploaded is None:
+            st.warning("音声ファイルを選択してください")
+        else:
+            with st.spinner("推論を実行中..."):
+                transcription = run_inference(uploaded.getvalue(), uploaded.name, model_name)
+                if transcription:
+                    st.success("推論完了")
+                    st.text_area("文字起こし結果", value=transcription, height=120)
+                else:
+                    st.error("推論に失敗しました。ログを確認してください。")
+
 # 上部メトリクス表示（学習中のみ）
 if st.session_state.is_training:
     m1, m2 = st.columns(2)
@@ -502,6 +553,11 @@ with log_container:
 
 # 学習中の進捗更新
 if st.session_state.is_training:
+    # 直近のポーリング時刻を表示（デバッグ/可視化）
+    import time
+    last_polled = st.session_state.get("last_poll_at")
+    if last_polled:
+        st.caption(f"最終ポーリング: {time.strftime('%H:%M:%S', time.localtime(last_polled))}")
     # 進捗更新の頻度を制限（1秒ごと）
     import time
     current_time = time.time()
@@ -514,15 +570,6 @@ if st.session_state.is_training:
         progress_updated = update_progress_from_backend()
         st.session_state.last_progress_update = current_time
     
-    # リロードの頻度を制限（1秒ごと、または進捗が更新された場合のみ）
-    if "last_rerun_time" not in st.session_state:
-        st.session_state.last_rerun_time = 0
-    
-    should_rerun = (
-        current_time - st.session_state.last_rerun_time >= 1 or  # 1秒経過
-        progress_updated  # 進捗が更新された
-    )
-    
-    if should_rerun:
-        st.session_state.last_rerun_time = current_time
-        st.rerun()
+    # 確実な1秒ごとのポーリング（スリープ→再実行）
+    time.sleep(1)
+    st.rerun()

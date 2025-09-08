@@ -8,6 +8,7 @@ import requests
 import torch
 import torchaudio
 import subprocess
+import time
 
 from . import trainer, config_loader
 from .models.interface import BaseASRModel
@@ -119,9 +120,20 @@ def get_status():
 
 @router.get("/progress", summary="学習進捗を取得")
 def get_progress():
-    """現在の学習進捗を返す"""
+    """現在の学習進捗を返す（安定化のためコピー＆型整形）"""
     logger.debug(f"/progress called. status: {training_status}")
-    return training_status
+    # 直接の参照を返さずコピーして返す
+    data = dict(training_status)
+    # 型の安定化（フロント側の描画がこけないように float へ）
+    for key in ["current_loss", "current_learning_rate", "progress"]:
+        value = data.get(key)
+        try:
+            data[key] = float(value) if value is not None else 0.0
+        except Exception:
+            data[key] = 0.0
+    # 追加情報: サーバー側の時刻
+    data["server_time"] = time.time()
+    return data
 
 @router.post("/dataset/download", summary="データセットダウンロード")
 def download_dataset(params: Dict):
