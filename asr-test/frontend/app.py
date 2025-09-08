@@ -436,7 +436,7 @@ with st.sidebar:
     # 学習パラメータ
     epochs = st.number_input("エポック数", min_value=1, value=10)
     batch_size = st.number_input("バッチサイズ", min_value=1, value=4)
-    lightweight = st.checkbox("軽量(先頭10件)でテスト実行", value=False)
+    lightweight = st.checkbox("軽量(先頭10件)でテスト実行", value=True)
     limit_samples = st.number_input("使用サンプル数を制限 (0で無効)", min_value=0, value=0)
     
     # 学習開始/停止ボタン
@@ -502,7 +502,7 @@ with log_container:
 
 # 学習中の進捗更新
 if st.session_state.is_training:
-    # 進捗更新の頻度を制限（5秒ごと）
+    # 進捗更新の頻度を制限（1秒ごと）
     import time
     current_time = time.time()
     if "last_progress_update" not in st.session_state:
@@ -510,7 +510,7 @@ if st.session_state.is_training:
     
     # 進捗更新の実行
     progress_updated = False
-    if current_time - st.session_state.last_progress_update >= 5:
+    if current_time - st.session_state.last_progress_update >= 1:
         progress_updated = update_progress_from_backend()
         st.session_state.last_progress_update = current_time
     

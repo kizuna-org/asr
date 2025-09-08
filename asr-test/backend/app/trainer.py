@@ -144,6 +144,8 @@ def start_training(params: Dict):
                 "learning_rate": None,
             }
         })
+        # 1秒ごとの同期用のタイムスタンプ
+        last_broadcast_time = 0.0
         
         for epoch in range(start_epoch, num_epochs):
             if stop_training_flag:
@@ -168,6 +170,21 @@ def start_training(params: Dict):
                 training_status['current_loss'] = loss.item()
                 training_status['current_learning_rate'] = optimizer.param_groups[0]['lr']
                 training_status['progress'] = current_step / training_status['total_steps']
+                # 1秒ごとに現在のエポック/ステップをブロードキャスト
+                now = time.time()
+                if now - last_broadcast_time >= 1.0:
+                    websocket_manager.broadcast_sync({
+                        "type": "progress",
+                        "payload": {
+                            "epoch": epoch + 1,
+                            "total_epochs": num_epochs,
+                            "step": current_step,
+                            "total_steps": training_status['total_steps'],
+                            "loss": loss.item(),
+                            "learning_rate": optimizer.param_groups[0]['lr']
+                        }
+                    })
+                    last_broadcast_time = now
                 
                 if i % training_config['log_interval'] == 0:
                     log_message = f"Epoch {epoch + 1}/{num_epochs}, Step {i}/{len(train_loader)}, Loss: {loss.item():.4f}"
