@@ -9,6 +9,9 @@ import torch
 import torchaudio
 import subprocess
 import time
+import tempfile
+import shutil
+import traceback
 
 from . import trainer, config_loader
 from .models.interface import BaseASRModel
@@ -89,19 +92,37 @@ async def inference(file: UploadFile = File(...), model_name: str = "conformer")
     try:
         # モデルを取得
         model = get_model_for_inference(model_name)
-        
-        # 音声ファイルを読み込み、リサンプリング
-        waveform, sample_rate = torchaudio.load(file.file)
-        
+
+        # 音声ファイルを一時ファイルに保存してから読み込み（バックエンド間の互換性向上）
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{file.filename}") as tmp:
+            file.file.seek(0)
+            shutil.copyfileobj(file.file, tmp)
+            tmp_path = tmp.name
+
+        # torchaudio で読み込み
+        waveform, sample_rate = torchaudio.load(tmp_path)
+
         # HuggingFaceモデルが要求する16kHzにリサンプリング
         resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)
         resampled_waveform = resampler(waveform)
 
+        # モノラル化（複数チャネルの場合は平均化）し、1Dテンソルへ整形
+        if resampled_waveform.dim() == 2 and resampled_waveform.size(0) > 1:
+            resampled_waveform = resampled_waveform.mean(dim=0, keepdim=False)
+        else:
+            resampled_waveform = resampled_waveform.squeeze(0)
+
         # 推論実行
-        transcription = model.inference(resampled_waveform.squeeze(0))
+        transcription = model.inference(resampled_waveform)
         return {"transcription": transcription}
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        # 可能な限り詳細な情報を返す（フロントでログ表示）
+        error_detail = (
+            f"Inference failed: {str(e)}\n"
+            f"Traceback (most recent call last):\n{traceback.format_exc()}"
+        )
+        logger.error(error_detail)
+        raise HTTPException(status_code=500, detail=error_detail)
 
 @router.get("/config", summary="設定情報の取得")
 def get_config():

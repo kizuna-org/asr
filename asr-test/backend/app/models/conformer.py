@@ -53,10 +53,18 @@ class ConformerASRModel(BaseASRModel):
     @torch.no_grad()
     def inference(self, waveform: torch.Tensor) -> str:
         """単一の音声波形から文字起こしを行う。"""
-        if waveform.dim() == 1:
-            waveform = waveform.unsqueeze(0)
+        # 入力は1Dテンソル想定。2D(チャネル, 長さ)の可能性があればモノラル化
+        if waveform.dim() == 2:
+            # (channels, time) -> mono 1D
+            waveform = waveform.mean(dim=0)
 
-        processed = self.processor(waveform, sampling_rate=16000, return_tensors="pt", padding=True)
+        # モデルへの入力は list[np.ndarray] で (time,) となるようにする
+        if isinstance(waveform, torch.Tensor):
+            waveform_list = [waveform.detach().cpu().numpy()]
+        else:
+            waveform_list = [waveform]
+
+        processed = self.processor(waveform_list, sampling_rate=16000, return_tensors="pt", padding=True)
         input_values = processed.input_values.to(self.model.device)
 
         logits = self.model(input_values).logits
