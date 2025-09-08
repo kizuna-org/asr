@@ -1,5 +1,6 @@
 from fastapi import APIRouter, BackgroundTasks, UploadFile, File, HTTPException
 from typing import Dict
+import logging
 import os
 import tarfile
 from pathlib import Path
@@ -11,8 +12,10 @@ import subprocess
 from . import trainer, config_loader
 from .models.interface import BaseASRModel
 from .state import training_status, _model_cache
+from .websocket import manager as websocket_manager
 
 router = APIRouter()
+logger = logging.getLogger("asr-api")
 print(f"DEBUG: API router created")  # デバッグ用
 
 def get_model_for_inference(model_name: str) -> BaseASRModel:
@@ -47,7 +50,26 @@ def start_training(params: Dict, background_tasks: BackgroundTasks):
     if not dataset_name or not config_loader.get_dataset_config(dataset_name):
         raise HTTPException(status_code=400, detail=f"Dataset '{dataset_name}' is not a valid dataset name.")
 
-    print(f"DEBUG: Starting training with params: {params}")
+    logger.info(f"/train/start called with params: {params}")
+    # 即時にフラグを立て、初期状態をセットしてリロード時の不一致を防止
+    training_status["is_training"] = True
+    training_status["current_epoch"] = 0
+    training_status["current_step"] = 0
+    training_status["current_loss"] = 0.0
+    training_status["current_learning_rate"] = 0.0
+    training_status["progress"] = 0.0
+    training_status.setdefault("latest_logs", [])
+    training_status.pop("latest_error", None)
+    try:
+        websocket_manager.broadcast_sync({
+            "type": "status",
+            "payload": {
+                "status": "starting",
+                "message": f"学習開始リクエスト受理: model={model_name}, dataset={dataset_name}"
+            }
+        })
+    except Exception:
+        pass
     background_tasks.add_task(trainer.start_training, params)
     return {"message": "Training started in background."}
 
@@ -98,7 +120,7 @@ def get_status():
 @router.get("/progress", summary="学習進捗を取得")
 def get_progress():
     """現在の学習進捗を返す"""
-    print(f"DEBUG: /progress endpoint called, training_status: {training_status}")  # デバッグ用
+    logger.debug(f"/progress called. status: {training_status}")
     return training_status
 
 @router.post("/dataset/download", summary="データセットダウンロード")

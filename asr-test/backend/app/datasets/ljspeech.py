@@ -1,117 +1,115 @@
 # backend/app/datasets/ljspeech.py
-import torch
-import torchaudio
-from datasets import load_dataset
-from transformers import T5Tokenizer
-from typing import Dict, Any
+import os
+import csv
+from typing import Dict, Any, List, Tuple
 
 import torch
 import torchaudio
-from datasets import load_dataset
-from transformers import T5Tokenizer
-from typing import Dict, Any
-from torch.utils.data import Subset
 
 from .interface import BaseASRDataset
 
+
 class LJSpeechDataset(BaseASRDataset):
-    """LJSpeechデータセットを扱うクラス。訓練/検証スプリットを自動で作成する。"""
+    """ローカル展開済みの LJSpeech-1.1 を読み込むデータセット。
+
+    期待構成:
+      {root}/LJSpeech-1.1/
+        ├── metadata.csv  (id|text|normalized_text)
+        └── wavs/
+             └── {id}.wav
+    """
 
     def __init__(self, config: Dict[str, Any], split: str = 'train'):
-        self.tokenizer = T5Tokenizer.from_pretrained("google/flan-t5-base")
         self.config = config
         self.split = split
         super().__init__(config, split)
 
-    def _load_data(self):
-        """データをロードし、指定されたsplitに応じてデータセットを準備する"""
-        full_dataset = load_dataset("lj_speech", split='train')
-        
-        # 検証セットの割合と乱数シードを設定
-        val_size = self.config.get("validation_size", 0.05)
-        random_seed = self.config.get("random_seed", 42)
+    def _load_data(self) -> List[Tuple[str, str]]:
+        """metadata.csv を読み込み、(wav_path, text) のリストを返す。
 
-        # 訓練セットと検証セットに分割
-        train_len = int(len(full_dataset) * (1.0 - val_size))
-        val_len = len(full_dataset) - train_len
-        train_subset, val_subset = torch.utils.data.random_split(
-            full_dataset, 
-            [train_len, val_len],
-            generator=torch.Generator().manual_seed(random_seed)
-        )
+        訓練/検証の分割は config の validation_size と random_seed に従う。
+        """
+        root_dir = self.config.get("path", "/app/data/ljspeech")
+        ljs_dir = os.path.join(root_dir, "LJSpeech-1.1")
+        metadata_path = os.path.join(ljs_dir, "metadata.csv")
+        wavs_dir = os.path.join(ljs_dir, "wavs")
 
+        if not os.path.exists(metadata_path):
+            raise FileNotFoundError(f"metadata.csv not found: {metadata_path}")
+        if not os.path.isdir(wavs_dir):
+            raise FileNotFoundError(f"wavs directory not found: {wavs_dir}")
+
+        entries: List[Tuple[str, str]] = []
+        with open(metadata_path, "r", encoding="utf-8") as f:
+            reader = csv.reader(f, delimiter='|')
+            for row in reader:
+                if not row:
+                    continue
+                utt_id = row[0].strip()
+                # metadata.csv は id|text|normalized_text
+                text = row[2].strip() if len(row) > 2 and row[2].strip() else row[1].strip()
+                wav_path = os.path.join(wavs_dir, f"{utt_id}.wav")
+                if os.path.exists(wav_path):
+                    entries.append((wav_path, text))
+
+        if len(entries) == 0:
+            raise RuntimeError(f"No wav entries found under {wavs_dir}")
+
+        # 分割設定
+        val_size = float(self.config.get("validation_size", 0.05))
+        random_seed = int(self.config.get("random_seed", 42))
+
+        # 決定論的にシャッフル
+        g = torch.Generator()
+        g.manual_seed(random_seed)
+        indices = torch.randperm(len(entries), generator=g).tolist()
+
+        split_idx = int(len(entries) * (1.0 - val_size))
         if self.split == 'train':
-            return train_subset
-        else: # validation
-            return val_subset
+            chosen = [entries[i] for i in indices[:split_idx]]
+        else:
+            chosen = [entries[i] for i in indices[split_idx:]]
+
+        return chosen
 
     def __len__(self) -> int:
         return len(self.data)
 
     def __getitem__(self, idx: int) -> Dict:
-        # Subsetから元のアイテムを取得
-        item = self.data.dataset[self.data.indices[idx]]
-        
-        waveform = torch.tensor(item["audio"]["array"], dtype=torch.float32)
-        sample_rate = item["audio"]["sampling_rate"]
-
-        # ... (以降の処理は変更なし) ...
-
+        wav_path, text = self.data[idx]
+        waveform, sample_rate = torchaudio.load(wav_path)
         waveform = self._preprocess_audio(waveform, sample_rate)
-
-        # 2. テキストの前処理
-        text = item["text"]
-        # TODO: text_cleanersを適用する
-        token_ids = self.tokenizer(text, return_tensors="pt").input_ids.squeeze()
-
         return {
-            "waveform": waveform,
-            "sample_rate": self.config["sample_rate"],
+            "waveform": waveform.squeeze(0),
+            "sample_rate": 16000,
             "text": text,
-            "token_ids": token_ids
         }
 
     def _preprocess_audio(self, waveform: torch.Tensor, original_sample_rate: int) -> torch.Tensor:
-        """音声データをリサンプリングし、メルスペクトログラムに変換する"""
-        target_sample_rate = self.config["sample_rate"]
+        target_sample_rate = 16000
 
-        # リサンプリング
+        if waveform.dim() == 2:
+            waveform = waveform.mean(dim=0, keepdim=True)
+        elif waveform.dim() == 1:
+            waveform = waveform.unsqueeze(0)
+
         if original_sample_rate != target_sample_rate:
-            resampler = torchaudio.transforms.Resample(original_sample_rate, target_sample_rate)
+            resampler = torchaudio.transforms.Resample(orig_freq=original_sample_rate, new_freq=target_sample_rate)
             waveform = resampler(waveform)
 
-        # メルスペクトログラム計算
-        mel_spectrogram_transform = torchaudio.transforms.MelSpectrogram(
-            sample_rate=target_sample_rate,
-            n_fft=self.config["n_fft"],
-            win_length=self.config["win_length"],
-            hop_length=self.config["hop_length"],
-            n_mels=self.config["n_mels"],
-            f_min=self.config["f_min"],
-            f_max=self.config["f_max"]
-        )
-        mel_spectrogram = mel_spectrogram_transform(waveform)
+        return waveform
 
-        return mel_spectrogram
 
 def collate_fn(batch):
-    """バッチ内のデータをパディングしてテンソルにまとめる"""
-    waveforms = [item['waveform'].squeeze(0).T for item in batch] # (Time, Freq)
-    token_ids = [item['token_ids'] for item in batch]
-
-    # 波形をパディング
-    padded_waveforms = torch.nn.utils.rnn.pad_sequence(waveforms, batch_first=True).transpose(1, 2) # (Batch, Freq, Time)
-
-    # トークンIDをパディング
-    padded_token_ids = torch.nn.utils.rnn.pad_sequence(token_ids, batch_first=True)
-
-    # テキストはそのままリストで返す
+    """バッチ内の波形をパディングし、テキストはリストで返す"""
+    waveforms = [item['waveform'] for item in batch]
     texts = [item['text'] for item in batch]
+
+    padded_waveforms = torch.nn.utils.rnn.pad_sequence(waveforms, batch_first=True)
+    waveform_lengths = torch.tensor([wf.shape[0] for wf in waveforms], dtype=torch.long)
 
     return {
         "waveforms": padded_waveforms,
-        "waveform_lengths": torch.tensor([wf.shape[0] for wf in waveforms]),
-        "token_ids": padded_token_ids,
-        "token_lengths": torch.tensor([len(t) for t in token_ids]),
-        "texts": texts
+        "waveform_lengths": waveform_lengths,
+        "texts": texts,
     }

@@ -12,12 +12,14 @@ available_datasets:
 models:
   conformer:
     # --- アーキテクチャ設定 ---
-    input_dim: 80         # 入力特徴量の次元数 (例: メルスペクトログラムの次元)
-    encoder_dim: 256      # エンコーダの隠れ層の次元数
+    input_dim: 80 # 入力特徴量の次元数 (例: メルスペクトログラムの次元)
+    encoder_dim: 256 # エンコーダの隠れ層の次元数
     num_encoder_layers: 4 # エンコーダブロックの数
-    num_heads: 4          # Multi-Head Attention のヘッド数
-    kernel_size: 31       # Convolutionモジュールのカーネルサイズ
-    dropout: 0.1          # ドロップアウト率
+    num_heads: 4 # Multi-Head Attention のヘッド数
+    kernel_size: 31 # Convolutionモジュールのカーネルサイズ
+    dropout: 0.1 # ドロップアウト率
+    # --- 実装用のHFモデル指定（学習のPoCではCTCモデルを流用） ---
+    huggingface_model_name: "facebook/wav2vec2-base-960h"
 
     # --- トークナイザ設定 ---
     tokenizer:
@@ -32,13 +34,13 @@ datasets:
     path: "/app/data/ljspeech" # Dockerコンテナ内のデータセットルートパス
 
     # --- 音声前処理設定 ---
-    sample_rate: 22050    # リサンプリングするサンプルレート
-    n_fft: 1024           # STFTのウィンドウサイズ
-    win_length: 1024      # STFTのウィンドウ長
-    hop_length: 256       # STFTのホップ長
-    n_mels: 80            # 生成するメルフィルタバンクの数
-    f_min: 0              # メルスペクトログラムの最小周波数
-    f_max: 8000           # メルスペクトログラムの最大周波数
+    sample_rate: 22050 # リサンプリングするサンプルレート
+    n_fft: 1024 # STFTのウィンドウサイズ
+    win_length: 1024 # STFTのウィンドウ長
+    hop_length: 256 # STFTのホップ長
+    n_mels: 80 # 生成するメルフィルタバンクの数
+    f_min: 0 # メルスペクトログラムの最小周波数
+    f_max: 8000 # メルスペクトログラムの最大周波数
 
     # --- テキスト前処理 ---
     text_cleaners: ['english_cleaners'] # 適用するテキストクリーナーのリスト
@@ -46,19 +48,19 @@ datasets:
 # 学習のグローバル設定
 training:
   # --- オプティマイザ設定 ---
-  optimizer: "AdamW"      # 使用するオプティマイザ名 (torch.optim内のクラス名)
-  learning_rate: 0.001    # 学習率
-  weight_decay: 0.01      # AdamWのweight decay
-  betas: [0.9, 0.98]      # Adam/AdamWのbetaパラメータ
-  eps: 1.0e-9             # Adam/AdamWのepsilon
+  optimizer: "AdamW" # 使用するオプティマイザ名 (torch.optim内のクラス名)
+  learning_rate: 0.001 # 学習率
+  weight_decay: 0.01 # AdamWのweight decay
+  betas: [0.9, 0.98] # Adam/AdamWのbetaパラメータ
+  eps: 1.0e-9 # Adam/AdamWのepsilon
 
   # --- スケジューラ設定 ---
-  scheduler: "WarmupLR"   # 学習率スケジューラの名前 (オプション)
-  warmup_steps: 4000      # WarmupLRのウォームアップステップ数
+  scheduler: "WarmupLR" # 学習率スケジューラの名前 (オプション)
+  warmup_steps: 4000 # WarmupLRのウォームアップステップ数
 
   # --- 学習ループ設定 ---
-  batch_size: 32          # バッチサイズ
-  num_epochs: 100         # 総エポック数
-  grad_clip_thresh: 1.0   # 勾配クリッピングの閾値
-  log_interval: 10        # ログを記録するステップ間隔 (steps)
-  checkpoint_interval: 1  # チェックポイントを保存する間隔 (epochs)
+  batch_size: 32 # バッチサイズ
+  num_epochs: 100 # 総エポック数
+  grad_clip_thresh: 1.0 # 勾配クリッピングの閾値
+  log_interval: 10 # ログを記録するステップ間隔 (steps)
+  checkpoint_interval: 1 # チェックポイントを保存する間隔 (epochs)

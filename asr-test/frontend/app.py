@@ -52,6 +52,10 @@ def init_session_state():
         "available_datasets": [],
         "current_progress": 0,
         "progress_text": "待機中",
+        "current_epoch": 0,
+        "current_step": 0,
+        "total_epochs": 0,
+        "total_steps": 0,
         "last_progress_update": 0,
         "initial_load": False,
         "last_rerun_time": 0,
@@ -312,6 +316,10 @@ def update_progress_from_backend():
     if progress_data:
         # 進捗データを更新
         if "current_epoch" in progress_data and "current_step" in progress_data:
+            st.session_state.current_epoch = progress_data.get("current_epoch", 0)
+            st.session_state.current_step = progress_data.get("current_step", 0)
+            st.session_state.total_epochs = progress_data.get("total_epochs", 0)
+            st.session_state.total_steps = progress_data.get("total_steps", 0)
             st.session_state.current_progress = progress_data.get("progress", 0)
             st.session_state.progress_text = f"Epoch {progress_data['current_epoch']}/{progress_data.get('total_epochs', '?')}, Step {progress_data['current_step']}/{progress_data.get('total_steps', '?')}"
         
@@ -422,7 +430,7 @@ with st.sidebar:
     
     # 学習パラメータ
     epochs = st.number_input("エポック数", min_value=1, value=10)
-    batch_size = st.number_input("バッチサイズ", min_value=1, value=32)
+    batch_size = st.number_input("バッチサイズ", min_value=1, value=4)
     
     # 学習開始/停止ボタン
     col1, col2 = st.columns(2)
@@ -447,6 +455,14 @@ with st.sidebar:
 # メインコンテンツ
 col1, col2 = st.columns(2)
 
+# 上部メトリクス表示（学習中のみ）
+if st.session_state.is_training:
+    m1, m2 = st.columns(2)
+    with m1:
+        st.metric(label="Epoch", value=f"{st.session_state.current_epoch}/{st.session_state.total_epochs}")
+    with m2:
+        st.metric(label="Step", value=f"{st.session_state.current_step}/{st.session_state.total_steps}")
+
 with col1:
     st.header("学習ロス")
     if not st.session_state.progress_df.empty:
@@ -457,7 +473,9 @@ with col1:
             merged_val = pd.merge(st.session_state.validation_df, last_step_per_epoch, on="epoch")
             loss_data = pd.merge(loss_data, merged_val, on=["epoch", "step"], how="left")
         
-        st.line_chart(loss_data.set_index("step")[["train_loss", "val_loss"]])
+        # 存在する列のみを描画対象にする
+        plot_cols = [c for c in ["train_loss", "val_loss"] if c in loss_data.columns]
+        st.line_chart(loss_data.set_index("step")[plot_cols])
     else:
         st.info("学習データがありません。学習を開始するとグラフが表示されます。")
 

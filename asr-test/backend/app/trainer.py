@@ -4,6 +4,7 @@ import importlib
 import os
 import re
 import glob
+import logging
 from typing import Dict
 
 from .websocket import manager as websocket_manager
@@ -12,6 +13,9 @@ from . import config_loader
 
 # 学習停止フラグ
 stop_training_flag = False
+
+# ロガー設定（uvicorn/fastapiの親ロガー配下にぶら下げる）
+logger = logging.getLogger("asr-api")
 
 # --- ヘルパー関数 ---
 
@@ -31,7 +35,9 @@ def save_checkpoint(model, optimizer, epoch, model_name, dataset_name, checkpoin
     if os.path.lexists(latest_path):
         os.remove(latest_path)
     os.symlink(os.path.basename(checkpoint_path), latest_path)
-    websocket_manager.broadcast_sync({"type": "log", "payload": {"level": "INFO", "message": f"チェックポイントを保存しました: {checkpoint_path}"}})
+    message = f"チェックポイントを保存しました: {checkpoint_path}"
+    logger.info(message)
+    websocket_manager.broadcast_sync({"type": "log", "payload": {"level": "INFO", "message": message}})
 
 @torch.no_grad()
 def run_validation(model, loader, device):
@@ -53,6 +59,12 @@ def start_training(params: Dict):
     epochs = params.get("epochs", 10)  # フロントエンドから送信されるエポック数
     batch_size = params.get("batch_size", 32)  # フロントエンドから送信されるバッチサイズ
     device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # CPU 実行時はメモリ保護のためバッチサイズを自動的に制限
+    if device == "cpu" and batch_size > 4:
+        original_bs = batch_size
+        batch_size = 4
+        logger.warning(f"CPU 実行のためバッチサイズを {original_bs} -> {batch_size} に調整しました")
     training_was_stopped = False
 
     try:
@@ -63,9 +75,16 @@ def start_training(params: Dict):
         training_status["current_loss"] = 0.0
         training_status["current_learning_rate"] = 0.0
         training_status["progress"] = 0.0
-        training_status["latest_logs"] = []
-        
-        websocket_manager.broadcast_sync({"type": "log", "payload": {"level": "INFO", "message": f"学習を開始します: model={model_name}, dataset={dataset_name}, epochs={epochs}, batch_size={batch_size}, device={device}"}})
+        # 暫定のトータル値を先に埋めて 0/0 表示を避ける
+        training_status["total_epochs"] = epochs or 0
+        training_status["total_steps"] = max(1, (epochs or 1))
+        training_status.setdefault("latest_logs", [])
+        training_status.pop("latest_error", None)
+
+        start_msg = f"学習を開始します: model={model_name}, dataset={dataset_name}, epochs={epochs}, batch_size={batch_size}, device={device}"
+        logger.info(start_msg)
+        training_status["latest_logs"].append(start_msg)
+        websocket_manager.broadcast_sync({"type": "log", "payload": {"level": "INFO", "message": start_msg}})
 
         model_config = config_loader.get_model_config(model_name)
         dataset_config = config_loader.get_dataset_config(dataset_name)
@@ -100,7 +119,19 @@ def start_training(params: Dict):
 
         num_epochs = training_config['num_epochs']
         training_status['total_epochs'] = num_epochs
-        training_status['total_steps'] = len(train_loader) * num_epochs
+        training_status['total_steps'] = max(1, len(train_loader) * num_epochs)
+        # 正確な合計がわかったら一度通知
+        websocket_manager.broadcast_sync({
+            "type": "progress",
+            "payload": {
+                "epoch": 0,
+                "total_epochs": training_status['total_epochs'],
+                "step": 0,
+                "total_steps": training_status['total_steps'],
+                "loss": None,
+                "learning_rate": None,
+            }
+        })
         
         for epoch in range(start_epoch, num_epochs):
             if stop_training_flag:
@@ -128,43 +159,51 @@ def start_training(params: Dict):
                 
                 if i % training_config['log_interval'] == 0:
                     log_message = f"Epoch {epoch + 1}/{num_epochs}, Step {i}/{len(train_loader)}, Loss: {loss.item():.4f}"
+                    logger.info(log_message)
                     training_status['latest_logs'].append(log_message)
-                    # 最新の10件のみ保持
-                    if len(training_status['latest_logs']) > 10:
-                        training_status['latest_logs'] = training_status['latest_logs'][-10:]
-                    
+                    if len(training_status['latest_logs']) > 50:
+                        training_status['latest_logs'] = training_status['latest_logs'][-50:]
+
                     websocket_manager.broadcast_sync({"type": "progress", "payload": {"epoch": epoch + 1, "total_epochs": num_epochs, "step": i, "total_steps": len(train_loader), "loss": loss.item(), "learning_rate": optimizer.param_groups[0]['lr']}})
+                    websocket_manager.broadcast_sync({"type": "log", "payload": {"level": "INFO", "message": log_message}})
             
             if training_was_stopped:
                 break
 
             val_loss = run_validation(model, valid_loader, device)
+            val_message = f"Validation: epoch={epoch + 1}, val_loss={val_loss:.4f}"
+            logger.info(val_message)
             websocket_manager.broadcast_sync({"type": "validation_result", "payload": { "epoch": epoch + 1, "val_loss": val_loss }})
+            websocket_manager.broadcast_sync({"type": "log", "payload": {"level": "INFO", "message": val_message}})
 
             if (epoch + 1) % training_config.get("checkpoint_interval", 1) == 0:
                 save_checkpoint(model, optimizer, epoch + 1, model_name, dataset_name)
 
         if training_was_stopped:
             save_checkpoint(model, optimizer, epoch, model_name, dataset_name) # 停止時も保存
+            logger.info("学習がユーザーによって停止されました。")
             websocket_manager.broadcast_sync({"type": "status", "payload": {"status": "stopped", "message": "学習がユーザーによって停止されました。"}})
         else:
+            logger.info("学習が正常に完了しました。")
             websocket_manager.broadcast_sync({"type": "status", "payload": {"status": "completed", "message": "学習が正常に完了しました。"}})
 
     except Exception as e:
         import traceback
         error_msg = f"学習中にエラーが発生しました: {e}"
         error_traceback = traceback.format_exc()
-        print(f"ERROR: {error_msg}")
-        print(f"TRACEBACK: {error_traceback}")
+        logger.error(error_msg)
+        logger.error(error_traceback)
+        # API経由でも確認できるように保持
+        training_status["latest_error"] = {"message": str(e), "traceback": error_traceback}
+        training_status.setdefault("latest_logs", []).append(error_msg)
         websocket_manager.broadcast_sync({"type": "error", "payload": {"message": error_msg, "traceback": error_traceback}})
     finally:
         training_status["is_training"] = False
-        # 学習終了時に進捗情報をクリア
+        # 学習終了時に数値系の進捗情報はリセット（ログ/エラーは保持）
         training_status["current_epoch"] = 0
         training_status["current_step"] = 0
         training_status["current_loss"] = 0.0
         training_status["current_learning_rate"] = 0.0
         training_status["progress"] = 0.0
-        training_status["latest_logs"] = []
         stop_training_flag = False
 

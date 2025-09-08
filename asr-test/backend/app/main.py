@@ -1,5 +1,6 @@
 # backend/app/main.py
 from fastapi import FastAPI
+import logging
 from .api import router as api_router
 from .websocket import router as websocket_router
 
@@ -8,6 +9,15 @@ app = FastAPI(
     description="ASRモデルの学習と推論を行うためのAPI",
     version="0.1.0"
 )
+
+# ロギング設定
+logger = logging.getLogger("asr-api")
+if not logger.handlers:
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter("[%(asctime)s] [%(levelname)s] %(message)s")
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+logger.setLevel(logging.INFO)
 
 # HTTP APIエンドポイントをインクルード
 print(f"DEBUG: Including API router with prefix '/api'")  # デバッグ用

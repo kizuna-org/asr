@@ -81,10 +81,18 @@ def download_ljspeech_dataset():
         print("Skipping download.")
         return True
 
-    # Candidate mirror URLs (first reachable wins)
-    mirror_urls = [
+    # Candidate mirror URLs (first reachable wins). Allow override via env.
+    env_url = os.environ.get("LJSPEECH_URL")
+    mirror_urls = ([env_url] if env_url else []) + [
+        # Legacy keithito paths
         "https://data.keithito.com/speech/LJSpeech-1.1.tar.bz2",
+        "https://data.keithito.com/data/speech/LJSpeech-1.1.tar.bz2",
+        # OpenSLR mirrors (try http if https fails due to cert or 404)
         "https://www.openslr.org/resources/12/LJSpeech-1.1.tar.bz2",
+        "http://www.openslr.org/resources/12/LJSpeech-1.1.tar.bz2",
+        "https://openslr.org/resources/12/LJSpeech-1.1.tar.bz2",
+        "http://openslr.org/resources/12/LJSpeech-1.1.tar.bz2",
+        # Regional mirrors
         "https://us.openslr.org/resources/12/LJSpeech-1.1.tar.bz2",
         "https://openslr.elda.org/resources/12/LJSpeech-1.1.tar.bz2",
     ]
@@ -118,6 +126,11 @@ def download_ljspeech_dataset():
                     last_err = e
                     print(f"Mirror failed: {url} -> {e}")
             else:
+                print("\n=== All mirrors failed ===")
+                print("Tried URLs in order:")
+                for u in mirror_urls:
+                    print(f" - {u}")
+                print("You can set LJSPEECH_URL to a reachable URL, or place a valid 'LJSpeech-1.1.tar.bz2' under /app/data/ljspeech and rerun.")
                 raise requests.exceptions.RequestException(f"All mirrors failed: {last_err}")
 
             # ファイルサイズを確認
