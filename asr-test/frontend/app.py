@@ -8,6 +8,10 @@ from typing import Dict, Any
 import traceback
 import os
 import threading
+import queue
+import numpy as np
+from streamlit_webrtc import webrtc_streamer, WebRtcMode, AudioProcessorBase
+import logging
 
 # --- 設定 ---
 # 環境変数からバックエンドURLを取得、デフォルトはローカルホスト
@@ -583,3 +587,190 @@ if st.session_state.is_training:
     # 確実な1秒ごとのポーリング（スリープ→再実行）
     time.sleep(1)
     st.rerun()
+
+# --- リアルタイム推論（マイク入力） ---
+st.header("リアルタイム推論（マイク入力）")
+
+class MicAudioProcessor(AudioProcessorBase):
+    def __init__(self) -> None:
+        self.frame_queue = None  # type: queue.Queue
+        self.logger = logging.getLogger("ui-rt")
+        self.msg_queue = None  # optional queue to report stats
+        self._frames_sent = 0
+
+    def recv_audio(self, frames, **kwargs):
+        # frames: list of av.AudioFrame
+        if self.frame_queue is None:
+            self.logger.debug("recv_audio called without frame_queue")
+            return frames
+        for frame in frames:
+            # 32-bit float PCM, shape: (channels, samples)
+            pcm = frame.to_ndarray(format="flt")
+            # モノラル化
+            if pcm.ndim == 2 and pcm.shape[0] > 1:
+                pcm_mono = pcm.mean(axis=0)
+            else:
+                pcm_mono = pcm[0] if pcm.ndim == 2 else pcm
+            # 送信は float32 little-endian bytes（サーバは f32 をサポート）
+            pcm_f32 = pcm_mono.astype(np.float32)
+            try:
+                self.frame_queue.put(pcm_f32.tobytes(), timeout=0.1)
+                self._frames_sent += 1
+                if self.msg_queue and (self._frames_sent % 25 == 0):
+                    # おおよそ定期的に統計を送る
+                    self.msg_queue.put({"type": "stats", "payload": {"frames_sent": self._frames_sent}})
+            except queue.Full:
+                self.logger.warning("frame_queue is full; dropping audio chunk")
+        return frames
+
+async def stream_audio_to_ws(q: "queue.Queue[bytes]", model_name: str, sample_rate: int):
+    import websockets
+    # 接続リトライ（コンテキストマネージャを正しく使用）
+    retries = 0
+    while True:
+        try:
+            async with websockets.connect(
+                WEBSOCKET_URL,
+                ping_interval=20,
+                ping_timeout=20,
+                open_timeout=20,
+            ) as ws:
+                await ws.send(json.dumps({"type": "start", "model_name": model_name, "sample_rate": sample_rate, "format": "f32"}))
+                # 受信タスク
+                async def receiver():
+                    try:
+                        while True:
+                            msg = await ws.recv()
+                            try:
+                                data = json.loads(msg)
+                                # メインスレッドで処理するため、キューに積む
+                                st.session_state["realtime_msg_queue"].put(data)
+                            except Exception:
+                                st.session_state["realtime_msg_queue"].put({"type": "error", "payload": {"message": f"invalid message: {msg}"}})
+                                pass
+                    except Exception:
+                        return
+
+                recv_task = asyncio.create_task(receiver())
+
+                try:
+                    while True:
+                        try:
+                            chunk = q.get(timeout=0.2)
+                        except queue.Empty:
+                            # サイレント時も接続維持
+                            await asyncio.sleep(0.02)
+                            continue
+                        await ws.send(chunk)
+                        # 送信カウンタを簡易計測
+                        cnt = st.session_state.get("_rt_chunks_sent", 0) + 1
+                        st.session_state["_rt_chunks_sent"] = cnt
+                        if cnt % 25 == 0:
+                            try:
+                                st.session_state["realtime_msg_queue"].put({"type": "stats", "payload": {"chunks_sent": cnt}})
+                            except Exception:
+                                pass
+                except asyncio.CancelledError:
+                    pass
+                finally:
+                    try:
+                        await ws.send(json.dumps({"type": "stop"}))
+                    except Exception:
+                        pass
+                    recv_task.cancel()
+                    with contextlib.suppress(Exception):
+                        await recv_task
+                return
+        except Exception as e:
+            retries += 1
+            try:
+                st.session_state["realtime_msg_queue"].put({"type": "error", "payload": {"message": f"ws session error (retry {retries}): {e}"}})
+            except Exception:
+                pass
+            if retries >= 5:
+                return
+            await asyncio.sleep(min(1.0 * retries, 5.0))
+
+import contextlib
+
+st.session_state.setdefault("realtime_running", False)
+st.session_state.setdefault("realtime_partial", "")
+st.session_state.setdefault("realtime_final", "")
+st.session_state.setdefault("realtime_status", {})
+st.session_state.setdefault("realtime_error", "")
+st.session_state.setdefault("realtime_msg_queue", queue.Queue())
+
+col_rt1, col_rt2 = st.columns([2, 1])
+with col_rt1:
+    rtc_ctx = webrtc_streamer(
+        key="asr-audio",
+        mode=WebRtcMode.SENDONLY,
+        audio_receiver_size=2048,
+        media_stream_constraints={"audio": True, "video": False},
+        async_processing=True,
+        audio_processor_factory=MicAudioProcessor,
+    )
+
+with col_rt2:
+    selected_model = st.selectbox("リアルタイム用モデル", st.session_state.available_models, index=0 if st.session_state.available_models else None)
+    sample_rate = st.number_input("送信サンプルレート", min_value=16000, max_value=48000, value=48000, step=1000)
+    start_btn = st.button("リアルタイム開始", disabled=st.session_state.get("realtime_running", False) or rtc_ctx.state.playing is False)
+    stop_btn = st.button("リアルタイム停止", disabled=not st.session_state.get("realtime_running", False))
+
+    if start_btn and rtc_ctx and rtc_ctx.audio_processor:
+        # 送信キューとスレッド/タスクの初期化
+        send_queue = queue.Queue(maxsize=100)
+        rtc_ctx.audio_processor.frame_queue = send_queue
+        rtc_ctx.audio_processor.msg_queue = st.session_state["realtime_msg_queue"]
+
+        # 新しいイベントループで実行
+        loop = asyncio.new_event_loop()
+        def run_loop():
+            asyncio.set_event_loop(loop)
+            loop.run_until_complete(stream_audio_to_ws(send_queue, selected_model or "conformer", int(sample_rate)))
+        t = threading.Thread(target=run_loop, daemon=True)
+        t.start()
+        st.session_state["realtime_loop"] = loop
+        st.session_state["realtime_thread"] = t
+        st.session_state["realtime_running"] = True
+
+    if stop_btn and st.session_state.get("realtime_running", False):
+        # 送信停止: スレッドとループを停止
+        loop = st.session_state.get("realtime_loop")
+        if loop and loop.is_running():
+            loop.call_soon_threadsafe(loop.stop)
+        st.session_state["realtime_running"] = False
+        # audio processor のキュー解除
+        if rtc_ctx and rtc_ctx.audio_processor:
+            rtc_ctx.audio_processor.frame_queue = None
+
+# メインスレッドでメッセージキューをドレインし、UI状態を更新
+while not st.session_state["realtime_msg_queue"].empty():
+    try:
+        data = st.session_state["realtime_msg_queue"].get_nowait()
+    except Exception:
+        break
+    if data.get("type") == "partial":
+        st.session_state["realtime_partial"] = data["payload"].get("text", "")
+    elif data.get("type") == "final":
+        st.session_state["realtime_final"] = data["payload"].get("text", "")
+    elif data.get("type") == "status":
+        st.session_state["realtime_status"] = data.get("payload", {})
+    elif data.get("type") == "error":
+        st.session_state["realtime_error"] = data.get("payload", {}).get("message", "error")
+    elif data.get("type") == "stats":
+        st.session_state["realtime_stats"] = data.get("payload", {})
+
+st.text_area("部分結果", value=st.session_state.get("realtime_partial", ""), height=80)
+st.text_area("最終結果", value=st.session_state.get("realtime_final", ""), height=80)
+
+stats = st.session_state.get("realtime_stats", {})
+if stats:
+    col_s1, col_s2 = st.columns(2)
+    with col_s1:
+        st.metric("frames_sent", value=f"{stats.get('frames_sent', 0)}")
+    with col_s2:
+        st.metric("chunks_sent", value=f"{stats.get('chunks_sent', st.session_state.get('_rt_chunks_sent', 0))}")
+
+if st.session_state.get("realtime_error"):
+    st.error(st.session_state.get("realtime_error"))

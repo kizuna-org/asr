@@ -185,6 +185,47 @@
 }
 ```
 
-### 2.2. クライアントからサーバーへのメッセージ
+### 2.2. クライアントからサーバーへのメッセージ（拡張: リアルタイム推論）
 
-現在の設計では、クライアントからサーバーへのメッセージ送信は想定していません。接続確立後の通信はサーバーからの一方的なプッシュのみです。
+エンドポイント: `ws://<backend-host>:<port>/ws`
+
+クライアントは以下のプロトコルでメッセージを送信し、音声をストリーミングして部分/最終の文字起こしを受信できます。
+
+- Text(JSON) `start`:
+  ```json
+  {"type": "start", "model_name": "conformer", "sample_rate": 48000, "format": "i16"}
+  ```
+  - `model_name`: 使用するモデル名（省略時 `conformer`）
+  - `sample_rate`: クライアント送信のサンプルレート（例: 48000）
+  - `format`: `i16` (PCM16LE) または `f32` (float32, little endian)
+
+- Binary 音声フレーム:
+  - `start` 後、一定長の音声フレームを連続で送信します。
+  - モノラル想定。サーバー側で 16kHz mono へリサンプリング。
+
+- Text(JSON) `stop`:
+  ```json
+  {"type": "stop"}
+  ```
+
+サーバーからの応答（追加）:
+
+- 部分結果 `partial`:
+  ```json
+  {"type": "partial", "payload": {"text": "hello wor"}}
+  ```
+
+- 最終結果 `final`:
+  ```json
+  {"type": "final", "payload": {"text": "hello world"}}
+  ```
+
+- ステータス `status`（準備完了/停止）:
+  ```json
+  {"type": "status", "payload": {"status": "ready"}}
+  ```
+
+- エラー `error`:
+  ```json
+  {"type": "error", "payload": {"message": "Invalid JSON"}}
+  ```
