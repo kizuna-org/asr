@@ -11,8 +11,9 @@ PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 COMPOSE_FILE="${PROJECT_DIR}/docker-compose.yml"
 COMPOSE_GPU_FILE="${PROJECT_DIR}/docker-compose.gpu.yml"
 
-IMAGE_BACKEND="asr-app"
-IMAGE_FRONTEND="asr-frontend"
+# (compose build へ移行したため未使用)
+# IMAGE_BACKEND="asr-app"
+# IMAGE_FRONTEND="asr-frontend"
 
 PORT_FRONTEND=58080
 PORT_BACKEND=58081
@@ -122,18 +123,11 @@ if [ "${USE_PROXY}" -eq 1 ]; then
 fi
 
 if [ "${DO_BUILD}" -eq 1 ]; then
-    echo "🔨 Building backend image: ${IMAGE_BACKEND}"
+    echo "🔨 Building images via docker compose (ensures compose image names are rebuilt)"
     if ((${#BUILD_ARGS[@]:-0})); then
-        docker build "${PROJECT_DIR}" -f "${PROJECT_DIR}/backend/Dockerfile" -t "${IMAGE_BACKEND}" "${BUILD_ARGS[@]}"
+        docker compose ${COMPOSE_FILES} build "${BUILD_ARGS[@]}"
     else
-        docker build "${PROJECT_DIR}" -f "${PROJECT_DIR}/backend/Dockerfile" -t "${IMAGE_BACKEND}"
-    fi
-
-    echo "🔨 Building frontend image: ${IMAGE_FRONTEND}"
-    if ((${#BUILD_ARGS[@]:-0})); then
-        docker build "${PROJECT_DIR}" -f "${PROJECT_DIR}/frontend/Dockerfile" -t "${IMAGE_FRONTEND}" "${BUILD_ARGS[@]}"
-    else
-        docker build "${PROJECT_DIR}" -f "${PROJECT_DIR}/frontend/Dockerfile" -t "${IMAGE_FRONTEND}"
+        docker compose ${COMPOSE_FILES} build
     fi
 else
     echo "⏭️  Skipping image build as requested"

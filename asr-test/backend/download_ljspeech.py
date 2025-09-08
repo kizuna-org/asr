@@ -3,6 +3,8 @@
 Script to download the LJSpeech dataset directly from the source
 """
 
+SCRIPT_VERSION = "2025-09-08-02"
+
 import os
 import sys
 import subprocess
@@ -12,9 +14,57 @@ import tarfile
 from pathlib import Path
 
 
+def _safe_extract_tar_bz2(archive_path: str, dest_dir: str) -> None:
+    """Safely extract a .tar.bz2 archive to dest_dir, preventing path traversal."""
+    with tarfile.open(archive_path, 'r:bz2') as tar:
+        def is_within_directory(directory, target):
+            abs_directory = os.path.abspath(directory)
+            abs_target = os.path.abspath(target)
+            return os.path.commonpath([abs_directory]) == os.path.commonpath([abs_directory, abs_target])
+
+        for member in tar.getmembers():
+            member_path = os.path.join(dest_dir, member.name)
+            if not is_within_directory(dest_dir, member_path):
+                raise tarfile.TarError("Blocked path traversal in tar file")
+        tar.extractall(dest_dir)
+
+
+def _download_with_retries(url: str, dest_file: str, attempts: int = 3, timeout: int = 300) -> None:
+    """Download URL to dest_file with retries and simple exponential backoff."""
+    last_err = None
+    for i in range(1, attempts + 1):
+        try:
+            print(f"Attempt {i}/{attempts}: {url}")
+            response = requests.get(url, stream=True, timeout=timeout)
+            response.raise_for_status()
+
+            total_size = int(response.headers.get('content-length', 0))
+            downloaded_size = 0
+
+            with open(dest_file, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded_size += len(chunk)
+                        if total_size > 0:
+                            progress = (downloaded_size / total_size) * 100
+                            print(f"\rDownload progress: {progress:.1f}% ({downloaded_size}/{total_size} bytes)", end='', flush=True)
+            print()
+            return
+        except requests.exceptions.RequestException as e:
+            last_err = e
+            print(f"Warning: download failed: {e}")
+            if i < attempts:
+                backoff = min(30, 2 ** i)
+                print(f"Retrying in {backoff}s...")
+                time.sleep(backoff)
+    # If we exit loop without return
+    raise last_err if last_err else RuntimeError("Download failed for unknown reason")
+
 def download_ljspeech_dataset():
     """Download the LJSpeech dataset directly from the source."""
     print("Starting LJSpeech dataset download...")
+    print(f"download_ljspeech.py version: {SCRIPT_VERSION}")
     print(f"Current working directory: {os.getcwd()}")
     print(f"Python executable: {sys.executable}")
 
@@ -31,41 +81,52 @@ def download_ljspeech_dataset():
         print("Skipping download.")
         return True
 
-    # LJSpeech dataset URL
-    dataset_url = "https://data.keithito.com/speech/LJSpeech-1.1.tar.bz2"
+    # Candidate mirror URLs (first reachable wins)
+    mirror_urls = [
+        "https://data.keithito.com/speech/LJSpeech-1.1.tar.bz2",
+        "https://www.openslr.org/resources/12/LJSpeech-1.1.tar.bz2",
+        "https://us.openslr.org/resources/12/LJSpeech-1.1.tar.bz2",
+        "https://openslr.elda.org/resources/12/LJSpeech-1.1.tar.bz2",
+    ]
     tar_file_path = os.path.join(data_dir, "LJSpeech-1.1.tar.bz2")
 
     try:
-        # Download the dataset
-        print(f"Downloading LJSpeech dataset from: {dataset_url}")
-        print("This may take several minutes depending on your internet connection...")
-        
-        # ダウンロードを実行
-        response = requests.get(dataset_url, stream=True, timeout=300)
-        response.raise_for_status()
-        
-        total_size = int(response.headers.get('content-length', 0))
-        downloaded_size = 0
-        
-        with open(tar_file_path, 'wb') as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-                    downloaded_size += len(chunk)
-                    if total_size > 0:
-                        progress = (downloaded_size / total_size) * 100
-                        print(f"\rDownload progress: {progress:.1f}% ({downloaded_size}/{total_size} bytes)", end='', flush=True)
-        
-        print(f"\n✅ Download completed: {tar_file_path}")
-        
-        # ファイルサイズを確認
-        file_size_mb = os.path.getsize(tar_file_path) / (1024 * 1024)
-        print(f"Downloaded file size: {file_size_mb:.1f} MB")
-        
-        # アーカイブを展開
-        print("Extracting archive...")
-        with tarfile.open(tar_file_path, 'r:bz2') as tar:
-            tar.extractall(data_dir)
+        # If a tarball already exists, try extraction first
+        if os.path.exists(tar_file_path) and os.path.getsize(tar_file_path) > 0:
+            print(f"Found existing archive: {tar_file_path}. Trying to extract before re-downloading...")
+            try:
+                _safe_extract_tar_bz2(tar_file_path, data_dir)
+                print("✅ Archive extracted successfully (existing file)")
+            except tarfile.TarError as e:
+                print(f"Warning: existing archive extraction failed: {e}. Will re-download.")
+                try:
+                    os.remove(tar_file_path)
+                except Exception:
+                    pass
+
+        # Download the dataset using mirrors if dataset not yet present
+        if not os.path.exists(ljspeech_path):
+            print("Starting download. This may take several minutes...")
+            last_err = None
+            for url in mirror_urls:
+                print(f"Downloading LJSpeech dataset from: {url}")
+                try:
+                    _download_with_retries(url, tar_file_path, attempts=3, timeout=300)
+                    print(f"✅ Download completed: {tar_file_path}")
+                    break
+                except Exception as e:
+                    last_err = e
+                    print(f"Mirror failed: {url} -> {e}")
+            else:
+                raise requests.exceptions.RequestException(f"All mirrors failed: {last_err}")
+
+            # ファイルサイズを確認
+            file_size_mb = os.path.getsize(tar_file_path) / (1024 * 1024)
+            print(f"Downloaded file size: {file_size_mb:.1f} MB")
+
+            # アーカイブを展開
+            print("Extracting archive...")
+            _safe_extract_tar_bz2(tar_file_path, data_dir)
         
         print("✅ Archive extracted successfully")
         
@@ -98,8 +159,9 @@ def download_ljspeech_dataset():
         
         # 一時ファイルを削除（オプション）
         try:
-            os.remove(tar_file_path)
-            print(f"✅ Cleaned up temporary file: {tar_file_path}")
+            if os.path.exists(tar_file_path):
+                os.remove(tar_file_path)
+                print(f"✅ Cleaned up temporary file: {tar_file_path}")
         except Exception as e:
             print(f"Warning: Could not remove temporary file: {e}")
 

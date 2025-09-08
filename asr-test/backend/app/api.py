@@ -6,6 +6,7 @@ from pathlib import Path
 import requests
 import torch
 import torchaudio
+import subprocess
 
 from . import trainer, config_loader
 from .models.interface import BaseASRModel
@@ -106,41 +107,46 @@ def download_dataset(params: Dict):
     dataset_name = params.get("dataset_name")
     try:
         if dataset_name == "ljspeech":
-            # 直接ダウンロード（requests + tarfile）で実行
+            # スクリプトをサブプロセス経由で実行してダウンロード
+            script_path = "/app/download_ljspeech.py"
             data_root = "/app/data"
             ljspeech_root = os.path.join(data_root, "ljspeech")
-            os.makedirs(ljspeech_root, exist_ok=True)
-
-            dataset_url = "https://data.keithito.com/speech/LJSpeech-1.1.tar.bz2"
-            tar_path = os.path.join(ljspeech_root, "LJSpeech-1.1.tar.bz2")
-            extract_dir = ljspeech_root
             final_dir = os.path.join(ljspeech_root, "LJSpeech-1.1")
+
+            os.makedirs(ljspeech_root, exist_ok=True)
 
             # 既に展開済みならスキップ
             if os.path.exists(final_dir):
-                return {"message": f"Dataset '{dataset_name}' already exists", "path": final_dir}
+                wav_count = len(list(Path(final_dir).glob("wavs/*.wav")))
+                return {"message": f"Dataset '{dataset_name}' already exists", "path": final_dir, "num_wavs": wav_count}
 
-            # ダウンロード
-            with requests.get(dataset_url, stream=True, timeout=300) as r:
-                r.raise_for_status()
-                with open(tar_path, "wb") as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        if chunk:
-                            f.write(chunk)
-
-            # 展開
-            with tarfile.open(tar_path, "r:bz2") as tar:
-                tar.extractall(extract_dir)
-
-            # wav 数の簡易検査
-            wav_count = len(list(Path(final_dir).glob("wavs/*.wav")))
-
-            # 一時ファイル削除（失敗しても無視）
             try:
-                os.remove(tar_path)
-            except Exception:
-                pass
+                # 環境の python パスで実行（compose/uvicorn 環境に追従）
+                python_exe = os.environ.get("PYTHON", "python3")
+                result = subprocess.run([
+                    python_exe, script_path
+                ], capture_output=True, text=True, timeout=3600)
+            except subprocess.TimeoutExpired as e:
+                raise HTTPException(status_code=504, detail=f"Download script timeout: {str(e)}")
 
+            if result.returncode != 0:
+                # スクリプトの出力をすべて返す（クライアント側でスタックトレースを確認可能にする）
+                stdout_text = result.stdout or ""
+                stderr_text = result.stderr or ""
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        f"Download script failed (exit={result.returncode})\n"
+                        f"STDOUT:\n{stdout_text}\n"
+                        f"STDERR:\n{stderr_text}"
+                    ),
+                )
+
+            # 成功時の検査
+            if not os.path.exists(final_dir):
+                raise HTTPException(status_code=500, detail=f"Download finished but target dir not found: {final_dir}")
+
+            wav_count = len(list(Path(final_dir).glob("wavs/*.wav")))
             return {
                 "message": f"Dataset '{dataset_name}' downloaded successfully",
                 "path": final_dir,
@@ -154,7 +160,11 @@ def download_dataset(params: Dict):
         raise HTTPException(status_code=500, detail=f"Archive extract error: {str(e)}")
     except Exception as e:
         import traceback
-        error_detail = f"Unexpected error: {str(e)}\nTraceback: {traceback.format_exc()}"
+        # エラー発生時は常にスタックトレースを含めて返す
+        error_detail = (
+            f"Unexpected error: {str(e)}\n"
+            f"Traceback (most recent call last):\n{traceback.format_exc()}"
+        )
         raise HTTPException(status_code=500, detail=error_detail)
 
 @router.get("/test", summary="テスト用エンドポイント")
