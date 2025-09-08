@@ -233,9 +233,27 @@ def download_dataset(dataset_name: str):
         response = requests.post(f"{BACKEND_URL}/dataset/download", json={"dataset_name": dataset_name}, timeout=300, proxies=request_proxies)
         
         if response.status_code == 200:
+            result = response.json()
             st.session_state.logs.append(f"✅ データセット '{dataset_name}' のダウンロードが完了しました")
+            
+            # サーバーからの詳細情報をログに追加
+            if "stdout" in result and result["stdout"]:
+                st.session_state.logs.append(f"📋 ダウンロード詳細:\n{result['stdout']}")
+            if "stderr" in result and result["stderr"]:
+                st.session_state.logs.append(f"⚠️ 警告メッセージ:\n{result['stderr']}")
+            
             return True
         else:
+            # より詳細なエラー情報を表示
+            try:
+                error_detail = response.json()
+                if "detail" in error_detail:
+                    st.session_state.logs.append(f"❌ ダウンロードエラー詳細:\n{error_detail['detail']}")
+                else:
+                    st.session_state.logs.append(f"❌ ダウンロードエラー: {response.text}")
+            except:
+                st.session_state.logs.append(f"❌ ダウンロードエラー: HTTP {response.status_code}")
+            
             log_detailed_error("データセットダウンロード", Exception(f"HTTP {response.status_code}"), response)
             return False
             

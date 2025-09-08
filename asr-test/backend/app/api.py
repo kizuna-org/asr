@@ -1,5 +1,9 @@
 from fastapi import APIRouter, BackgroundTasks, UploadFile, File, HTTPException
 from typing import Dict
+import os
+import tarfile
+from pathlib import Path
+import requests
 import torch
 import torchaudio
 
@@ -102,30 +106,56 @@ def download_dataset(params: Dict):
     dataset_name = params.get("dataset_name")
     try:
         if dataset_name == "ljspeech":
-            # LJSpeechデータセットのダウンロード処理
-            import subprocess
-            import os
-            
-            data_dir = "/app/data"
-            ljspeech_dir = os.path.join(data_dir, "ljspeech")
-            
-            if not os.path.exists(ljspeech_dir):
-                os.makedirs(ljspeech_dir, exist_ok=True)
-            
-            # ダウンロードスクリプトを実行
-            download_script = "/app/download_ljspeech.py"
-            if os.path.exists(download_script):
-                result = subprocess.run(["python3", download_script], capture_output=True, text=True, cwd=data_dir)
-                if result.returncode == 0:
-                    return {"message": f"Dataset '{dataset_name}' downloaded successfully"}
-                else:
-                    raise HTTPException(status_code=500, detail=f"Download failed: {result.stderr}")
-            else:
-                raise HTTPException(status_code=404, detail="Download script not found")
+            # 直接ダウンロード（requests + tarfile）で実行
+            data_root = "/app/data"
+            ljspeech_root = os.path.join(data_root, "ljspeech")
+            os.makedirs(ljspeech_root, exist_ok=True)
+
+            dataset_url = "https://data.keithito.com/speech/LJSpeech-1.1.tar.bz2"
+            tar_path = os.path.join(ljspeech_root, "LJSpeech-1.1.tar.bz2")
+            extract_dir = ljspeech_root
+            final_dir = os.path.join(ljspeech_root, "LJSpeech-1.1")
+
+            # 既に展開済みならスキップ
+            if os.path.exists(final_dir):
+                return {"message": f"Dataset '{dataset_name}' already exists", "path": final_dir}
+
+            # ダウンロード
+            with requests.get(dataset_url, stream=True, timeout=300) as r:
+                r.raise_for_status()
+                with open(tar_path, "wb") as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+
+            # 展開
+            with tarfile.open(tar_path, "r:bz2") as tar:
+                tar.extractall(extract_dir)
+
+            # wav 数の簡易検査
+            wav_count = len(list(Path(final_dir).glob("wavs/*.wav")))
+
+            # 一時ファイル削除（失敗しても無視）
+            try:
+                os.remove(tar_path)
+            except Exception:
+                pass
+
+            return {
+                "message": f"Dataset '{dataset_name}' downloaded successfully",
+                "path": final_dir,
+                "num_wavs": wav_count,
+            }
         else:
             raise HTTPException(status_code=400, detail=f"Dataset '{dataset_name}' is not supported for download")
+    except requests.exceptions.Timeout as e:
+        raise HTTPException(status_code=500, detail=f"Download timeout: {str(e)}")
+    except tarfile.TarError as e:
+        raise HTTPException(status_code=500, detail=f"Archive extract error: {str(e)}")
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        import traceback
+        error_detail = f"Unexpected error: {str(e)}\nTraceback: {traceback.format_exc()}"
+        raise HTTPException(status_code=500, detail=error_detail)
 
 @router.get("/test", summary="テスト用エンドポイント")
 def test_endpoint():
