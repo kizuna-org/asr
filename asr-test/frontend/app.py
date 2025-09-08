@@ -514,12 +514,12 @@ if st.session_state.is_training:
         progress_updated = update_progress_from_backend()
         st.session_state.last_progress_update = current_time
     
-    # リロードの頻度を制限（10秒ごと、または進捗が更新された場合のみ）
+    # リロードの頻度を制限（1秒ごと、または進捗が更新された場合のみ）
     if "last_rerun_time" not in st.session_state:
         st.session_state.last_rerun_time = 0
     
     should_rerun = (
-        current_time - st.session_state.last_rerun_time >= 10 or  # 10秒経過
+        current_time - st.session_state.last_rerun_time >= 1 or  # 1秒経過
         progress_updated  # 進捗が更新された
     )
     
