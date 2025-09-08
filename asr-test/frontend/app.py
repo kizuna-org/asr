@@ -53,7 +53,10 @@ def init_session_state():
         "current_progress": 0,
         "progress_text": "待機中",
         "last_progress_update": 0,
-        "initial_load": False
+        "initial_load": False,
+        "last_rerun_time": 0,
+        "consecutive_errors": 0,
+        "max_consecutive_errors": 3
     }
     for key, value in defaults.items():
         if key not in st.session_state:
@@ -135,17 +138,24 @@ def get_status():
             status = response.json()
             st.session_state.is_training = status.get("is_training", False)
             st.session_state.logs.append("✅ ステータスを取得しました")
+            # 成功時は連続エラーカウンターをリセット
+            st.session_state.consecutive_errors = 0
         else:
             log_detailed_error("ステータス取得", Exception(f"HTTP {response.status_code}"), response)
+            st.session_state.consecutive_errors += 1
             
     except requests.exceptions.ConnectionError as e:
         log_detailed_error("ステータス取得", e)
+        st.session_state.consecutive_errors += 1
     except requests.exceptions.Timeout as e:
         log_detailed_error("ステータス取得", e)
+        st.session_state.consecutive_errors += 1
     except requests.exceptions.RequestException as e:
         log_detailed_error("ステータス取得", e)
+        st.session_state.consecutive_errors += 1
     except Exception as e:
         log_detailed_error("ステータス取得", e)
+        st.session_state.consecutive_errors += 1
 
 def start_training(model_name: str, dataset_name: str, epochs: int, batch_size: int):
     """学習を開始"""
@@ -232,10 +242,13 @@ def get_training_progress():
             st.session_state.logs.append(f"⚠️ 進捗取得エラー: HTTP {response.status_code}")
             return None
     except requests.exceptions.ConnectionError as e:
+        # 接続エラーの場合は学習状態を停止に設定
         st.session_state.logs.append(f"❌ バックエンド接続エラー: {e}")
+        st.session_state.is_training = False
         return None
     except requests.exceptions.Timeout as e:
-        st.session_state.logs.append(f"❌ 進捗取得タイムアウト: {e}")
+        # タイムアウトの場合はログに記録するが、学習状態は維持
+        st.session_state.logs.append(f"⏰ 進捗取得タイムアウト: {e}")
         return None
     except Exception as e:
         st.session_state.logs.append(f"❌ 進捗取得エラー: {e}")
@@ -243,6 +256,11 @@ def get_training_progress():
 
 def update_progress_from_backend():
     """バックエンドから進捗を取得して更新"""
+    # 連続エラーが多すぎる場合は進捗更新をスキップ
+    if st.session_state.consecutive_errors >= st.session_state.max_consecutive_errors:
+        st.session_state.logs.append("⚠️ 連続エラーが多すぎるため、進捗更新を一時停止します")
+        return False
+    
     progress_data = get_training_progress()
     if progress_data:
         # 進捗データを更新
@@ -291,15 +309,34 @@ def update_progress_from_backend():
             for log in progress_data["latest_logs"]:
                 if log not in st.session_state.logs:
                     st.session_state.logs.append(log)
+        
+        # 成功時は連続エラーカウンターをリセット
+        st.session_state.consecutive_errors = 0
+        return True
+    else:
+        st.session_state.consecutive_errors += 1
+        return False
 
 # --- UI描画 ---
 st.set_page_config(layout="wide")
 init_session_state()
 
 if not st.session_state.initial_load:
+    # 初期化時は設定とステータスを取得
     get_config()
     get_status()
     st.session_state.initial_load = True
+elif st.session_state.is_training:
+    # 学習中の場合のみ、ステータスを再確認（リロード時の状態復元）
+    import time
+    current_time = time.time()
+    if "last_status_check" not in st.session_state:
+        st.session_state.last_status_check = 0
+    
+    # ステータス確認の頻度を制限（30秒ごと）
+    if current_time - st.session_state.last_status_check >= 30:
+        get_status()
+        st.session_state.last_status_check = current_time
 
 # タイトル
 st.title("ASR 学習ダッシュボード")
@@ -383,9 +420,21 @@ if st.session_state.is_training:
     if "last_progress_update" not in st.session_state:
         st.session_state.last_progress_update = 0
     
+    # 進捗更新の実行
+    progress_updated = False
     if current_time - st.session_state.last_progress_update >= 5:
-        update_progress_from_backend()
+        progress_updated = update_progress_from_backend()
         st.session_state.last_progress_update = current_time
     
-    # 学習中は定期的に更新
-    st.rerun()
+    # リロードの頻度を制限（10秒ごと、または進捗が更新された場合のみ）
+    if "last_rerun_time" not in st.session_state:
+        st.session_state.last_rerun_time = 0
+    
+    should_rerun = (
+        current_time - st.session_state.last_rerun_time >= 10 or  # 10秒経過
+        progress_updated  # 進捗が更新された
+    )
+    
+    if should_rerun:
+        st.session_state.last_rerun_time = current_time
+        st.rerun()
