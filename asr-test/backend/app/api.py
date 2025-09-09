@@ -20,23 +20,43 @@ from .websocket import manager as websocket_manager
 
 router = APIRouter()
 logger = logging.getLogger("asr-api")
-print(f"DEBUG: API router created")  # デバッグ用
+
+# ログ出力の改善
+logger.info("API router initialized", extra={"extra_fields": {"component": "api", "action": "init"}})
 
 def get_model_for_inference(model_name: str) -> BaseASRModel:
     """推論用のモデルをロードまたはキャッシュから取得する"""
+    logger.info(f"Getting model for inference: {model_name}", 
+                extra={"extra_fields": {"component": "api", "action": "get_model", "model_name": model_name}})
+    
     if model_name not in _model_cache:
+        logger.info(f"Model {model_name} not in cache, loading from config", 
+                   extra={"extra_fields": {"component": "api", "action": "load_model", "model_name": model_name}})
+        
         model_config = config_loader.get_model_config(model_name)
         if not model_config:
+            logger.error(f"Model config not found: {model_name}", 
+                        extra={"extra_fields": {"component": "api", "action": "error", "model_name": model_name, "error_type": "config_not_found"}})
             raise HTTPException(status_code=404, detail=f"Model '{model_name}' not found in config.")
         
         # 動的にモデルクラスをインポート
         import importlib
         ModelClass = getattr(importlib.import_module(f".models.{model_name}", "app"), f"{model_name.capitalize()}ASRModel")
         
+        logger.info(f"Loading model class: {ModelClass.__name__}", 
+                   extra={"extra_fields": {"component": "api", "action": "load_model_class", "model_name": model_name, "class_name": ModelClass.__name__}})
+        
         model = ModelClass(model_config)
         # TODO: 最新のチェックポイントをロードするロジック
         model.eval() # 推論モード
         _model_cache[model_name] = model
+        
+        logger.info(f"Model {model_name} loaded and cached successfully", 
+                   extra={"extra_fields": {"component": "api", "action": "model_cached", "model_name": model_name}})
+    else:
+        logger.debug(f"Using cached model: {model_name}", 
+                    extra={"extra_fields": {"component": "api", "action": "use_cached_model", "model_name": model_name}})
+    
     return _model_cache[model_name]
 
 @router.post("/train/start", summary="学習開始")
@@ -89,6 +109,9 @@ def stop_training():
 @router.post("/inference", summary="音声ファイルによる推論")
 async def inference(file: UploadFile = File(...), model_name: str = "conformer"):
     """アップロードされた音声ファイルで推論を実行する"""
+    logger.info(f"Starting inference request", 
+                extra={"extra_fields": {"component": "api", "action": "inference_start", "model_name": model_name, "filename": file.filename}})
+    
     try:
         # モデルを取得
         model = get_model_for_inference(model_name)
@@ -99,8 +122,15 @@ async def inference(file: UploadFile = File(...), model_name: str = "conformer")
             shutil.copyfileobj(file.file, tmp)
             tmp_path = tmp.name
 
+        logger.info(f"Audio file saved to temporary path: {tmp_path}", 
+                   extra={"extra_fields": {"component": "api", "action": "file_saved", "tmp_path": tmp_path}})
+
         # torchaudio で読み込み
         waveform, sample_rate = torchaudio.load(tmp_path)
+        
+        logger.info(f"Audio loaded successfully", 
+                   extra={"extra_fields": {"component": "api", "action": "audio_loaded", 
+                                         "original_shape": waveform.shape, "sample_rate": sample_rate}})
 
         # HuggingFaceモデルが要求する16kHzにリサンプリング
         resampler = torchaudio.transforms.Resample(orig_freq=sample_rate, new_freq=16000)
@@ -112,16 +142,38 @@ async def inference(file: UploadFile = File(...), model_name: str = "conformer")
         else:
             resampled_waveform = resampled_waveform.squeeze(0)
 
+        logger.info(f"Audio preprocessed", 
+                   extra={"extra_fields": {"component": "api", "action": "audio_preprocessed", 
+                                         "final_shape": resampled_waveform.shape, "dtype": str(resampled_waveform.dtype)}})
+
         # 推論実行
+        import time
+        start_time = time.time()
         transcription = model.inference(resampled_waveform)
-        return {"transcription": transcription}
+        inference_time = time.time() - start_time
+        
+        logger.info(f"Inference completed successfully", 
+                   extra={"extra_fields": {"component": "api", "action": "inference_complete", 
+                                         "transcription": transcription, "inference_time_ms": inference_time * 1000}})
+        
+        # 一時ファイルを削除
+        try:
+            os.unlink(tmp_path)
+            logger.debug(f"Temporary file deleted: {tmp_path}")
+        except Exception as e:
+            logger.warning(f"Failed to delete temporary file: {e}")
+        
+        return {"transcription": transcription, "inference_time_ms": inference_time * 1000}
     except Exception as e:
         # 可能な限り詳細な情報を返す（フロントでログ表示）
         error_detail = (
             f"Inference failed: {str(e)}\n"
             f"Traceback (most recent call last):\n{traceback.format_exc()}"
         )
-        logger.error(error_detail)
+        logger.error(f"Inference failed", 
+                    extra={"extra_fields": {"component": "api", "action": "inference_error", 
+                                          "model_name": model_name, "filename": file.filename, 
+                                          "error": str(e), "traceback": traceback.format_exc()}})
         raise HTTPException(status_code=500, detail=error_detail)
 
 @router.get("/config", summary="設定情報の取得")

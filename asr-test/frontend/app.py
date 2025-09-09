@@ -12,6 +12,58 @@ import queue
 import numpy as np
 from streamlit_webrtc import webrtc_streamer, WebRtcMode, AudioProcessorBase
 import logging
+import sys
+from datetime import datetime
+
+# --- ログ設定 ---
+class StructuredFormatter(logging.Formatter):
+    """構造化ログフォーマッター（フロントエンド用）"""
+    
+    def format(self, record):
+        log_entry = {
+            "timestamp": datetime.fromtimestamp(record.created).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+            "module": record.module,
+            "function": record.funcName,
+            "line": record.lineno
+        }
+        
+        # 例外情報がある場合は追加
+        if record.exc_info:
+            log_entry["exception"] = self.formatException(record.exc_info)
+        
+        # 追加のフィールドがある場合は追加
+        if hasattr(record, 'extra_fields'):
+            log_entry.update(record.extra_fields)
+            
+        return json.dumps(log_entry, ensure_ascii=False)
+
+def setup_frontend_logging():
+    """フロントエンドのログ設定を初期化"""
+    # ルートロガーの設定
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    
+    # 既存のハンドラーをクリア
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
+    
+    # コンソールハンドラーの設定
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+    console_handler.setFormatter(StructuredFormatter())
+    root_logger.addHandler(console_handler)
+    
+    # 特定のロガーのレベル設定
+    logging.getLogger("ui-rt").setLevel(logging.INFO)
+    logging.getLogger("audio_puller").setLevel(logging.INFO)
+    logging.getLogger("websocket_loop").setLevel(logging.INFO)
+    logging.getLogger("websocket_sender").setLevel(logging.INFO)
+
+# ログ設定を初期化
+setup_frontend_logging()
 
 # --- 設定 ---
 # 環境変数からバックエンドURLを取得、デフォルトはローカルホスト
@@ -597,30 +649,49 @@ class MicAudioProcessor(AudioProcessorBase):
         self.logger = logging.getLogger("ui-rt")
         self.msg_queue = None  # optional queue to report stats
         self._frames_sent = 0
+        
+        self.logger.info("MicAudioProcessor initialized", 
+                        extra={"extra_fields": {"component": "audio_processor", "action": "init"}})
 
     def recv_audio(self, frames, **kwargs):
         # frames: list of av.AudioFrame
+        self.logger.debug("Audio frames received", 
+                         extra={"extra_fields": {"component": "audio_processor", "action": "frames_received", 
+                                               "frame_count": len(frames), "has_queue": self.frame_queue is not None}})
+        
         if self.frame_queue is None:
-            self.logger.debug("recv_audio called without frame_queue")
+            self.logger.debug("Frame queue is None, returning frames without processing", 
+                             extra={"extra_fields": {"component": "audio_processor", "action": "no_queue"}})
             return frames
+            
         for frame in frames:
             # 32-bit float PCM, shape: (channels, samples)
             pcm = frame.to_ndarray(format="flt")
+            
             # モノラル化
             if pcm.ndim == 2 and pcm.shape[0] > 1:
                 pcm_mono = pcm.mean(axis=0)
             else:
                 pcm_mono = pcm[0] if pcm.ndim == 2 else pcm
+            
             # 送信は float32 little-endian bytes（サーバは f32 をサポート）
             pcm_f32 = pcm_mono.astype(np.float32)
+            
             try:
                 self.frame_queue.put(pcm_f32.tobytes(), timeout=0.1)
                 self._frames_sent += 1
+                
+                if self._frames_sent % 25 == 0:  # 定期的にログ出力
+                    self.logger.info("Audio frames processed", 
+                                   extra={"extra_fields": {"component": "audio_processor", "action": "frames_processed", 
+                                                         "total_frames": self._frames_sent, "frame_size_bytes": len(pcm_f32.tobytes())}})
+                
                 if self.msg_queue and (self._frames_sent % 25 == 0):
                     # おおよそ定期的に統計を送る
                     self.msg_queue.put({"type": "stats", "payload": {"frames_sent": self._frames_sent}})
             except queue.Full:
-                self.logger.warning("frame_queue is full; dropping audio chunk")
+                self.logger.warning("Frame queue is full, dropping audio chunk", 
+                                  extra={"extra_fields": {"component": "audio_processor", "action": "queue_full"}})
         return frames
 
 async def stream_audio_to_ws(q: "queue.Queue[bytes]", model_name: str, sample_rate: int):
@@ -635,7 +706,15 @@ async def stream_audio_to_ws(q: "queue.Queue[bytes]", model_name: str, sample_ra
                 ping_timeout=20,
                 open_timeout=20,
             ) as ws:
-                await ws.send(json.dumps({"type": "start", "model_name": model_name, "sample_rate": sample_rate, "format": "f32"}))
+                # 接続開始メッセージを送信
+                start_msg = {"type": "start", "model_name": model_name, "sample_rate": sample_rate, "format": "f32"}
+                await ws.send(json.dumps(start_msg))
+                
+                logger = logging.getLogger("websocket_sender")
+                logger.info("WebSocket start message sent", 
+                           extra={"extra_fields": {"component": "websocket", "action": "start_sent", 
+                                                 "model_name": model_name, "sample_rate": sample_rate}})
+                
                 # 受信タスク
                 async def receiver():
                     try:
@@ -643,38 +722,67 @@ async def stream_audio_to_ws(q: "queue.Queue[bytes]", model_name: str, sample_ra
                             msg = await ws.recv()
                             try:
                                 data = json.loads(msg)
+                                logger.debug("WebSocket message received", 
+                                           extra={"extra_fields": {"component": "websocket", "action": "message_received", 
+                                                                 "message_type": data.get("type")}})
                                 # メインスレッドで処理するため、キューに積む
-                                st.session_state["realtime_msg_queue"].put(data)
-                            except Exception:
-                                st.session_state["realtime_msg_queue"].put({"type": "error", "payload": {"message": f"invalid message: {msg}"}})
+                                try:
+                                    st.session_state["realtime_msg_queue"].put(data)
+                                except Exception:
+                                    # Streamlitコンテキストエラーを無視
+                                    pass
+                            except Exception as e:
+                                logger.error("Error parsing WebSocket message", 
+                                           extra={"extra_fields": {"component": "websocket", "action": "parse_error", 
+                                                                 "error": str(e), "message": msg}})
+                                try:
+                                    st.session_state["realtime_msg_queue"].put({"type": "error", "payload": {"message": f"invalid message: {msg}"}})
+                                except Exception:
+                                    pass
                                 pass
-                    except Exception:
+                    except Exception as e:
+                        logger.error("WebSocket receiver error", 
+                                   extra={"extra_fields": {"component": "websocket", "action": "receiver_error", 
+                                                         "error": str(e)}})
                         return
 
                 recv_task = asyncio.create_task(receiver())
 
                 try:
-                    while True:
+                    while st.session_state.get("realtime_running", False):
                         try:
                             chunk = q.get(timeout=0.2)
+                            logger.debug("Sending audio chunk", 
+                                       extra={"extra_fields": {"component": "websocket", "action": "chunk_send", 
+                                                             "chunk_size_bytes": len(chunk)}})
+                            await ws.send(chunk)
+                            logger.debug("Audio chunk sent successfully", 
+                                       extra={"extra_fields": {"component": "websocket", "action": "chunk_sent"}})
+                            # 送信カウンタを簡易計測
+                            cnt = st.session_state.get("_rt_chunks_sent", 0) + 1
+                            st.session_state["_rt_chunks_sent"] = cnt
+                            if cnt % 25 == 0:
+                                logger.info("Audio chunks sent", 
+                                           extra={"extra_fields": {"component": "websocket", "action": "chunks_sent", 
+                                                                 "total_chunks": cnt}})
+                                # Streamlitのセッション状態へのアクセスはスレッド外で行う
+                                pass
                         except queue.Empty:
                             # サイレント時も接続維持
                             await asyncio.sleep(0.02)
                             continue
-                        await ws.send(chunk)
-                        # 送信カウンタを簡易計測
-                        cnt = st.session_state.get("_rt_chunks_sent", 0) + 1
-                        st.session_state["_rt_chunks_sent"] = cnt
-                        if cnt % 25 == 0:
-                            try:
-                                st.session_state["realtime_msg_queue"].put({"type": "stats", "payload": {"chunks_sent": cnt}})
-                            except Exception:
-                                pass
+                        except Exception as e:
+                            logger.error("Error sending audio chunk", 
+                                       extra={"extra_fields": {"component": "websocket", "action": "chunk_send_error", 
+                                                             "error": str(e)}})
+                            break
                 except asyncio.CancelledError:
                     pass
                 finally:
                     try:
                         await ws.send(json.dumps({"type": "stop"}))
+                        logger.info("WebSocket stop message sent", 
+                                   extra={"extra_fields": {"component": "websocket", "action": "stop_sent"}})
                     except Exception:
                         pass
                     recv_task.cancel()
@@ -683,11 +791,16 @@ async def stream_audio_to_ws(q: "queue.Queue[bytes]", model_name: str, sample_ra
                 return
         except Exception as e:
             retries += 1
+            logger.error("WebSocket connection error", 
+                        extra={"extra_fields": {"component": "websocket", "action": "connection_error", 
+                                              "retry_count": retries, "error": str(e)}})
             try:
                 st.session_state["realtime_msg_queue"].put({"type": "error", "payload": {"message": f"ws session error (retry {retries}): {e}"}})
             except Exception:
                 pass
             if retries >= 5:
+                logger.error("Max retries reached, giving up", 
+                            extra={"extra_fields": {"component": "websocket", "action": "max_retries_reached"}})
                 return
             await asyncio.sleep(min(1.0 * retries, 5.0))
 
@@ -708,7 +821,6 @@ with col_rt1:
         audio_receiver_size=2048,
         media_stream_constraints={"audio": True, "video": False},
         async_processing=True,
-        # AudioProcessor は受信ストリーム処理用のため未指定。ローカルマイクは audio_receiver から取得する。
     )
 
 with col_rt2:
@@ -717,49 +829,129 @@ with col_rt2:
     start_btn = st.button("リアルタイム開始", disabled=st.session_state.get("realtime_running", False) or rtc_ctx.state.playing is False)
     stop_btn = st.button("リアルタイム停止", disabled=not st.session_state.get("realtime_running", False))
 
-    if start_btn and rtc_ctx:
+    # デバッグ情報を表示
+    st.write("**デバッグ情報:**")
+    st.write(f"- start_btn: {start_btn}")
+    st.write(f"- rtc_ctx: {rtc_ctx is not None}")
+    st.write(f"- rtc_ctx.state.playing: {rtc_ctx.state.playing if rtc_ctx else 'N/A'}")
+    st.write(f"- rtc_ctx.audio_receiver: {rtc_ctx.audio_receiver is not None if rtc_ctx else 'N/A'}")
+    st.write(f"- realtime_running: {st.session_state.get('realtime_running', False)}")
+
+    if start_btn:
+        st.write(f"🔍 Start button pressed: rtc_ctx={rtc_ctx is not None}, audio_receiver={rtc_ctx.audio_receiver is not None if rtc_ctx else False}")
+        if not rtc_ctx:
+            st.error("WebRTCコンテキストが初期化されていません")
+        elif not rtc_ctx.audio_receiver:
+            st.error("オーディオレシーバーが初期化されていません")
+        else:
+            st.write("✅ All conditions met, starting realtime streaming")
+    
+    if start_btn and rtc_ctx and rtc_ctx.audio_receiver:
         # 送信キューとスレッド/タスクの初期化
         send_queue = queue.Queue(maxsize=100)
-        # WebRTCのローカルマイクフレームをpullするスレッド
+        
+        # audio_receiverから直接フレームを取得するスレッド
         def pull_audio_frames():
             import time as _time
+            import logging
             frames_sent = 0
+            
+            # ログ設定
+            logging.basicConfig(level=logging.INFO)
+            logger = logging.getLogger("audio_puller")
+            
+            logger.info("Starting audio puller thread", 
+                       extra={"extra_fields": {"component": "audio_puller", "action": "thread_start"}})
+            logger.info("Audio puller context info", 
+                       extra={"extra_fields": {"component": "audio_puller", "action": "context_info", 
+                                             "rtc_state": str(rtc_ctx.state), "has_receiver": rtc_ctx.audio_receiver is not None}})
+            
             while st.session_state.get("realtime_running", False):
                 if rtc_ctx.audio_receiver:
                     try:
-                        frames = rtc_ctx.audio_receiver.get_frames(timeout=1)
-                    except Exception:
-                        frames = []
-                    for frame in frames:
-                        try:
-                            pcm = frame.to_ndarray(format="flt")
-                            if pcm.ndim == 2 and pcm.shape[0] > 1:
-                                pcm_mono = pcm.mean(axis=0)
-                            else:
-                                pcm_mono = pcm[0] if pcm.ndim == 2 else pcm
-                            pcm_f32 = pcm_mono.astype(np.float32)
-                            send_queue.put(pcm_f32.tobytes(), timeout=0.2)
-                            frames_sent += 1
-                            if frames_sent % 25 == 0:
+                        frames = rtc_ctx.audio_receiver.get_frames(timeout=0.1)
+                        if frames:
+                            logger.info("Frames received from audio_receiver", 
+                                       extra={"extra_fields": {"component": "audio_puller", "action": "frames_received", 
+                                                             "frame_count": len(frames)}})
+                            
+                            for frame in frames:
                                 try:
-                                    st.session_state["realtime_msg_queue"].put({"type": "stats", "payload": {"frames_sent": frames_sent}})
-                                except Exception:
-                                    pass
-                        except Exception:
-                            continue
+                                    pcm = frame.to_ndarray(format="flt")
+                                    
+                                    if pcm.ndim == 2 and pcm.shape[0] > 1:
+                                        pcm_mono = pcm.mean(axis=0)
+                                    else:
+                                        pcm_mono = pcm[0] if pcm.ndim == 2 else pcm
+                                    
+                                    pcm_f32 = pcm_mono.astype(np.float32)
+                                    
+                                    # 音声データの詳細ログ
+                                    logger.debug("Processing audio frame", 
+                                               extra={"extra_fields": {"component": "audio_puller", "action": "frame_processing", 
+                                                                     "pcm_shape": pcm.shape, "pcm_mono_shape": pcm_mono.shape, 
+                                                                     "pcm_f32_shape": pcm_f32.shape, "bytes_size": len(pcm_f32.tobytes())}})
+                                    
+                                    try:
+                                        send_queue.put(pcm_f32.tobytes(), timeout=0.1)
+                                        frames_sent += 1
+                                        
+                                        if frames_sent % 10 == 0:  # より頻繁にログ出力
+                                            logger.info("Audio frames processed", 
+                                                       extra={"extra_fields": {"component": "audio_puller", "action": "frames_processed", 
+                                                                             "total_frames": frames_sent, "frame_size_bytes": len(pcm_f32.tobytes())}})
+                                            # Streamlitのセッション状態へのアクセスはスレッド外で行う
+                                            pass
+                                    except queue.Full:
+                                        logger.warning("Send queue is full, dropping frame", 
+                                                     extra={"extra_fields": {"component": "audio_puller", "action": "queue_full"}})
+                                except Exception as e:
+                                    logger.error("Error processing audio frame", 
+                                               extra={"extra_fields": {"component": "audio_puller", "action": "frame_error", 
+                                                                     "error": str(e)}})
+                                    continue
+                        else:
+                            # フレームが取得できない場合は短い間隔で待機
+                            _time.sleep(0.01)
+                    except Exception as e:
+                        logger.error("Error getting frames from audio_receiver", 
+                                   extra={"extra_fields": {"component": "audio_puller", "action": "get_frames_error", 
+                                                         "error": str(e)}})
+                        _time.sleep(0.1)
                 else:
+                    logger.debug("No audio_receiver available, waiting", 
+                               extra={"extra_fields": {"component": "audio_puller", "action": "no_receiver"}})
                     _time.sleep(0.05)
+
+        st.write("🚀 Starting realtime streaming with audio_receiver")
 
         # 新しいイベントループで実行
         loop = asyncio.new_event_loop()
         def run_loop():
-            asyncio.set_event_loop(loop)
-            loop.run_until_complete(stream_audio_to_ws(send_queue, selected_model or "conformer", int(sample_rate)))
+            import logging
+            logger = logging.getLogger("websocket_loop")
+            
+            try:
+                asyncio.set_event_loop(loop)
+                logger.info("Starting WebSocket loop", 
+                           extra={"extra_fields": {"component": "websocket_loop", "action": "loop_start", 
+                                                 "model": selected_model or "conformer", "sample_rate": int(sample_rate)}})
+                loop.run_until_complete(stream_audio_to_ws(send_queue, selected_model or "conformer", int(sample_rate)))
+            except Exception as e:
+                logger.error("WebSocket loop error", 
+                           extra={"extra_fields": {"component": "websocket_loop", "action": "loop_error", 
+                                                 "error": str(e), "traceback": traceback.format_exc()}})
+                try:
+                    st.error(f"WebSocket loop error: {e}")
+                except Exception:
+                    pass
         t = threading.Thread(target=run_loop, daemon=True)
         t.start()
+        
         # Puller スレッド開始
         p = threading.Thread(target=pull_audio_frames, daemon=True)
         p.start()
+        
         st.session_state["realtime_loop"] = loop
         st.session_state["realtime_thread"] = t
         st.session_state["realtime_puller"] = p
@@ -767,10 +959,17 @@ with col_rt2:
 
     if stop_btn and st.session_state.get("realtime_running", False):
         # 送信停止: スレッドとループを停止
+        logger = logging.getLogger("ui-rt")
+        logger.info("Stopping realtime streaming", 
+                   extra={"extra_fields": {"component": "ui", "action": "stop_streaming"}})
+        
+        st.session_state["realtime_running"] = False
+        
+        # スレッドの停止を待つ
         loop = st.session_state.get("realtime_loop")
         if loop and loop.is_running():
             loop.call_soon_threadsafe(loop.stop)
-        st.session_state["realtime_running"] = False
+        
         # puller スレッドはフラグで停止。追加の操作は不要。
 
 # メインスレッドでメッセージキューをドレインし、UI状態を更新

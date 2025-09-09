@@ -8,8 +8,8 @@ import torchaudio
 from . import config_loader
 
 router = APIRouter()
-# 既存の API ロガーに合わせる
-logger = logging.getLogger("asr-api")
+# WebSocket専用のロガー
+logger = logging.getLogger("websocket")
 
 class ConnectionManager:
     def __init__(self):
@@ -60,9 +60,12 @@ async def websocket_endpoint(websocket: WebSocket):
     サーバ側は 16kHz mono にリサンプリングしてバッファに蓄積し、
     約1秒毎にモデル推論を走らせて partial を返す。
     """
+    client_info = getattr(websocket, "client", None)
     await manager.connect(websocket)
-    logger.info("WS connected: client=%s", getattr(websocket, "client", None))
-    print("[WS] connected", getattr(websocket, "client", None))
+    
+    logger.info("WebSocket connection established", 
+                extra={"extra_fields": {"component": "websocket", "action": "connect", 
+                                      "client": str(client_info), "connection_count": len(manager.active_connections)}})
 
     # ストリーミング状態
     model = None  # type: Optional[torch.nn.Module]
@@ -79,14 +82,19 @@ async def websocket_endpoint(websocket: WebSocket):
             model_config = config_loader.get_model_config(model_name)
             if not model_config:
                 logger.error("Model config not found: %s", model_name)
+                print(f"[WS] ERROR: Model config not found: {model_name}")
                 raise RuntimeError(f"Model '{model_name}' not found in config.")
             import importlib
             class_name = f"{model_name.capitalize()}ASRModel"
             ModelClass = getattr(importlib.import_module(f".models.{model_name}", "app"), class_name)
             logger.info("Loading model class: %s", class_name)
+            print(f"[WS] Loading model class: {class_name}")
             m = ModelClass(model_config)
             m.eval()
             _model_cache[model_name] = m
+            print(f"[WS] Model {model_name} loaded and cached successfully")
+        else:
+            print(f"[WS] Using cached model: {model_name}")
         return _model_cache[model_name]
 
     try:
@@ -113,16 +121,22 @@ async def websocket_endpoint(websocket: WebSocket):
                         input_dtype = data.get("format", "i16")
                         if input_dtype not in ("i16", "f32"):
                             input_dtype = "i16"
+                        
                         # モデル・リサンプラ初期化
-                        logger.info("Start streaming: model=%s sr=%s fmt=%s", model_name, input_sample_rate, input_dtype)
-                        print(f"[WS] start: model={model_name} sr={input_sample_rate} fmt={input_dtype}")
+                        logger.info("Starting audio streaming", 
+                                   extra={"extra_fields": {"component": "websocket", "action": "start_streaming", 
+                                                         "model_name": model_name, "sample_rate": input_sample_rate, 
+                                                         "format": input_dtype, "client": str(client_info)}})
+                        
                         model = get_model_for_inference(model_name)
                         if input_sample_rate != 16000:
                             resampler = torchaudio.transforms.Resample(orig_freq=input_sample_rate, new_freq=16000)
-                            logger.debug("Resampler initialized: %s -> 16000", input_sample_rate)
-                            print(f"[WS] resampler: {input_sample_rate}->16000")
+                            logger.info("Resampler initialized", 
+                                       extra={"extra_fields": {"component": "websocket", "action": "resampler_init", 
+                                                             "from_rate": input_sample_rate, "to_rate": 16000}})
                         else:
                             resampler = None
+                        
                         buffer.clear()
                         last_infer_time = asyncio.get_event_loop().time()
                         await websocket.send_text(json.dumps({"type": "status", "payload": {"status": "ready"}}))
@@ -149,14 +163,20 @@ async def websocket_endpoint(websocket: WebSocket):
                     # 音声フレーム受信
                     if model is None:
                         # start 前のフレームは無視
-                        logger.debug("Audio frame ignored because streaming not started")
+                        logger.debug("Audio frame ignored because streaming not started", 
+                                   extra={"extra_fields": {"component": "websocket", "action": "frame_ignored", 
+                                                         "reason": "streaming_not_started"}})
                         continue
+                    
                     raw = message["bytes"]
                     if not raw:
+                        logger.debug("Empty audio chunk received", 
+                                   extra={"extra_fields": {"component": "websocket", "action": "empty_chunk"}})
                         continue
-                    logger.debug("Received audio chunk: %d bytes (fmt=%s)", len(raw), input_dtype)
-                    # print too to ensure visibility in container logs
-                    print(f"[WS] audio chunk {len(raw)} bytes fmt={input_dtype}")
+                    
+                    logger.debug("Received audio chunk", 
+                               extra={"extra_fields": {"component": "websocket", "action": "audio_chunk_received", 
+                                                     "size_bytes": len(raw), "format": input_dtype}})
                     # バイナリをテンソル化
                     if input_dtype == "i16":
                         tensor = torch.frombuffer(raw, dtype=torch.int16).to(torch.float32) / 32768.0
@@ -177,21 +197,42 @@ async def websocket_endpoint(websocket: WebSocket):
 
                     buffer.append(tensor)
                     total_samples = sum(t.numel() for t in buffer)
-                    logger.debug("Buffered samples: %d", total_samples)
-                    print(f"[WS] buffered samples={total_samples}")
+                    logger.debug("Audio buffered", 
+                               extra={"extra_fields": {"component": "websocket", "action": "audio_buffered", 
+                                                     "total_samples": total_samples, "buffer_chunks": len(buffer)}})
 
                     # 一定間隔で部分推論
                     now = asyncio.get_event_loop().time()
-                    if now - last_infer_time >= 1.0:
+                    if now - last_infer_time >= 1.0 and len(buffer) > 0:
                         last_infer_time = now
                         try:
                             waveform = torch.cat(buffer) if len(buffer) > 1 else buffer[0]
-                            logger.debug("Running partial inference on %d samples", waveform.numel())
-                            print(f"[WS] partial inference on samples={waveform.numel()}")
+                            
+                            logger.info("Running partial inference", 
+                                       extra={"extra_fields": {"component": "websocket", "action": "partial_inference_start", 
+                                                             "samples": waveform.numel(), "duration_sec": waveform.numel() / 16000}})
+                            
+                            import time
+                            start_time = time.time()
                             transcription = model.inference(waveform)
-                            await websocket.send_text(json.dumps({"type": "partial", "payload": {"text": transcription}}))
+                            inference_time = time.time() - start_time
+                            
+                            logger.info("Partial inference completed", 
+                                       extra={"extra_fields": {"component": "websocket", "action": "partial_inference_complete", 
+                                                             "transcription": transcription, "inference_time_ms": inference_time * 1000}})
+                            
+                            if transcription and transcription.strip():  # 空でない場合のみ送信
+                                await websocket.send_text(json.dumps({"type": "partial", "payload": {"text": transcription}}))
+                                logger.debug("Partial result sent to client", 
+                                           extra={"extra_fields": {"component": "websocket", "action": "partial_result_sent", 
+                                                                 "transcription": transcription}})
+                            else:
+                                logger.debug("Transcription is empty, not sending", 
+                                           extra={"extra_fields": {"component": "websocket", "action": "empty_transcription"}})
                         except Exception as e:
-                            logger.exception("Partial inference error")
+                            logger.error("Partial inference error", 
+                                       extra={"extra_fields": {"component": "websocket", "action": "partial_inference_error", 
+                                                             "error": str(e), "traceback": traceback.format_exc()}})
                             await websocket.send_text(json.dumps({"type": "error", "payload": {"message": str(e)}}))
                         # バッファは継続的に蓄積（全体での最良仮説前提）。必要に応じて末尾数秒に切り詰め可能。
                         # 例: 最新 20 秒に制限
@@ -215,6 +256,14 @@ async def websocket_endpoint(websocket: WebSocket):
                             logger.debug("Trimmed buffer to last %d seconds", max_seconds)
                         continue
     except WebSocketDisconnect:
-        logger.info("WS disconnected: client=%s", getattr(websocket, "client", None))
+        logger.info("WebSocket disconnected", 
+                   extra={"extra_fields": {"component": "websocket", "action": "disconnect", 
+                                         "client": str(getattr(websocket, "client", None))}})
+    except Exception as e:
+        logger.error("WebSocket error", 
+                   extra={"extra_fields": {"component": "websocket", "action": "error", 
+                                         "error": str(e), "traceback": traceback.format_exc()}})
     finally:
         manager.disconnect(websocket)
+        logger.info("WebSocket cleanup completed", 
+                   extra={"extra_fields": {"component": "websocket", "action": "cleanup"}})
