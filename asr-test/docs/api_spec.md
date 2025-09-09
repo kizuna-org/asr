@@ -1,10 +1,10 @@
 # API仕様書
 
-このドキュメントは、ASR学習POCアプリケーションのバックエンドAPIとWebSocket通信の仕様を定義します。
+このドキュメントは、ASR学習POCアプリケーションのバックエンドAPIとWebSocket通信の仕様を定義します。実装は FastAPI で提供され、HTTP API は全て `/api` プレフィックス配下で公開されます（WebSocketはプレフィックスなし）。
 
 ## 1. REST API
 
-ベースURL: `http://<backend-host>:<port>`
+ベースURL: `http://<backend-host>:<port>/api`
 
 ### 1.1. 学習制御
 
@@ -29,7 +29,7 @@
 -   **202 Accepted**: 学習プロセスが正常にバックグラウンドで開始された場合。
     ```json
     {
-      "status": "Training started in background."
+      "message": "Training started in background."
     }
     ```
 -   **400 Bad Request**: リクエストボディが不正な場合や、指定されたモデル/データセットが存在しない場合。
@@ -58,7 +58,7 @@
 -   **200 OK**: 学習プロセスに停止シグナルを送信した場合。
     ```json
     {
-      "status": "Stop signal sent to training process."
+      "message": "Stop signal sent to training process."
     }
     ```
 -   **404 Not Found**: 実行中の学習プロセスがない場合。
@@ -77,13 +77,15 @@
 **リクエストボディ (multipart/form-data)**
 
 -   `file` (file, required): 推論対象の音声ファイル (WAV, FLACなど)。
+-   `model_name` (query, optional): 既定値 `conformer`
 
 **レスポンス**
 
 -   **200 OK**: 推論が成功した場合。
     ```json
     {
-      "transcription": "hello world"
+      "transcription": "hello world",
+      "inference_time_ms": 123.4
     }
     ```
 -   **400 Bad Request**: ファイルが提供されなかった場合。
@@ -100,14 +102,70 @@
 -   **200 OK**:
     ```json
     {
-      "available_models": ["conformer", "rnn-t"],
+      "available_models": ["conformer"],
       "available_datasets": ["ljspeech"],
       "training_config": {
         "learning_rate": 0.001,
         "batch_size": 32,
-        "optimizer": "Adam"
+        "optimizer": "AdamW"
       }
     }
+### 1.4. ステータス・進捗
+
+#### `GET /status`
+
+学習の実行有無を返します。
+
+**レスポンス**
+
+-   **200 OK**
+    ```json
+    { "is_training": true }
+    ```
+
+#### `GET /progress`
+
+最新の学習進捗スナップショットを返します。
+
+例:
+
+```json
+{
+  "is_training": true,
+  "current_epoch": 1,
+  "current_step": 50,
+  "current_loss": 0.1234,
+  "current_learning_rate": 0.0009,
+  "progress": 0.05,
+  "total_epochs": 10,
+  "total_steps": 1000,
+  "server_time": 1719555555.12
+}
+```
+
+### 1.5. データセットダウンロード
+
+#### `POST /dataset/download`
+
+指定データセットをコンテナ内 `/app/data` にダウンロードして展開します（現状 `ljspeech` のみサポート）。
+
+**リクエストボディ (application/json)**
+
+```json
+{ "dataset_name": "ljspeech" }
+```
+
+**レスポンス**
+
+-   成功時 200: `message`, `path`, `num_wavs`
+-   既存時 200: `message`, `path`, `num_wavs`
+-   エラー時 4xx/5xx: `detail` にメッセージ
+
+### 1.6. テスト
+
+#### `GET /test`
+
+疎通確認用エンドポイント。利用可能なAPIのリストを返します。
     ```
 
 ## 2. WebSocket API

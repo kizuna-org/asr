@@ -1,25 +1,24 @@
 # デプロイ & インフラ構成設計書
 
-このドキュメントは、`run.sh` スクリプトの分析に基づき、本アプリケーションのデプロイ手順とインフラ構成について記述します。
-
-**注意:** `docker-compose.yml` の完全な内容をツールで読み取れなかったため、一部推測に基づいています。
+このドキュメントは、`docker-compose.yml` および `docker-compose.gpu.yml`、並びにローカル実行用の `run-local.sh` に基づき、本アプリケーションのデプロイ/実行手順とインフラ構成について記述します。
 
 ## 1. 概要
 
-開発用PCから `run.sh` を実行することで、リモートのGPUサーバー (`edu-gpu`) にアプリケーションをデプロイします。デプロイプロセスには、ファイル同期、Dockerコンテナのビルドと起動、ローカルPCへのポートフォワーディングが含まれます。
+開発用PCでは基本的にコンテナで実行します。ローカル実行時は `run-local.sh` を使用します（直接 `python` を実行しないこと）。GPUサーバーでの実行時は `docker-compose.gpu.yml` を併用して GPU を割り当てます。
 
 ## 2. インフラストラクチャ
 
--   **リモートサーバー**: `edu-gpu` というホスト名を持つSSHアクセス可能なサーバー。GPUを搭載している。
--   **プロジェクトパス**: サーバー上の `/home/students/r03i/r03i18/asr-test/asr/asr-test` にプロジェクトファイルが配置される。
--   **コンテナ環境**: DockerおよびDocker Composeが利用可能。NVIDIA Container Runtimeがセットアップされており、コンテナ内からGPUを利用できる。
+-   **リモートサーバー（任意）**: GPUを搭載したサーバー。NVIDIA Container Runtime が設定済みであること。
+-   **プロジェクトパス**: 任意の作業パスに配置。
+-   **コンテナ環境**: Docker および Docker Compose。NVIDIA Container Runtime が有効。
 
-## 3. デプロイ手順 (`run.sh` の処理フロー)
+## 3. 実行手順
 
-1.  **ファイル同期**:
-    -   `rsync` を使用して、ローカルのプロジェクトファイルをリモートサーバーにコピーする。
-    -   `__pycache__/` と `models/` ディレクトリは同期対象から除外される。
-    -   **[考察]** `models/` が除外されているのは、大規模な学習済みモデルを毎回転送しないようにするためと考えられます。チェックポイントは `checkpoints/` に保存されるため、このディレクトリはサーバー上で永続化されるべきです（後述のボリューム設定を参照）。
+1.  **ローカル（CPU/GPU問わず）**:
+    -   `asr-test/` 直下で `run-local.sh` を実行します。全ての実行はコンテナ内で行われます。
+2.  **GPU サーバー上での実行**:
+    -   `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d`
+    -   事前に `docker compose build` を行う場合は、`docker compose build` を利用します。
 
 2.  **コンテナの再起動**:
     -   `docker compose down`: リモートサーバー上で現在実行中のコンテナをすべて停止・削除する。
@@ -37,54 +36,22 @@
     -   これにより、ローカルPCのブラウザから `http://localhost:58080` のようにアクセスできる。
     -   `run.sh` を `Ctrl+C` で終了すると、ポートフォワーディングも自動的に停止する。
 
-## 4. コンテナ構成 (docker-compose.yml の推測)
+## 4. コンテナ構成（実体）
 
-```yaml
-# 推定される docker-compose.yml の内容
-services:
-  # バックエンドAPIサービス
-  asr-api:
-    # run.sh の `docker build` コマンドから、イメージ名が直接指定されている可能性
-    image: asr-app
-    # もしくは、コンテキストを直接指定
-    # build:
-    #   context: ./backend
-    #   dockerfile: Dockerfile
-    ports:
-      - "58081:8000" # ホスト:コンテナ (FastAPIのデフォルトは8000)
-    volumes:
-      - ./data:/app/data # データセット用
-      - ./checkpoints:/app/checkpoints # 学習済みモデル/チェックポイント用
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
+バックエンド/フロントはそれぞれ `docker-compose.yml` でビルド・起動されます。GPU 割り当ては `docker-compose.gpu.yml` で上書きします。
 
-  # フロントエンドGUIサービス
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-    ports:
-      - "58080:8501" # ホスト:コンテナ (Streamlitのデフォルトは8501)
-    depends_on:
-      - asr-api
-    command: streamlit run app.py --server.port 8501
+- `docker-compose.yml` の主なポイント
+  - `asr-api`: `backend/Dockerfile` をビルド。`58081:8000` を公開。`./data` と `./checkpoints` を `/app/data`, `/app/checkpoints` にマウント。
+  - `frontend`: `frontend/Dockerfile` をビルド。`58080:8501` を公開。`BACKEND_HOST=asr-api`, `BACKEND_PORT=8000` を環境変数で指定。
 
-volumes:
-  data:
-  checkpoints:
-```
+- `docker-compose.gpu.yml` の主なポイント
+  - `asr-api`: NVIDIA GPU を 1 枚予約（`deploy.resources.reservations.devices`）。イメージ名での起動を想定。
 
 ### 4.1. サービス詳細
 
 -   **`asr-api` (バックエンド)**
     -   **役割**: FastAPIを用いて、学習・推論のAPIエンドポイントとWebSocketサーバーを提供する。
-    -   **ビルド**: `backend/Dockerfile` からビルドされる（と推測）。
+    -   **ビルド**: `backend/Dockerfile` からビルドされます（ローカル）。GPU環境ではビルド済みイメージを使用可。
     -   **ポート**: コンテナのポート `8000` をホストの `58081` にマッピング。
     -   **GPU**: NVIDIA GPUを1つ割り当てるように設定。
     -   **ボリューム**:
@@ -93,13 +60,17 @@ volumes:
 
 -   **`frontend` (フロントエンド)**
     -   **役割**: Streamlitを用いて、学習の制御や結果を可視化するWeb GUIを提供する。
-    -   **ビルド**: `frontend/Dockerfile` からビルドされる（と推測）。
+    -   **ビルド**: `frontend/Dockerfile` からビルドされます。
     -   **ポート**: コンテナのポート `8501` をホストの `58080` にマッピング。
 
 ## 5. 他の設計への影響
 
 -   **パス設定 (`config.yaml`)**:
-    -   `config_spec.md` に記載されているデータセットのパス (`datasets.ljspeech.path`) は、コンテナ内のパス (`/app/data/ljspeech` など) を指すように記述する必要があります。
+    -   `datasets.ljspeech.path` はコンテナ内のパス `/app/data/ljspeech` を指定します。
 -   **ディレクトリ構成 (`main.md`)**:
-    -   `run.sh` の挙動から、`main.md` に記載のディレクトリ構成案は妥当であると判断できます。
-    -   ただし、`checkpoints` と `data` ディレクトリは `rsync` の対象外とし、サーバー側で永続的に管理するのが望ましいです。
+    -   `checkpoints` と `data` はホスト側ディレクトリをマウントし、永続化します。
+
+## 6. 運用ガイド
+
+- ローカルでの操作は必ず `run-local.sh` を使用してください（直接 `python` は実行しない）。
+- GPU 環境では `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d` を推奨します。

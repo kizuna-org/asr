@@ -1,6 +1,6 @@
 # 設定ファイル仕様書 (config.yaml)
 
-このドキュメントは、バックエンドアプリケーションの設定ファイル `backend/config.yaml` の構造と各パラメータについて詳述します。
+このドキュメントは、バックエンドアプリケーションの設定ファイル `backend/config.yaml` の構造と各パラメータについて詳述します。実体はコンテナ内の作業ディレクトリ直下（`/app/config.yaml` 相当の相対パス `config.yaml`）で読み込まれます。
 
 ## 1. ルートレベル
 
@@ -8,7 +8,6 @@
 # 使用可能なモデルとデータセットのリスト
 available_models:
   - conformer
-  - rnn-t
 
 available_datasets:
   - ljspeech
@@ -43,15 +42,14 @@ models:
     num_heads: 4          # Multi-Head Attention のヘッド数
     kernel_size: 31       # Convolutionモジュールのカーネルサイズ
     dropout: 0.1          # ドロップアウト率
+    # --- 実装用のHFモデル指定（学習PoCではCTCモデルを流用） ---
+    huggingface_model_name: "facebook/wav2vec2-base-960h"
 
     # --- トークナイザ設定 ---
     tokenizer:
       type: "SentencePiece" # "Character", "Word" など
       vocab_size: 5000
-      model_path: "/path/to/tokenizer.model" # SentencePieceモデルのパス
-
-  rnn-t:
-    # ... (RNN-Tモデル用の設定)
+      # model_path: "/path/to/tokenizer.model" # SentencePieceモデルのパス（任意）
 ```
 
 -   各パラメータは、対応するモデルクラス (`app/models/{model_name}.py`) の `__init__` メソッドで解釈されます。
@@ -65,7 +63,7 @@ models:
 datasets:
   ljspeech:
     # --- データパス ---
-    path: "/data/ljspeech" # Dockerコンテナ内のデータセットルートパス
+    path: "/app/data/ljspeech" # Dockerコンテナ内のデータセットルートパス
 
     # --- 音声前処理設定 ---
     sample_rate: 22050    # リサンプリングするサンプルレート
@@ -102,8 +100,8 @@ training:
   warmup_steps: 4000      # WarmupLRのウォームアップステップ数
 
   # --- 学習ループ設定 ---
-  batch_size: 32          # バッチサイズ
-  num_epochs: 100         # 総エポック数
+  batch_size: 32          # バッチサイズ（APIからのリクエストで上書き可）
+  num_epochs: 100         # 総エポック数（APIからのリクエストで上書き可）
   grad_clip_thresh: 1.0   # 勾配クリッピングの閾値
   log_interval: 10        # ログを記録するステップ間隔 (steps)
   checkpoint_interval: 1  # チェックポイントを保存する間隔 (epochs)
