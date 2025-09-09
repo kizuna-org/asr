@@ -168,9 +168,9 @@
 #### `GET /api/test`
 
 疎通確認用エンドポイント。利用可能なAPIのリストを返します。
-    ```json
-    { "message": "Test endpoint is working", "endpoints": ["/api/config", "/api/status", "/api/progress", "/api/train/start", "/api/train/stop", "/api/dataset/download"] }
-    ```
+```json
+{ "message": "Test endpoint is working", "endpoints": ["/config", "/status", "/progress", "/train/start", "/train/stop", "/dataset/download"] }
+```
 
 ## 2. WebSocket API
 

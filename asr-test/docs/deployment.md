@@ -8,33 +8,33 @@
 
 ## 2. インフラストラクチャ
 
--   **リモートサーバー（任意）**: GPUを搭載したサーバー。NVIDIA Container Runtime が設定済みであること。
--   **プロジェクトパス**: 任意の作業パスに配置。
--   **コンテナ環境**: Docker および Docker Compose。NVIDIA Container Runtime が有効。
+- **リモートサーバー（任意）**: GPUを搭載したサーバー。NVIDIA Container Runtime が設定済みであること。
+- **プロジェクトパス**: 任意の作業パスに配置。
+- **コンテナ環境**: Docker および Docker Compose。NVIDIA Container Runtime が有効。
 
 ## 3. 実行手順
 
-1.  **ローカル（CPU/GPU問わず）**:
-    -   `asr-test/` 直下で `./run-local.sh` を実行します。全ての実行はコンテナ内で行われます。
-2.  **GPU サーバー上での実行**:
-    -   `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d`
-    -   事前に `docker compose build` を行う場合は、`docker compose build` を利用します。
+1. **ローカル（CPU/GPU問わず）**
+   - `asr-test/` 直下で `./run-local.sh` を実行します。全ての実行はコンテナ内で行われます。
+2. **GPU サーバー上での実行**
+   - `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d`
+   - 事前にビルドする場合は `docker compose build` を利用します。
 
-2.  **コンテナの再起動**:
-    -   `docker compose down`: リモートサーバー上で現在実行中のコンテナをすべて停止・削除する。
-    -   `docker build . -t asr-app`: リモートサーバー上でプロジェクトのルートから `Dockerfile` を探し、`asr-app` というタグでDockerイメージをビルドする。
-    -   `docker compose up -d`: `docker-compose.yml` に基づいてコンテナをバックグラウンドで起動する。
-    -   **[注記]** 本来 `docker compose up --build` でビルドと起動を同時に実行できますが、デプロイ対象のリモートサーバーが特殊なネットワーク環境下にある等の理由で、ビルドと起動のコマンドを分離して実行する必要があることを前提としています。
+3. **コンテナの再起動**
+   - `docker compose down`: 現在実行中のコンテナを停止・削除します。
+   - `docker build . -t asr-app`: ルートから `backend/Dockerfile` を参照してビルドします（GPU用は別イメージも可）。
+   - `docker compose up -d`: `docker-compose.yml` に基づいて起動します。
+   - 注記: `docker compose up --build` で同時実行も可能ですが、環境によってはビルドと起動を分離してください。
 
-3.  **動作確認**:
-    -   `check_nvidia_runtime.sh`: サーバーのNVIDIA Container Runtime設定が正しいことを確認する。
-    -   `docker compose exec asr-api python gpu_check.py`: `asr-api` コンテナ内でGPUが正常に認識されていることを確認する（ローカルで直接 `python` を叩かない）。
+4. **動作確認**
+   - `check_nvidia_runtime.sh`: NVIDIA Container Runtime設定の確認。
+   - `docker compose exec asr-api python gpu_check.py`: コンテナ内でGPUが認識されていることを確認（ローカルで直接 `python` は叩かない）。
 
-4.  **ポートフォワーディング**:
-    -   SSHのControlMaster機能を利用して、リモートサーバーとの間に永続的なマスターセッションを確立する。
-    -   このセッションを介して、リモートサーバーのポート `58080` と `58081` をローカルPCの同名ポートに転送する。
-    -   これにより、ローカルPCのブラウザから `http://localhost:58080` のようにアクセスできる。
-    -   `run.sh` を `Ctrl+C` で終了すると、ポートフォワーディングも自動的に停止する。
+5. **ポートフォワーディング**
+   - SSHのControlMaster機能でマスターセッションを確立。
+   - リモートの `58080` と `58081` をローカルへ転送。
+   - これにより `http://localhost:58080` でフロント、`http://localhost:58081` でAPIにアクセス可能。
+   - `run.sh` 終了でフォワーディングも停止します。
 
 ## 4. コンテナ構成（実体）
 
@@ -65,10 +65,10 @@
 
 ## 5. 他の設計への影響
 
--   **パス設定 (`config.yaml`)**:
-    -   `datasets.ljspeech.path` はコンテナ内のパス `/app/data/ljspeech` を指定します。
--   **ディレクトリ構成 (`main.md`)**:
-    -   `checkpoints` と `data` はホスト側ディレクトリをマウントし、永続化します。
+- **パス設定 (`config.yaml`)**
+  - `datasets.ljspeech.path` はコンテナ内のパス `/app/data/ljspeech` を指定します。
+- **ディレクトリ構成 (`main.md`)**
+  - `checkpoints` と `data` はホスト側ディレクトリをマウントし、永続化します。
 
 ## 6. 運用ガイド
 
