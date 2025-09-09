@@ -708,7 +708,7 @@ with col_rt1:
         audio_receiver_size=2048,
         media_stream_constraints={"audio": True, "video": False},
         async_processing=True,
-        audio_processor_factory=MicAudioProcessor,
+        # AudioProcessor は受信ストリーム処理用のため未指定。ローカルマイクは audio_receiver から取得する。
     )
 
 with col_rt2:
@@ -717,11 +717,38 @@ with col_rt2:
     start_btn = st.button("リアルタイム開始", disabled=st.session_state.get("realtime_running", False) or rtc_ctx.state.playing is False)
     stop_btn = st.button("リアルタイム停止", disabled=not st.session_state.get("realtime_running", False))
 
-    if start_btn and rtc_ctx and rtc_ctx.audio_processor:
+    if start_btn and rtc_ctx:
         # 送信キューとスレッド/タスクの初期化
         send_queue = queue.Queue(maxsize=100)
-        rtc_ctx.audio_processor.frame_queue = send_queue
-        rtc_ctx.audio_processor.msg_queue = st.session_state["realtime_msg_queue"]
+        # WebRTCのローカルマイクフレームをpullするスレッド
+        def pull_audio_frames():
+            import time as _time
+            frames_sent = 0
+            while st.session_state.get("realtime_running", False):
+                if rtc_ctx.audio_receiver:
+                    try:
+                        frames = rtc_ctx.audio_receiver.get_frames(timeout=1)
+                    except Exception:
+                        frames = []
+                    for frame in frames:
+                        try:
+                            pcm = frame.to_ndarray(format="flt")
+                            if pcm.ndim == 2 and pcm.shape[0] > 1:
+                                pcm_mono = pcm.mean(axis=0)
+                            else:
+                                pcm_mono = pcm[0] if pcm.ndim == 2 else pcm
+                            pcm_f32 = pcm_mono.astype(np.float32)
+                            send_queue.put(pcm_f32.tobytes(), timeout=0.2)
+                            frames_sent += 1
+                            if frames_sent % 25 == 0:
+                                try:
+                                    st.session_state["realtime_msg_queue"].put({"type": "stats", "payload": {"frames_sent": frames_sent}})
+                                except Exception:
+                                    pass
+                        except Exception:
+                            continue
+                else:
+                    _time.sleep(0.05)
 
         # 新しいイベントループで実行
         loop = asyncio.new_event_loop()
@@ -730,8 +757,12 @@ with col_rt2:
             loop.run_until_complete(stream_audio_to_ws(send_queue, selected_model or "conformer", int(sample_rate)))
         t = threading.Thread(target=run_loop, daemon=True)
         t.start()
+        # Puller スレッド開始
+        p = threading.Thread(target=pull_audio_frames, daemon=True)
+        p.start()
         st.session_state["realtime_loop"] = loop
         st.session_state["realtime_thread"] = t
+        st.session_state["realtime_puller"] = p
         st.session_state["realtime_running"] = True
 
     if stop_btn and st.session_state.get("realtime_running", False):
@@ -740,9 +771,7 @@ with col_rt2:
         if loop and loop.is_running():
             loop.call_soon_threadsafe(loop.stop)
         st.session_state["realtime_running"] = False
-        # audio processor のキュー解除
-        if rtc_ctx and rtc_ctx.audio_processor:
-            rtc_ctx.audio_processor.frame_queue = None
+        # puller スレッドはフラグで停止。追加の操作は不要。
 
 # メインスレッドでメッセージキューをドレインし、UI状態を更新
 while not st.session_state["realtime_msg_queue"].empty():
