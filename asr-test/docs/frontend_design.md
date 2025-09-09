@@ -60,7 +60,7 @@ if 'ws_client' not in st.session_state:
 
 1.  **[UI]** ユーザーがサイドバーでモデルとデータセットを選択し、「学習開始」ボタンをクリックします。
 2.  **[app.py]** `on_click` コールバックがトリガーされます。
-3.  **[app.py]** `requests.post` を使用して、バックエンドの `/train/start` エンドポイントに `{ "model_name": ..., "dataset_name": ... }` を送信します。
+3.  **[app.py]** `requests.post` を使用して、バックエンドの `/api/train/start` エンドポイントに `{ "model_name": ..., "dataset_name": ... }` を送信します。
 4.  **[app.py]** レスポンスが `202 Accepted` であれば、`st.session_state.is_training = True` に設定します。
 5.  **[app.py]** WebSocket接続処理を開始します (`connect_to_websocket` 関数を呼び出す)。
 6.  **[app.py]** `st.experimental_rerun()` を呼び出してUIを更新し、ボタンを無効化したり、ステータス表示を変更したりします。
@@ -128,6 +128,6 @@ def handle_ws_message(data):
 
 1.  **[UI]** ユーザーが `st.file_uploader` を使って音声ファイルをアップロードします。
 2.  **[UI]** 「推論実行」ボタンをクリックします。
-3.  **[app.py]** `requests.post` を使用して、バックエンドの `/inference` エンドポイントに `multipart/form-data` としてファイルを送信します。
+3.  **[app.py]** `requests.post` を使用して、バックエンドの `/api/inference` エンドポイントに `multipart/form-data` としてファイルを送信します。
 4.  **[app.py]** レスポンス (JSON) を受け取り、`transcription` の値を抽出します。
 5.  **[app.py]** 結果を `st.text_area` に表示します。

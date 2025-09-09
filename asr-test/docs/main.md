@@ -3,7 +3,7 @@ ASR学習POCアプリケーション 基本設計案 (詳細版)
 既存の音声認識技術よりもリアルタイムかつ高速に動作するASRモデルの学習・評価サイクルを迅速に回すための、Proof of Concept（概念実証）アプリケーションを構築する。Web GUIを通じて、学習の制御、進捗の可視化、および学習済みモデルのテストを直感的に行えるようにすることを目的とする。
 
 2. 全体構成案
-(変更なし)
+Docker Compose でバックエンド(FastAPI)とフロントエンド(Streamlit)を起動します。HTTP API は `/api` プレフィックス、WebSocket は `/ws` を使用します。ホスト公開ポートは `58081`(API) と `58080`(Frontend)。
 
 3. 各コンポーネント詳細
 3.1. バックエンド (GPUサーバー上のDockerコンテナ)
@@ -29,9 +29,9 @@ librosa (音声ファイルの前処理用)
 PyYAML (設定ファイルの読み込み用)
 
 詳細な内部構造
-APIリクエストフロー (POST /train/start):
+APIリクエストフロー (POST /api/train/start):
 
-frontendからHTTPリクエストをapi.pyのエンドポイントが受信します。
+frontendからHTTPリクエストを`api.py`のエンドポイントが受信します（`/api` プレフィックス）。
 
 FastAPIのBackgroundTasksを使い、学習プロセスを非同期のバックグラウンドタスクとしてtrainer.py内のstart_training関数に渡します。これにより、APIはすぐにレスポンスを返し、UIが固まるのを防ぎます。
 
@@ -221,7 +221,7 @@ models:
 # データセットごとの設定
 datasets:
   ljspeech:
-    path: "/data/ljspeech" # コンテナ内のパス
+    path: "/app/data/ljspeech" # コンテナ内のパス（composeで ./data をマウント）
     sample_rate: 22050
     n_fft: 1024
     n_mels: 80
@@ -233,7 +233,7 @@ training:
   optimizer: "Adam"
 
 7. 次のステップ
-環境構築: docker-compose.yml と各Dockerfileを記述し、コンテナを起動できる状態にする。
+環境構築: `docker-compose.yml` と各Dockerfileでコンテナを起動できる状態にする。ローカル操作は`run-local.sh`を使用し、直接 `python` は実行しない。
 
 最小限の実装:
 

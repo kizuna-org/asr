@@ -4,7 +4,7 @@
 
 ## 1. 概要
 
-開発用PCでは基本的にコンテナで実行します。ローカル実行時は `run-local.sh` を使用します（直接 `python` を実行しないこと）。GPUサーバーでの実行時は `docker-compose.gpu.yml` を併用して GPU を割り当てます。
+開発用PCでは基本的にコンテナで実行します。ローカル実行時は `run-local.sh` を使用します（直接 `python` を実行しないこと）。GPUサーバーでの実行時は `docker-compose.gpu.yml` を併用して GPU を割り当てます。`./asr-test` は別ホストのGPUサーバーで動作するため、ローカルでは `run-local.sh` を必ず使用します。
 
 ## 2. インフラストラクチャ
 
@@ -15,7 +15,7 @@
 ## 3. 実行手順
 
 1.  **ローカル（CPU/GPU問わず）**:
-    -   `asr-test/` 直下で `run-local.sh` を実行します。全ての実行はコンテナ内で行われます。
+    -   `asr-test/` 直下で `./run-local.sh` を実行します。全ての実行はコンテナ内で行われます。
 2.  **GPU サーバー上での実行**:
     -   `docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d`
     -   事前に `docker compose build` を行う場合は、`docker compose build` を利用します。
@@ -28,7 +28,7 @@
 
 3.  **動作確認**:
     -   `check_nvidia_runtime.sh`: サーバーのNVIDIA Container Runtime設定が正しいことを確認する。
-    -   `docker compose exec asr-api python gpu_check.py`: `asr-api` コンテナ内からPythonスクリプトを実行し、GPUが正常に認識されていることを確認する。
+    -   `docker compose exec asr-api python gpu_check.py`: `asr-api` コンテナ内でGPUが正常に認識されていることを確認する（ローカルで直接 `python` を叩かない）。
 
 4.  **ポートフォワーディング**:
     -   SSHのControlMaster機能を利用して、リモートサーバーとの間に永続的なマスターセッションを確立する。
@@ -50,7 +50,7 @@
 ### 4.1. サービス詳細
 
 -   **`asr-api` (バックエンド)**
-    -   **役割**: FastAPIを用いて、学習・推論のAPIエンドポイントとWebSocketサーバーを提供する。
+    -   **役割**: FastAPIを用いて、学習・推論のAPIエンドポイント（プレフィックス `/api`）とWebSocketサーバー（`/ws`）を提供する。
     -   **ビルド**: `backend/Dockerfile` からビルドされます（ローカル）。GPU環境ではビルド済みイメージを使用可。
     -   **ポート**: コンテナのポート `8000` をホストの `58081` にマッピング。
     -   **GPU**: NVIDIA GPUを1つ割り当てるように設定。

@@ -4,7 +4,7 @@
 
 (主要コンポーネントのリストは変更なし)
 
-## 1. 学習開始リクエスト (POST /train/start)
+## 1. 学習開始リクエスト (POST /api/train/start)
 
 (変更なし)
 
@@ -62,8 +62,8 @@ for epoch in range(start_epoch, num_epochs):
 
 ### 3.3. チェックポイント保存 (Checkpointing)
 -   `checkpoint_interval` で指定されたエポックごとに実行されます。
--   **命名規則:** `{checkpoints_dir}/{model_name}-{dataset_name}-epoch-{epoch}.pt` という形式でファイルを保存します。
--   **最新チェックポイントの管理:** 保存後、同じディレクトリに `{model_name}-{dataset_name}-latest.pt` という名前で、今保存したファイルへのシンボリックリンクを作成（または上書き）します。これにより、最新のチェックポイントを容易に特定できます。
+-   **命名規則:** `/app/checkpoints/{model_name}-{dataset_name}-epoch-{epoch}.pt` という形式で保存します（ホスト側の `./checkpoints` をマウント）。
+-   **最新チェックポイントの管理:** 保存後、同ディレクトリに `{model_name}-{dataset_name}-latest.pt` を更新します。
 
 ## 4. プロセスの終了
 

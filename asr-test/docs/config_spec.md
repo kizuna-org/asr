@@ -1,6 +1,6 @@
 # 設定ファイル仕様書 (config.yaml)
 
-このドキュメントは、バックエンドアプリケーションの設定ファイル `backend/config.yaml` の構造と各パラメータについて詳述します。実体はコンテナ内の作業ディレクトリ直下（`/app/config.yaml` 相当の相対パス `config.yaml`）で読み込まれます。
+このドキュメントは、バックエンドアプリケーションの設定ファイル `backend/config.yaml` の構造と各パラメータについて詳述します。実体はコンテナ内の作業ディレクトリ直下（相対パス `config.yaml`、実行時は `/app/config.yaml`）で読み込まれます。
 
 ## 1. ルートレベル
 
@@ -25,7 +25,7 @@ training:
   # ... (セクション 4 を参照)
 ```
 
--   `available_models` (list[string], required): API経由で学習を開始できるモデル名のリスト。このリストにないモデルは `POST /train/start` で指定できません。
+-   `available_models` (list[string], required): API経由で学習を開始できるモデル名のリスト。このリストにないモデルは `POST /api/train/start` で指定できません。
 -   `available_datasets` (list[string], required): API経由で利用できるデータセット名のリスト。
 
 ## 2. `models` セクション
@@ -63,7 +63,7 @@ models:
 datasets:
   ljspeech:
     # --- データパス ---
-    path: "/app/data/ljspeech" # Dockerコンテナ内のデータセットルートパス
+    path: "/app/data/ljspeech" # Dockerコンテナ内のデータセットルートパス（composeで ./data を /app/data にマウント）
 
     # --- 音声前処理設定 ---
     sample_rate: 22050    # リサンプリングするサンプルレート

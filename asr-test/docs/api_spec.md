@@ -110,6 +110,8 @@
         "optimizer": "AdamW"
       }
     }
+    ```
+
 ### 1.4. ステータス・進捗
 
 #### `GET /status`
@@ -163,9 +165,11 @@
 
 ### 1.6. テスト
 
-#### `GET /test`
+#### `GET /api/test`
 
 疎通確認用エンドポイント。利用可能なAPIのリストを返します。
+    ```json
+    { "message": "Test endpoint is working", "endpoints": ["/api/config", "/api/status", "/api/progress", "/api/train/start", "/api/train/stop", "/api/dataset/download"] }
     ```
 
 ## 2. WebSocket API
