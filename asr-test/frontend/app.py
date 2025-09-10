@@ -491,6 +491,59 @@ def update_progress_from_backend():
         st.session_state.consecutive_errors += 1
         return False
 
+# --- モデル管理機能 ---
+def get_models():
+    """学習済みモデル一覧を取得"""
+    try:
+        request_proxies = proxies if should_use_proxy(BACKEND_URL) else None
+        response = requests.get(f"{BACKEND_URL}/models", timeout=10, proxies=request_proxies)
+        
+        if response.status_code == 200:
+            return response.json().get("models", [])
+        else:
+            st.error(f"モデル一覧の取得に失敗しました: HTTP {response.status_code}")
+            return []
+    except requests.exceptions.ConnectionError:
+        st.error("バックエンドに接続できません。バックエンドサービスが起動しているか確認してください。")
+        return []
+    except requests.exceptions.Timeout:
+        st.error("リクエストがタイムアウトしました。")
+        return []
+    except Exception as e:
+        st.error(f"モデル一覧の取得中にエラーが発生しました: {str(e)}")
+        return []
+
+def delete_model(model_name):
+    """指定されたモデルを削除"""
+    try:
+        request_proxies = proxies if should_use_proxy(BACKEND_URL) else None
+        response = requests.delete(f"{BACKEND_URL}/models/{model_name}", timeout=30, proxies=request_proxies)
+        
+        if response.status_code == 200:
+            return True, "モデルが正常に削除されました。"
+        else:
+            error_detail = response.json().get("detail", "不明なエラー")
+            return False, f"削除に失敗しました: {error_detail}"
+    except requests.exceptions.ConnectionError:
+        return False, "バックエンドに接続できません。"
+    except requests.exceptions.Timeout:
+        return False, "リクエストがタイムアウトしました。"
+    except Exception as e:
+        return False, f"削除中にエラーが発生しました: {str(e)}"
+
+def format_file_size(size_mb):
+    """ファイルサイズを適切な単位でフォーマット"""
+    if size_mb < 1:
+        return f"{size_mb * 1024:.1f} KB"
+    elif size_mb < 1024:
+        return f"{size_mb:.1f} MB"
+    else:
+        return f"{size_mb / 1024:.1f} GB"
+
+def format_timestamp(timestamp):
+    """タイムスタンプを読みやすい形式でフォーマット"""
+    return datetime.fromtimestamp(timestamp).strftime("%Y-%m-%d %H:%M:%S")
+
 # --- UI描画 ---
 st.set_page_config(
     page_title="ASR学習ダッシュボード",
@@ -525,12 +578,16 @@ st.markdown("---")
 col_nav1, col_nav2, col_nav3 = st.columns(3)
 with col_nav1:
     if st.button("🏠 メインダッシュボード", use_container_width=True, key="nav_main_top"):
-        st.switch_page("app.py")
+        st.session_state.current_page = "main"
+        st.rerun()
 with col_nav2:
     if st.button("🤖 モデル管理", use_container_width=True, key="nav_model_top"):
-        st.switch_page("pages/model_management.py")
+        st.session_state.current_page = "model_management"
+        st.rerun()
 with col_nav3:
-    st.markdown("### 📊 現在のページ: メインダッシュボード")
+    current_page = st.session_state.get("current_page", "main")
+    page_name = "メインダッシュボード" if current_page == "main" else "モデル管理"
+    st.markdown(f"### 📊 現在のページ: {page_name}")
 st.markdown("---")
 
 # サイドバー - 学習制御
@@ -538,10 +595,13 @@ with st.sidebar:
     st.header("📋 ナビゲーション")
     
     # ページ間のナビゲーション
-    if st.button("🏠 メインダッシュボード", use_container_width=True, disabled=True, key="nav_main_sidebar"):
-        pass  # 現在のページなので無効化
-    if st.button("🤖 モデル管理", use_container_width=True, key="nav_model_sidebar"):
-        st.switch_page("pages/model_management.py")
+    current_page = st.session_state.get("current_page", "main")
+    if st.button("🏠 メインダッシュボード", use_container_width=True, disabled=(current_page == "main"), key="nav_main_sidebar"):
+        st.session_state.current_page = "main"
+        st.rerun()
+    if st.button("🤖 モデル管理", use_container_width=True, disabled=(current_page == "model_management"), key="nav_model_sidebar"):
+        st.session_state.current_page = "model_management"
+        st.rerun()
     
     st.markdown("---")
     st.header("🎯 学習制御")
@@ -601,83 +661,85 @@ with st.sidebar:
         st.text(st.session_state.progress_text)
 
 # メインコンテンツ
-col1, col2 = st.columns(2)
+current_page = st.session_state.get("current_page", "main")
+if current_page == "main":
+    col1, col2 = st.columns(2)
 
-# 推論テストセクション
-st.header("推論テスト（音声アップロード）")
-inf_col1, inf_col2 = st.columns([2, 1])
-with inf_col1:
-    uploaded = st.file_uploader("音声ファイルを選択 (WAV/FLACなど)", type=["wav", "flac", "mp3", "m4a", "ogg"])
-    if uploaded is not None:
-        st.audio(uploaded, format="audio/wav")
-with inf_col2:
-    if st.button("推論を実行", disabled=uploaded is None):
-        if uploaded is None:
-            st.warning("音声ファイルを選択してください")
+    # 推論テストセクション
+    st.header("推論テスト（音声アップロード）")
+    inf_col1, inf_col2 = st.columns([2, 1])
+    with inf_col1:
+        uploaded = st.file_uploader("音声ファイルを選択 (WAV/FLACなど)", type=["wav", "flac", "mp3", "m4a", "ogg"])
+        if uploaded is not None:
+            st.audio(uploaded, format="audio/wav")
+    with inf_col2:
+        if st.button("推論を実行", disabled=uploaded is None):
+            if uploaded is None:
+                st.warning("音声ファイルを選択してください")
+            else:
+                with st.spinner("推論を実行中..."):
+                    result = run_inference(uploaded.getvalue(), uploaded.name, model_name)
+                    transcription = result.get("transcription", "")
+                    first_token_ms = result.get("first_token_time_ms")
+                    inference_ms = result.get("inference_time_ms")
+                    total_ms = result.get("total_time_ms")
+                    
+                    if transcription:
+                        st.success("推論完了")
+                        
+                        # 3種類の時間を表示
+                        col_time1, col_time2, col_time3 = st.columns(3)
+                        with col_time1:
+                            if first_token_ms is not None:
+                                st.metric(label="最初の出力まで", value=f"{first_token_ms:.0f} ms")
+                        with col_time2:
+                            if inference_ms is not None:
+                                st.metric(label="推論時間", value=f"{inference_ms:.0f} ms")
+                        with col_time3:
+                            if total_ms is not None:
+                                st.metric(label="総時間", value=f"{total_ms:.0f} ms")
+                        
+                        st.text_area("文字起こし結果", value=transcription, height=120)
+                    else:
+                        st.error("推論に失敗しました。ログを確認してください。")
+
+    # 上部メトリクス表示（学習中のみ）
+    if st.session_state.is_training:
+        m1, m2 = st.columns(2)
+        with m1:
+            st.metric(label="Epoch", value=f"{st.session_state.current_epoch}/{st.session_state.total_epochs}")
+        with m2:
+            st.metric(label="Step", value=f"{st.session_state.current_step}/{st.session_state.total_steps}")
+
+    with col1:
+        st.header("学習ロス")
+        if not st.session_state.progress_df.empty:
+            loss_data = st.session_state.progress_df.rename(columns={"loss": "train_loss"})
+            if not st.session_state.validation_df.empty:
+                # エポックの最後のステップに検証ロスを紐付ける
+                last_step_per_epoch = loss_data.groupby("epoch")["step"].max().reset_index()
+                merged_val = pd.merge(st.session_state.validation_df, last_step_per_epoch, on="epoch")
+                loss_data = pd.merge(loss_data, merged_val, on=["epoch", "step"], how="left")
+            
+            # 存在する列のみを描画対象にする
+            plot_cols = [c for c in ["train_loss", "val_loss"] if c in loss_data.columns]
+            st.line_chart(loss_data.set_index("step")[plot_cols])
         else:
-            with st.spinner("推論を実行中..."):
-                result = run_inference(uploaded.getvalue(), uploaded.name, model_name)
-                transcription = result.get("transcription", "")
-                first_token_ms = result.get("first_token_time_ms")
-                inference_ms = result.get("inference_time_ms")
-                total_ms = result.get("total_time_ms")
-                
-                if transcription:
-                    st.success("推論完了")
-                    
-                    # 3種類の時間を表示
-                    col_time1, col_time2, col_time3 = st.columns(3)
-                    with col_time1:
-                        if first_token_ms is not None:
-                            st.metric(label="最初の出力まで", value=f"{first_token_ms:.0f} ms")
-                    with col_time2:
-                        if inference_ms is not None:
-                            st.metric(label="推論時間", value=f"{inference_ms:.0f} ms")
-                    with col_time3:
-                        if total_ms is not None:
-                            st.metric(label="総時間", value=f"{total_ms:.0f} ms")
-                    
-                    st.text_area("文字起こし結果", value=transcription, height=120)
-                else:
-                    st.error("推論に失敗しました。ログを確認してください。")
+            st.info("学習データがありません。学習を開始するとグラフが表示されます。")
 
-# 上部メトリクス表示（学習中のみ）
-if st.session_state.is_training:
-    m1, m2 = st.columns(2)
-    with m1:
-        st.metric(label="Epoch", value=f"{st.session_state.current_epoch}/{st.session_state.total_epochs}")
-    with m2:
-        st.metric(label="Step", value=f"{st.session_state.current_step}/{st.session_state.total_steps}")
+    with col2:
+        st.header("学習率")
+        if not st.session_state.lr_df.empty:
+            st.line_chart(st.session_state.lr_df.set_index("step")["learning_rate"])
+        else:
+            st.info("学習率データがありません。学習を開始するとグラフが表示されます。")
 
-with col1:
-    st.header("学習ロス")
-    if not st.session_state.progress_df.empty:
-        loss_data = st.session_state.progress_df.rename(columns={"loss": "train_loss"})
-        if not st.session_state.validation_df.empty:
-            # エポックの最後のステップに検証ロスを紐付ける
-            last_step_per_epoch = loss_data.groupby("epoch")["step"].max().reset_index()
-            merged_val = pd.merge(st.session_state.validation_df, last_step_per_epoch, on="epoch")
-            loss_data = pd.merge(loss_data, merged_val, on=["epoch", "step"], how="left")
-        
-        # 存在する列のみを描画対象にする
-        plot_cols = [c for c in ["train_loss", "val_loss"] if c in loss_data.columns]
-        st.line_chart(loss_data.set_index("step")[plot_cols])
-    else:
-        st.info("学習データがありません。学習を開始するとグラフが表示されます。")
-
-with col2:
-    st.header("学習率")
-    if not st.session_state.lr_df.empty:
-        st.line_chart(st.session_state.lr_df.set_index("step")["learning_rate"])
-    else:
-        st.info("学習率データがありません。学習を開始するとグラフが表示されます。")
-
-# ログ表示
-st.header("ログ")
-log_container = st.container()
-with log_container:
-    for log in st.session_state.logs[-50:]:  # 最新50件を表示
-        st.text(log)
+    # ログ表示
+    st.header("ログ")
+    log_container = st.container()
+    with log_container:
+        for log in st.session_state.logs[-50:]:  # 最新50件を表示
+            st.text(log)
 
 # 学習中の進捗更新
 if st.session_state.is_training:
@@ -703,7 +765,8 @@ if st.session_state.is_training:
     st.rerun()
 
 # --- リアルタイム推論（マイク入力） ---
-st.header("リアルタイム推論（マイク入力）")
+if current_page == "main":
+    st.header("リアルタイム推論（マイク入力）")
 
 class MicAudioProcessor(AudioProcessorBase):
     def __init__(self) -> None:
@@ -1093,5 +1156,116 @@ if stats:
         queue_status = "🟢 Normal" if queue_size < 500 else "🟡 High" if queue_size < 800 else "🔴 Critical"
         st.metric("Queue Size", value=f"{queue_size}/1000", help=f"Status: {queue_status}")
 
-if st.session_state.get("realtime_error"):
-    st.error(st.session_state.get("realtime_error"))
+    if st.session_state.get("realtime_error"):
+        st.error(st.session_state.get("realtime_error"))
+
+# --- モデル管理セクション ---
+current_page = st.session_state.get("current_page", "main")
+if current_page == "model_management":
+    st.markdown("---")
+    st.header("🤖 学習済みモデル管理")
+    
+    # 説明
+    st.markdown("""
+    このページでは、学習済みモデルの一覧表示と削除を行うことができます。
+    モデルは学習完了時に自動的に保存され、ここで管理できます。
+    """)
+    
+    # モデル一覧の取得
+    if st.button("🔄 モデル一覧を更新", type="primary", key="refresh_models_main"):
+        st.rerun()
+    
+    models = get_models()
+    
+    if not models:
+        st.info("学習済みモデルが見つかりません。学習を実行してモデルを作成してください。")
+    else:
+        st.success(f"{len(models)}個の学習済みモデルが見つかりました。")
+        
+        # モデル一覧をテーブル形式で表示
+        st.subheader("📋 モデル一覧")
+        
+        # データフレーム用のデータを準備
+        model_data = []
+        for model in models:
+            model_data.append({
+                "モデル名": model["name"],
+                "エポック": model["epoch"] if model["epoch"] else "不明",
+                "サイズ": format_file_size(model["size_mb"]),
+                "ファイル数": model["file_count"],
+                "作成日時": format_timestamp(model["created_at"]),
+                "パス": model["path"]
+            })
+        
+        # テーブル表示
+        st.dataframe(
+            model_data,
+            use_container_width=True,
+            hide_index=True
+        )
+        
+        # モデル詳細と削除機能
+        st.subheader("🗑️ モデル削除")
+        st.warning("⚠️ モデルを削除すると復元できません。削除前に十分確認してください。")
+        
+        # モデル選択
+        model_names = [model["name"] for model in models]
+        selected_model = st.selectbox(
+            "削除するモデルを選択してください:",
+            model_names,
+            index=None,
+            placeholder="モデルを選択...",
+            key="model_selector"
+        )
+        
+        if selected_model:
+            # 選択されたモデルの詳細を表示
+            selected_model_info = next((m for m in models if m["name"] == selected_model), None)
+            if selected_model_info:
+                st.markdown("### 選択されたモデルの詳細")
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric("モデル名", selected_model_info["name"])
+                    st.metric("エポック", selected_model_info["epoch"] if selected_model_info["epoch"] else "不明")
+                
+                with col2:
+                    st.metric("サイズ", format_file_size(selected_model_info["size_mb"]))
+                    st.metric("ファイル数", selected_model_info["file_count"])
+                
+                with col3:
+                    st.metric("作成日時", format_timestamp(selected_model_info["created_at"]))
+                
+                # ファイル一覧
+                st.markdown("#### 含まれるファイル:")
+                for file_name in selected_model_info["files"]:
+                    st.text(f"• {file_name}")
+                
+                # 削除確認
+                st.markdown("### 削除確認")
+                confirm_text = st.text_input(
+                    f"削除を確認するために、モデル名 '{selected_model}' を入力してください:",
+                    placeholder="モデル名を入力...",
+                    key="confirm_delete"
+                )
+                
+                # 削除ボタン
+                if st.button("🗑️ モデルを削除", type="secondary", disabled=confirm_text != selected_model, key="delete_model_button_main"):
+                    if confirm_text == selected_model:
+                        with st.spinner("モデルを削除中..."):
+                            success, message = delete_model(selected_model)
+                            
+                            if success:
+                                st.success(message)
+                                st.balloons()
+                                # 削除後、ページを更新
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error(message)
+                    else:
+                        st.error("モデル名が一致しません。正確に入力してください。")
+    
+    # フッター
+    st.markdown("---")
+    st.markdown("💡 **ヒント**: モデルを削除する前に、必要に応じてバックアップを取ることをお勧めします。")
