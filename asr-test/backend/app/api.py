@@ -41,7 +41,10 @@ def get_model_for_inference(model_name: str) -> BaseASRModel:
         
         # 動的にモデルクラスをインポート
         import importlib
-        ModelClass = getattr(importlib.import_module(f".models.{model_name}", "app"), f"{model_name.capitalize()}ASRModel")
+        if model_name == "realtime":
+            ModelClass = getattr(importlib.import_module(f".models.{model_name}", "app"), "RealtimeASRModel")
+        else:
+            ModelClass = getattr(importlib.import_module(f".models.{model_name}", "app"), f"{model_name.capitalize()}ASRModel")
         
         logger.info(f"Loading model class: {ModelClass.__name__}", 
                    extra={"extra_fields": {"component": "api", "action": "load_model_class", "model_name": model_name, "class_name": ModelClass.__name__}})

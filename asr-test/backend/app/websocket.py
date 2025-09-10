@@ -86,8 +86,12 @@ async def websocket_endpoint(websocket: WebSocket):
                 print(f"[WS] ERROR: Model config not found: {model_name}")
                 raise RuntimeError(f"Model '{model_name}' not found in config.")
             import importlib
-            class_name = f"{model_name.capitalize()}ASRModel"
-            ModelClass = getattr(importlib.import_module(f".models.{model_name}", "app"), class_name)
+            if model_name == "realtime":
+                ModelClass = getattr(importlib.import_module(f".models.{model_name}", "app"), "RealtimeASRModel")
+            else:
+                class_name = f"{model_name.capitalize()}ASRModel"
+                ModelClass = getattr(importlib.import_module(f".models.{model_name}", "app"), class_name)
+            class_name = ModelClass.__name__
             logger.info("Loading model class: %s", class_name)
             print(f"[WS] Loading model class: {class_name}")
             m = ModelClass(model_config)

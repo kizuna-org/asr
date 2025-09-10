@@ -3,6 +3,7 @@
 # 使用可能なモデルとデータセットのリスト
 available_models:
   - conformer
+  - realtime
   # - rnn-t
 
 available_datasets:
@@ -26,6 +27,36 @@ models:
       type: "SentencePiece" # "Character", "Word" など
       vocab_size: 5000
       # model_path: "/path/to/tokenizer.model" # SentencePieceモデルのパス
+
+  # --- リアルタイムモデル設定 ---
+  realtime:
+    # --- アーキテクチャ設定 ---
+    encoder:
+      input_dim: 80 # 入力特徴量の次元数 (メルスペクトログラムの次元)
+      hidden_dim: 256 # エンコーダの隠れ層の次元数
+      num_layers: 3 # エンコーダの層数
+      rnn_type: "GRU" # RNNの種類
+      dropout: 0.1 # ドロップアウト率
+
+    decoder:
+      input_dim: 256 # デコーダの入力次元
+      vocab_size: 1000 # 語彙サイズ
+      blank_token: "_" # 空白トークン
+
+    # --- 処理設定 ---
+    processing:
+      chunk_size_ms: 100 # チャンクサイズ（ミリ秒）
+      sample_rate: 16000 # サンプリングレート
+      feature_type: "mel_spectrogram" # 特徴量の種類
+      n_mels: 80 # メルフィルタバンクの数
+      n_fft: 1024 # FFTのウィンドウサイズ
+      hop_length: 160 # ホップ長
+
+    # --- 最適化設定 ---
+    optimization:
+      precision: "fp16" # 精度（fp16/fp32）
+      batch_size: 1 # バッチサイズ（ストリーミング処理）
+      max_memory_mb: 512 # 最大メモリ使用量（MB）
 
 # データセットごとの設定
 datasets:

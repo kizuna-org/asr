@@ -100,7 +100,11 @@ def start_training(params: Dict):
         else:
             class_name = f"{dataset_name.capitalize()}Dataset"
         DatasetClass = getattr(importlib.import_module(f".datasets.{dataset_name}", "app"), class_name)
-        ModelClass = getattr(importlib.import_module(f".models.{model_name}", "app"), f"{model_name.capitalize()}ASRModel")
+        # リアルタイムモデルの場合は特別なクラス名を使用
+        if model_name == "realtime":
+            ModelClass = getattr(importlib.import_module(f".models.{model_name}", "app"), "RealtimeASRModel")
+        else:
+            ModelClass = getattr(importlib.import_module(f".models.{model_name}", "app"), f"{model_name.capitalize()}ASRModel")
         collate_fn = getattr(importlib.import_module(f".datasets.{dataset_name}", "app"), "collate_fn")
 
         # 軽量実行フラグ/サンプル制限の反映
