@@ -492,7 +492,12 @@ def update_progress_from_backend():
         return False
 
 # --- UI描画 ---
-st.set_page_config(layout="wide")
+st.set_page_config(
+    page_title="ASR学習ダッシュボード",
+    page_icon="🎯",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 init_session_state()
 
 if not st.session_state.initial_load:
@@ -515,9 +520,31 @@ elif st.session_state.is_training:
 # タイトル
 st.title("ASR 学習ダッシュボード")
 
+# ナビゲーション
+st.markdown("---")
+col_nav1, col_nav2, col_nav3 = st.columns(3)
+with col_nav1:
+    if st.button("🏠 メインダッシュボード", use_container_width=True):
+        st.switch_page("app.py")
+with col_nav2:
+    if st.button("🤖 モデル管理", use_container_width=True):
+        st.switch_page("pages/model_management.py")
+with col_nav3:
+    st.markdown("### 📊 現在のページ: メインダッシュボード")
+st.markdown("---")
+
 # サイドバー - 学習制御
 with st.sidebar:
-    st.header("学習制御")
+    st.header("📋 ナビゲーション")
+    
+    # ページ間のナビゲーション
+    if st.button("🏠 メインダッシュボード", use_container_width=True, disabled=True):
+        pass  # 現在のページなので無効化
+    if st.button("🤖 モデル管理", use_container_width=True):
+        st.switch_page("pages/model_management.py")
+    
+    st.markdown("---")
+    st.header("🎯 学習制御")
     
     # モデル選択
     model_name = st.selectbox(

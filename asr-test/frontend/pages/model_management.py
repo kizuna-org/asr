@@ -88,11 +88,48 @@ def format_timestamp(timestamp):
 st.set_page_config(
     page_title="モデル管理 - ASR学習ダッシュボード",
     page_icon="🤖",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
 # タイトル
 st.title("🤖 学習済みモデル管理")
+
+# ナビゲーション
+st.markdown("---")
+col_nav1, col_nav2, col_nav3 = st.columns(3)
+with col_nav1:
+    if st.button("🏠 メインダッシュボード", use_container_width=True):
+        st.switch_page("app.py")
+with col_nav2:
+    if st.button("🤖 モデル管理", use_container_width=True, disabled=True):
+        pass  # 現在のページなので無効化
+with col_nav3:
+    st.markdown("### 📊 現在のページ: モデル管理")
+st.markdown("---")
+
+# サイドバー - ナビゲーション
+with st.sidebar:
+    st.header("📋 ナビゲーション")
+    
+    # ページ間のナビゲーション
+    if st.button("🏠 メインダッシュボード", use_container_width=True):
+        st.switch_page("app.py")
+    if st.button("🤖 モデル管理", use_container_width=True, disabled=True):
+        pass  # 現在のページなので無効化
+    
+    st.markdown("---")
+    st.header("ℹ️ 情報")
+    st.markdown("""
+    **モデル管理ページ**
+    
+    このページでは以下の操作が可能です：
+    - 学習済みモデルの一覧表示
+    - モデルの詳細情報確認
+    - 不要なモデルの削除
+    
+    ⚠️ モデル削除は復元できません。
+    """)
 
 # 説明
 st.markdown("""
