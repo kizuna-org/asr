@@ -5,6 +5,7 @@ import os
 import re
 import glob
 import logging
+import math
 from typing import Dict
 
 from .websocket import manager as websocket_manager
@@ -18,6 +19,34 @@ stop_training_flag = False
 logger = logging.getLogger("asr-api")
 
 # --- ヘルパー関数 ---
+
+class WarmupLR:
+    """WarmupLRスケジューラーの実装"""
+    
+    def __init__(self, optimizer, warmup_steps, base_lr):
+        self.optimizer = optimizer
+        self.warmup_steps = warmup_steps
+        self.base_lr = base_lr
+        self.step_count = 0
+    
+    def step(self):
+        """学習率を更新"""
+        self.step_count += 1
+        
+        if self.step_count <= self.warmup_steps:
+            # ウォームアップ期間中は線形に学習率を増加
+            lr = self.base_lr * (self.step_count / self.warmup_steps)
+        else:
+            # ウォームアップ後は基本学習率を維持
+            lr = self.base_lr
+        
+        # オプティマイザの学習率を更新
+        for param_group in self.optimizer.param_groups:
+            param_group['lr'] = lr
+    
+    def get_last_lr(self):
+        """現在の学習率を取得"""
+        return [param_group['lr'] for param_group in self.optimizer.param_groups]
 
 def get_latest_checkpoint(model_name: str, dataset_name: str, checkpoints_dir: str = "./checkpoints") -> str:
     # ディレクトリ形式のチェックポイントを探す（新しい形式）
@@ -46,11 +75,28 @@ def get_latest_checkpoint(model_name: str, dataset_name: str, checkpoints_dir: s
     # エポック番号でソートして最新を返す
     return max(all_checkpoints, key=lambda p: int(re.search(r"epoch-(\d+)", p).group(1)))
 
-def save_checkpoint(model, optimizer, epoch, model_name, dataset_name, checkpoints_dir="./checkpoints"):
+def save_checkpoint(model, optimizer, epoch, model_name, dataset_name, scheduler=None, checkpoints_dir="./checkpoints"):
     if not os.path.exists(checkpoints_dir):
         os.makedirs(checkpoints_dir)
     checkpoint_path = os.path.join(checkpoints_dir, f"{model_name}-{dataset_name}-epoch-{epoch}.pt")
-    model.save_checkpoint(checkpoint_path, optimizer, epoch)
+    
+    # チェックポイントデータを準備
+    checkpoint_data = {
+        'epoch': epoch,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+    }
+    
+    # スケジューラーの状態も保存
+    if scheduler is not None:
+        checkpoint_data['scheduler_state_dict'] = {
+            'step_count': scheduler.step_count,
+            'warmup_steps': scheduler.warmup_steps,
+            'base_lr': scheduler.base_lr
+        }
+    
+    torch.save(checkpoint_data, checkpoint_path)
+    
     latest_path = os.path.join(checkpoints_dir, f"{model_name}-{dataset_name}-latest.pt")
     if os.path.lexists(latest_path):
         os.remove(latest_path)
@@ -147,11 +193,26 @@ def start_training(params: Dict):
         model = ModelClass(model_config).to(device)
         optimizer = torch.optim.AdamW(model.parameters(), lr=training_config['learning_rate'])
 
+        # 学習率スケジューラーの初期化
+        scheduler = None
+        if training_config.get('scheduler') == 'WarmupLR':
+            warmup_steps = training_config.get('warmup_steps', 4000)
+            scheduler = WarmupLR(optimizer, warmup_steps, training_config['learning_rate'])
+            logger.info(f"WarmupLRスケジューラーを初期化しました: warmup_steps={warmup_steps}, base_lr={training_config['learning_rate']}")
+
         start_epoch = 0
         latest_checkpoint_path = get_latest_checkpoint(model_name, dataset_name)
         if latest_checkpoint_path:
             websocket_manager.broadcast_sync({"type": "log", "payload": {"level": "INFO", "message": f"チェックポイントを読み込んでいます: {latest_checkpoint_path}"}})
             start_epoch = model.load_checkpoint(latest_checkpoint_path, optimizer)
+            
+            # スケジューラーの状態も復元
+            if scheduler is not None:
+                checkpoint = torch.load(latest_checkpoint_path, map_location=lambda storage, loc: storage)
+                if 'scheduler_state_dict' in checkpoint:
+                    scheduler_state = checkpoint['scheduler_state_dict']
+                    scheduler.step_count = scheduler_state['step_count']
+                    logger.info(f"スケジューラーの状態を復元しました: step_count={scheduler.step_count}")
 
         num_epochs = training_config['num_epochs']
         training_status['total_epochs'] = num_epochs
@@ -187,16 +248,26 @@ def start_training(params: Dict):
                 loss.backward()
                 optimizer.step()
                 
+                # 学習率スケジューラーの更新
+                if scheduler is not None:
+                    scheduler.step()
+                
                 # 進捗情報を更新
                 current_step = epoch * len(train_loader) + i
                 training_status['current_epoch'] = epoch + 1
                 training_status['current_step'] = current_step
                 training_status['current_loss'] = loss.item()
-                training_status['current_learning_rate'] = optimizer.param_groups[0]['lr']
+                # スケジューラーがある場合はスケジューラーから学習率を取得、なければオプティマイザから取得
+                if scheduler is not None:
+                    training_status['current_learning_rate'] = scheduler.get_last_lr()[0]
+                else:
+                    training_status['current_learning_rate'] = optimizer.param_groups[0]['lr']
                 training_status['progress'] = current_step / training_status['total_steps']
                 # 1秒ごとに現在のエポック/ステップをブロードキャスト
                 now = time.time()
                 if now - last_broadcast_time >= 1.0:
+                    # スケジューラーがある場合はスケジューラーから学習率を取得、なければオプティマイザから取得
+                    current_lr = scheduler.get_last_lr()[0] if scheduler is not None else optimizer.param_groups[0]['lr']
                     websocket_manager.broadcast_sync({
                         "type": "progress",
                         "payload": {
@@ -205,19 +276,21 @@ def start_training(params: Dict):
                             "step": current_step,
                             "total_steps": training_status['total_steps'],
                             "loss": loss.item(),
-                            "learning_rate": optimizer.param_groups[0]['lr']
+                            "learning_rate": current_lr
                         }
                     })
                     last_broadcast_time = now
                 
                 if i % training_config['log_interval'] == 0:
-                    log_message = f"Epoch {epoch + 1}/{num_epochs}, Step {i}/{len(train_loader)}, Loss: {loss.item():.4f}"
+                    # スケジューラーがある場合はスケジューラーから学習率を取得、なければオプティマイザから取得
+                    current_lr = scheduler.get_last_lr()[0] if scheduler is not None else optimizer.param_groups[0]['lr']
+                    log_message = f"Epoch {epoch + 1}/{num_epochs}, Step {i}/{len(train_loader)}, Loss: {loss.item():.4f}, LR: {current_lr:.6f}"
                     logger.info(log_message)
                     training_status['latest_logs'].append(log_message)
                     if len(training_status['latest_logs']) > 50:
                         training_status['latest_logs'] = training_status['latest_logs'][-50:]
 
-                    websocket_manager.broadcast_sync({"type": "progress", "payload": {"epoch": epoch + 1, "total_epochs": num_epochs, "step": i, "total_steps": len(train_loader), "loss": loss.item(), "learning_rate": optimizer.param_groups[0]['lr']}})
+                    websocket_manager.broadcast_sync({"type": "progress", "payload": {"epoch": epoch + 1, "total_epochs": num_epochs, "step": i, "total_steps": len(train_loader), "loss": loss.item(), "learning_rate": current_lr}})
                     websocket_manager.broadcast_sync({"type": "log", "payload": {"level": "INFO", "message": log_message}})
             
             if training_was_stopped:
@@ -230,10 +303,10 @@ def start_training(params: Dict):
             websocket_manager.broadcast_sync({"type": "log", "payload": {"level": "INFO", "message": val_message}})
 
             if (epoch + 1) % training_config.get("checkpoint_interval", 1) == 0:
-                save_checkpoint(model, optimizer, epoch + 1, model_name, dataset_name)
+                save_checkpoint(model, optimizer, epoch + 1, model_name, dataset_name, scheduler)
 
         if training_was_stopped:
-            save_checkpoint(model, optimizer, epoch, model_name, dataset_name) # 停止時も保存
+            save_checkpoint(model, optimizer, epoch, model_name, dataset_name, scheduler) # 停止時も保存
             logger.info("学習がユーザーによって停止されました。")
             websocket_manager.broadcast_sync({"type": "status", "payload": {"status": "stopped", "message": "学習がユーザーによって停止されました。"}})
         else:

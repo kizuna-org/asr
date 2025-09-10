@@ -87,7 +87,7 @@ training:
 
   # --- スケジューラ設定 ---
   scheduler: "WarmupLR" # 学習率スケジューラの名前 (オプション)
-  warmup_steps: 4000 # WarmupLRのウォームアップステップ数
+  warmup_steps: 100 # WarmupLRのウォームアップステップ数
 
   # --- 学習ループ設定 ---
   batch_size: 32 # バッチサイズ
