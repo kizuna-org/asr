@@ -904,19 +904,23 @@ with col_rt2:
                                     pcm_f32 = pcm_mono.astype(np.float32)
                                     
                                     # 音声フレーム処理（ログ削除）
+                                    # キューサイズをチェックして、満杯の場合は古いフレームをドロップ
+                                    if send_queue.qsize() > 800:  # 80%以上の場合
+                                        try:
+                                            send_queue.get_nowait()  # 古いフレームを1つ削除
+                                            # 古いフレームドロップ（ログ削除）
+                                        except queue.Empty:
+                                            pass
                                     
+                                    # 送信キューに積む（満杯時は例外処理）
                                     try:
-                                        # キューサイズをチェックして、満杯の場合は古いフレームをドロップ
-                                        if send_queue.qsize() > 800:  # 80%以上の場合
-                                            try:
-                                                send_queue.get_nowait()  # 古いフレームを1つ削除
-                            # 古いフレームドロップ（ログ削除）
-                                            except queue.Empty:
-                                                pass
-                                        
                                         send_queue.put(pcm_f32.tobytes(), timeout=0.05)  # タイムアウトを短縮
                                         frames_sent += 1
-                                        
+                                    except queue.Full:
+                                        logger.warning("Send queue is full, dropping frame", 
+                                                     extra={"extra_fields": {"component": "audio_puller", "action": "queue_full", 
+                                                                           "queue_size": send_queue.qsize()}})
+                                    
                                     # 統計情報をメッセージキューに送信
                                     try:
                                         if msg_queue_ref is not None:
@@ -927,10 +931,6 @@ with col_rt2:
                                             }})
                                     except Exception:
                                         pass
-                                    except queue.Full:
-                                        logger.warning("Send queue is full, dropping frame", 
-                                                     extra={"extra_fields": {"component": "audio_puller", "action": "queue_full", 
-                                                                           "queue_size": send_queue.qsize()}})
                                 except Exception as e:
                                     logger.debug("Error processing audio frame", 
                                                extra={"extra_fields": {"component": "audio_puller", "action": "frame_error", 
