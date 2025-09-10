@@ -606,13 +606,6 @@ with st.sidebar:
     st.markdown("---")
     st.header("🎯 学習制御")
     
-    # モデル選択
-    model_name = st.selectbox(
-        "モデル",
-        st.session_state.available_models,
-        index=0 if st.session_state.available_models else None
-    )
-    
     # データセット選択
     dataset_name = st.selectbox(
         "データセット",
@@ -634,6 +627,14 @@ with st.sidebar:
         else:
             st.error("データセットを選択してください")
     
+    # 学習用モデル選択
+    training_model_name = st.selectbox(
+        "学習用モデル",
+        st.session_state.available_models,
+        index=0 if st.session_state.available_models else None,
+        key="training_model_selector"
+    )
+    
     # 学習パラメータ
     epochs = st.number_input("エポック数", min_value=1, value=10)
     batch_size = st.number_input("バッチサイズ", min_value=1, value=4)
@@ -644,8 +645,8 @@ with st.sidebar:
     col1, col2 = st.columns(2)
     with col1:
         if st.button("学習開始", disabled=st.session_state.is_training):
-            if model_name and dataset_name:
-                success = start_training(model_name, dataset_name, epochs, batch_size, lightweight=lightweight, limit_samples=limit_samples)
+            if training_model_name and dataset_name:
+                success = start_training(training_model_name, dataset_name, epochs, batch_size, lightweight=lightweight, limit_samples=limit_samples)
                 if not success:
                     st.error("学習の開始に失敗しました。ログを確認してください。")
             else:
@@ -667,18 +668,64 @@ if current_page == "main":
 
     # 推論テストセクション
     st.header("推論テスト（音声アップロード）")
+    
+    # 推論用モデル選択
+    st.subheader("📋 推論設定")
+    col_model_select, col_model_info = st.columns([1, 2])
+    
+    with col_model_select:
+        # 利用可能なモデル一覧を取得
+        available_models = st.session_state.available_models
+        if available_models:
+            selected_inference_model = st.selectbox(
+                "推論に使用するモデル:",
+                available_models,
+                index=0,
+                key="inference_model_selector",
+                help="推論に使用するモデルを選択してください"
+            )
+        else:
+            st.warning("利用可能なモデルがありません")
+            selected_inference_model = None
+    
+    with col_model_info:
+        if selected_inference_model:
+            st.info(f"選択されたモデル: **{selected_inference_model}**")
+        else:
+            st.warning("モデルを選択してください")
+    
+    # 音声ファイルアップロードと推論実行
+    st.subheader("🎵 音声ファイルアップロード")
     inf_col1, inf_col2 = st.columns([2, 1])
+    
     with inf_col1:
-        uploaded = st.file_uploader("音声ファイルを選択 (WAV/FLACなど)", type=["wav", "flac", "mp3", "m4a", "ogg"])
+        uploaded = st.file_uploader(
+            "音声ファイルを選択 (WAV/FLAC/MP3/M4A/OGG)", 
+            type=["wav", "flac", "mp3", "m4a", "ogg"],
+            key="inference_file_uploader",
+            help="推論対象の音声ファイルをアップロードしてください"
+        )
         if uploaded is not None:
             st.audio(uploaded, format="audio/wav")
+            st.success(f"ファイルがアップロードされました: {uploaded.name}")
+    
     with inf_col2:
-        if st.button("推論を実行", disabled=uploaded is None):
+        st.subheader("🚀 推論実行")
+        inference_disabled = uploaded is None or selected_inference_model is None
+        if st.button(
+            "推論を実行", 
+            disabled=inference_disabled,
+            type="primary",
+            key="inference_execute_button",
+            use_container_width=True
+        ):
             if uploaded is None:
                 st.warning("音声ファイルを選択してください")
+            elif selected_inference_model is None:
+                st.warning("推論用モデルを選択してください")
             else:
                 with st.spinner("推論を実行中..."):
-                    result = run_inference(uploaded.getvalue(), uploaded.name, model_name)
+                    result = run_inference(uploaded.getvalue(), uploaded.name, selected_inference_model)
                     transcription = result.get("transcription", "")
                     first_token_ms = result.get("first_token_time_ms")
                     inference_ms = result.get("inference_time_ms")
@@ -687,7 +734,11 @@ if current_page == "main":
                     if transcription:
                         st.success("推論完了")
                         
+                        # 使用したモデル情報を表示
+                        st.info(f"使用モデル: **{selected_inference_model}**")
+                        
                         # 3種類の時間を表示
+                        st.subheader("⏱️ パフォーマンス情報")
                         col_time1, col_time2, col_time3 = st.columns(3)
                         with col_time1:
                             if first_token_ms is not None:
@@ -699,7 +750,19 @@ if current_page == "main":
                             if total_ms is not None:
                                 st.metric(label="総時間", value=f"{total_ms:.0f} ms")
                         
-                        st.text_area("文字起こし結果", value=transcription, height=120)
+                        # 文字起こし結果
+                        st.subheader("📝 文字起こし結果")
+                        st.text_area(
+                            "文字起こし結果", 
+                            value=transcription, 
+                            height=120,
+                            key="inference_result_text",
+                            help="音声から認識されたテキストが表示されます"
+                        )
+                        
+                        # 結果のコピーボタン
+                        if st.button("📋 結果をコピー", key="copy_result_button"):
+                            st.write("結果をクリップボードにコピーしました（手動でコピーしてください）")
                     else:
                         st.error("推論に失敗しました。ログを確認してください。")
 
@@ -939,10 +1002,48 @@ with col_rt1:
     )
 
 with col_rt2:
-    selected_model = st.selectbox("リアルタイム用モデル", st.session_state.available_models, index=0 if st.session_state.available_models else None)
-    sample_rate = st.number_input("送信サンプルレート", min_value=16000, max_value=48000, value=48000, step=1000)
-    start_btn = st.button("リアルタイム開始", disabled=st.session_state.get("realtime_running", False) or rtc_ctx.state.playing is False)
-    stop_btn = st.button("リアルタイム停止", disabled=not st.session_state.get("realtime_running", False))
+    st.subheader("🎯 リアルタイム推論設定")
+    
+    # リアルタイム用モデル選択
+    if st.session_state.available_models:
+        selected_realtime_model = st.selectbox(
+            "リアルタイム用モデル", 
+            st.session_state.available_models, 
+            index=0,
+            key="realtime_model_selector",
+            help="リアルタイム推論に使用するモデルを選択してください"
+        )
+        st.info(f"選択されたモデル: **{selected_realtime_model}**")
+    else:
+        st.warning("利用可能なモデルがありません")
+        selected_realtime_model = None
+    
+    # 音声設定
+    st.subheader("🔊 音声設定")
+    sample_rate = st.number_input(
+        "送信サンプルレート", 
+        min_value=16000, 
+        max_value=48000, 
+        value=48000, 
+        step=1000,
+        key="realtime_sample_rate",
+        help="マイクから送信する音声のサンプルレート"
+    )
+    
+    # 制御ボタン
+    st.subheader("🎮 制御")
+    start_btn = st.button(
+        "リアルタイム開始", 
+        disabled=st.session_state.get("realtime_running", False) or rtc_ctx.state.playing is False or selected_realtime_model is None,
+        key="realtime_start_button",
+        use_container_width=True
+    )
+    stop_btn = st.button(
+        "リアルタイム停止", 
+        disabled=not st.session_state.get("realtime_running", False),
+        key="realtime_stop_button",
+        use_container_width=True
+    )
 
     # デバッグ情報を表示
     st.write("**デバッグ情報:**")
@@ -1087,8 +1188,8 @@ with col_rt2:
                 asyncio.set_event_loop(loop)
                 logger.info("Starting WebSocket loop", 
                            extra={"extra_fields": {"component": "websocket_loop", "action": "loop_start", 
-                                                 "model": selected_model or "conformer", "sample_rate": int(sample_rate)}})
-                loop.run_until_complete(stream_audio_to_ws(send_queue, selected_model or "conformer", int(sample_rate), running_flag, msg_queue))
+                                                 "model": selected_realtime_model or "conformer", "sample_rate": int(sample_rate)}})
+                loop.run_until_complete(stream_audio_to_ws(send_queue, selected_realtime_model or "conformer", int(sample_rate), running_flag, msg_queue))
             except Exception as e:
                 logger.error("WebSocket loop error", 
                            extra={"extra_fields": {"component": "websocket_loop", "action": "loop_error", 
