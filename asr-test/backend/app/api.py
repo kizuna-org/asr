@@ -296,7 +296,96 @@ def download_dataset(params: Dict):
         )
         raise HTTPException(status_code=500, detail=error_detail)
 
+@router.get("/models", summary="学習済みモデル一覧取得")
+def get_models():
+    """学習済みモデルの一覧を取得する"""
+    try:
+        checkpoints_dir = Path("/app/checkpoints")
+        if not checkpoints_dir.exists():
+            return {"models": []}
+        
+        models = []
+        for model_path in checkpoints_dir.iterdir():
+            if model_path.is_dir():
+                # モデルディレクトリ内のファイルを確認
+                model_files = list(model_path.glob("*"))
+                if model_files:  # ファイルが存在する場合のみ追加
+                    # モデル名からエポック情報を抽出
+                    model_name = model_path.name
+                    epoch_info = None
+                    if "-epoch-" in model_name:
+                        try:
+                            epoch_part = model_name.split("-epoch-")[1]
+                            if epoch_part.endswith(".pt"):
+                                epoch_info = epoch_part[:-3]  # .ptを除去
+                        except:
+                            pass
+                    
+                    # ファイルサイズを計算
+                    total_size = sum(f.stat().st_size for f in model_files if f.is_file())
+                    size_mb = total_size / (1024 * 1024)
+                    
+                    # 作成日時を取得
+                    created_time = model_path.stat().st_ctime
+                    
+                    models.append({
+                        "name": model_name,
+                        "path": str(model_path),
+                        "epoch": epoch_info,
+                        "size_mb": round(size_mb, 2),
+                        "file_count": len(model_files),
+                        "created_at": created_time,
+                        "files": [f.name for f in model_files if f.is_file()]
+                    })
+        
+        # 作成日時でソート（新しい順）
+        models.sort(key=lambda x: x["created_at"], reverse=True)
+        
+        logger.info(f"Found {len(models)} trained models", 
+                   extra={"extra_fields": {"component": "api", "action": "list_models", "count": len(models)}})
+        
+        return {"models": models}
+        
+    except Exception as e:
+        logger.error(f"Error listing models", 
+                    extra={"extra_fields": {"component": "api", "action": "list_models_error", 
+                                          "error": str(e), "traceback": traceback.format_exc()}})
+        raise HTTPException(status_code=500, detail=f"Failed to list models: {str(e)}")
+
+@router.delete("/models/{model_name}", summary="学習済みモデル削除")
+def delete_model(model_name: str):
+    """指定された学習済みモデルを削除する"""
+    try:
+        # セキュリティチェック: パストラバーサル攻撃を防ぐ
+        if ".." in model_name or "/" in model_name or "\\" in model_name:
+            raise HTTPException(status_code=400, detail="Invalid model name")
+        
+        model_path = Path("/app/checkpoints") / model_name
+        if not model_path.exists():
+            raise HTTPException(status_code=404, detail=f"Model '{model_name}' not found")
+        
+        if not model_path.is_dir():
+            raise HTTPException(status_code=400, detail=f"'{model_name}' is not a valid model directory")
+        
+        # モデルディレクトリを削除
+        import shutil
+        shutil.rmtree(model_path)
+        
+        logger.info(f"Model deleted successfully", 
+                   extra={"extra_fields": {"component": "api", "action": "delete_model", 
+                                         "model_name": model_name, "path": str(model_path)}})
+        
+        return {"message": f"Model '{model_name}' deleted successfully"}
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting model", 
+                    extra={"extra_fields": {"component": "api", "action": "delete_model_error", 
+                                          "model_name": model_name, "error": str(e), "traceback": traceback.format_exc()}})
+        raise HTTPException(status_code=500, detail=f"Failed to delete model: {str(e)}")
+
 @router.get("/test", summary="テスト用エンドポイント")
 def test_endpoint():
     """テスト用のエンドポイント"""
-    return {"message": "Test endpoint is working", "endpoints": ["/config", "/status", "/progress", "/train/start", "/train/stop", "/dataset/download"]}
+    return {"message": "Test endpoint is working", "endpoints": ["/config", "/status", "/progress", "/train/start", "/train/stop", "/dataset/download", "/models"]}

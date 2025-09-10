@@ -169,13 +169,75 @@
 -   既存時 200: `message`, `path`, `num_wavs`
 -   エラー時 4xx/5xx: `detail` にメッセージ
 
-### 1.6. テスト
+### 1.6. 学習済みモデル管理
+
+#### `GET /models`
+
+学習済みモデルの一覧を取得します。
+
+**レスポンス**
+
+-   **200 OK**: モデル一覧の取得成功
+    ```json
+    {
+      "models": [
+        {
+          "name": "conformer-ljspeech-epoch-10.pt",
+          "path": "/app/checkpoints/conformer-ljspeech-epoch-10.pt",
+          "epoch": "10",
+          "size_mb": 245.67,
+          "file_count": 7,
+          "created_at": 1719555555.12,
+          "files": ["config.json", "model.safetensors", "optimizer.pt", "preprocessor_config.json", "special_tokens_map.json", "tokenizer_config.json", "vocab.json"]
+        }
+      ]
+    }
+    ```
+    - `name` (string): モデル名
+    - `path` (string): モデルファイルのパス
+    - `epoch` (string|null): エポック数（抽出可能な場合）
+    - `size_mb` (number): モデルサイズ（MB）
+    - `file_count` (number): 含まれるファイル数
+    - `created_at` (number): 作成日時（Unix timestamp）
+    - `files` (array): 含まれるファイル名のリスト
+
+#### `DELETE /models/{model_name}`
+
+指定された学習済みモデルを削除します。
+
+**パラメータ**
+
+-   `model_name` (string, required): 削除するモデル名
+
+**レスポンス**
+
+-   **200 OK**: モデル削除の成功
+    ```json
+    {
+      "message": "Model 'conformer-ljspeech-epoch-10.pt' deleted successfully"
+    }
+    ```
+-   **400 Bad Request**: 無効なモデル名の場合
+    ```json
+    {
+      "detail": "Invalid model name"
+    }
+    ```
+-   **404 Not Found**: 指定されたモデルが存在しない場合
+    ```json
+    {
+      "detail": "Model 'invalid-model' not found"
+    }
+    ```
+-   **500 Internal Server Error**: 削除処理中にエラーが発生した場合
+
+### 1.7. テスト
 
 #### `GET /api/test`
 
 疎通確認用エンドポイント。利用可能なAPIのリストを返します。
 ```json
-{ "message": "Test endpoint is working", "endpoints": ["/config", "/status", "/progress", "/train/start", "/train/stop", "/dataset/download"] }
+{ "message": "Test endpoint is working", "endpoints": ["/config", "/status", "/progress", "/train/start", "/train/stop", "/dataset/download", "/models"] }
 ```
 
 ## 2. WebSocket API
