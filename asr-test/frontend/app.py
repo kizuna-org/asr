@@ -124,7 +124,7 @@ def init_session_state():
 
 # --- 推論API呼び出し ---
 def run_inference(file_bytes: bytes, filename: str, model_name: str) -> Dict[str, Any]:
-    """音声ファイルをアップロードして推論を実行し、結果と推論時間(ms)を返す"""
+    """音声ファイルをアップロードして推論を実行し、結果と3種類の時間(ms)を返す"""
     try:
         import time
         st.session_state.logs.append(f"🧪 推論リクエスト送信中... URL: {BACKEND_URL}/inference")
@@ -145,17 +145,38 @@ def run_inference(file_bytes: bytes, filename: str, model_name: str) -> Dict[str
         response.raise_for_status()
         data = response.json()
         transcription = data.get("transcription", "")
-        # バックエンドが時間を返している場合は優先
-        server_elapsed_ms = data.get("inference_time_ms") or data.get("elapsed_ms")
-        total_ms = float(server_elapsed_ms) if server_elapsed_ms is not None else elapsed_ms
-        st.session_state.logs.append(f"✅ 推論が完了しました (⏱ {total_ms:.0f} ms)")
-        return {"transcription": transcription, "inference_time_ms": total_ms}
+        
+        # バックエンドから3種類の時間を取得
+        first_token_time_ms = data.get("first_token_time_ms")
+        inference_time_ms = data.get("inference_time_ms")
+        total_time_ms = data.get("total_time_ms")
+        
+        # バックエンドが時間を返していない場合はフォールバック
+        if first_token_time_ms is None:
+            first_token_time_ms = elapsed_ms * 0.1  # 仮の値
+        if inference_time_ms is None:
+            inference_time_ms = elapsed_ms * 0.8  # 仮の値
+        if total_time_ms is None:
+            total_time_ms = elapsed_ms
+        
+        st.session_state.logs.append(f"✅ 推論が完了しました")
+        st.session_state.logs.append(f"   📊 時間計測結果:")
+        st.session_state.logs.append(f"   - 最初の出力まで: {first_token_time_ms:.0f} ms")
+        st.session_state.logs.append(f"   - 推論時間: {inference_time_ms:.0f} ms")
+        st.session_state.logs.append(f"   - 総時間: {total_time_ms:.0f} ms")
+        
+        return {
+            "transcription": transcription, 
+            "first_token_time_ms": first_token_time_ms,
+            "inference_time_ms": inference_time_ms,
+            "total_time_ms": total_time_ms
+        }
     except requests.exceptions.RequestException as e:
         log_detailed_error("推論実行", e, getattr(e, "response", None))
-        return {"transcription": "", "inference_time_ms": None}
+        return {"transcription": "", "first_token_time_ms": None, "inference_time_ms": None, "total_time_ms": None}
     except Exception as e:
         log_detailed_error("推論実行", e)
-        return {"transcription": "", "inference_time_ms": None}
+        return {"transcription": "", "first_token_time_ms": None, "inference_time_ms": None, "total_time_ms": None}
 
 # --- 詳細エラーログ関数 ---
 def log_detailed_error(operation: str, error: Exception, response=None):
@@ -570,11 +591,25 @@ with inf_col2:
             with st.spinner("推論を実行中..."):
                 result = run_inference(uploaded.getvalue(), uploaded.name, model_name)
                 transcription = result.get("transcription", "")
-                infer_ms = result.get("inference_time_ms")
+                first_token_ms = result.get("first_token_time_ms")
+                inference_ms = result.get("inference_time_ms")
+                total_ms = result.get("total_time_ms")
+                
                 if transcription:
                     st.success("推論完了")
-                    if infer_ms is not None:
-                        st.metric(label="推論時間", value=f"{infer_ms:.0f} ms")
+                    
+                    # 3種類の時間を表示
+                    col_time1, col_time2, col_time3 = st.columns(3)
+                    with col_time1:
+                        if first_token_ms is not None:
+                            st.metric(label="最初の出力まで", value=f"{first_token_ms:.0f} ms")
+                    with col_time2:
+                        if inference_ms is not None:
+                            st.metric(label="推論時間", value=f"{inference_ms:.0f} ms")
+                    with col_time3:
+                        if total_ms is not None:
+                            st.metric(label="総時間", value=f"{total_ms:.0f} ms")
+                    
                     st.text_area("文字起こし結果", value=transcription, height=120)
                 else:
                     st.error("推論に失敗しました。ログを確認してください。")

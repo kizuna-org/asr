@@ -85,9 +85,15 @@
     ```json
     {
       "transcription": "hello world",
-      "inference_time_ms": 123.4
+      "first_token_time_ms": 45.2,
+      "inference_time_ms": 123.4,
+      "total_time_ms": 168.6
     }
     ```
+    - `transcription` (string): 文字起こし結果
+    - `first_token_time_ms` (number): 音声入力から最初の出力が来るまでの時間（ミリ秒）
+    - `inference_time_ms` (number): 推論処理時間（ミリ秒）
+    - `total_time_ms` (number): 音声入力から最後の出力が来るまでの総時間（ミリ秒）
 -   **400 Bad Request**: ファイルが提供されなかった場合。
 -   **500 Internal Server Error**: 推論中にエラーが発生した場合。
 

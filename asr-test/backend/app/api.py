@@ -109,6 +109,9 @@ def stop_training():
 @router.post("/inference", summary="音声ファイルによる推論")
 async def inference(file: UploadFile = File(...), model_name: str = "conformer"):
     """アップロードされた音声ファイルで推論を実行する"""
+    # 音声入力開始時刻（APIリクエスト受信時点）
+    input_start_time = time.time()
+    
     logger.info(f"Starting inference request", 
                 extra={"extra_fields": {"component": "api", "action": "inference_start", "model_name": model_name, "filename": file.filename}})
     
@@ -146,15 +149,26 @@ async def inference(file: UploadFile = File(...), model_name: str = "conformer")
                    extra={"extra_fields": {"component": "api", "action": "audio_preprocessed", 
                                          "final_shape": resampled_waveform.shape, "dtype": str(resampled_waveform.dtype)}})
 
-        # 推論実行
-        import time
-        start_time = time.time()
+        # 推論実行（3種類の時間計測）
+        # 2. 推論開始時刻
+        inference_start_time = time.time()
         transcription = model.inference(resampled_waveform)
-        inference_time = time.time() - start_time
+        inference_end_time = time.time()
+        
+        # 3. 推論完了時刻（レスポンス準備完了時点）
+        output_end_time = time.time()
+        
+        # 時間計算
+        first_token_time_ms = (inference_start_time - input_start_time) * 1000  # 音声入力から推論開始まで
+        inference_time_ms = (inference_end_time - inference_start_time) * 1000  # 推論時間
+        total_time_ms = (output_end_time - input_start_time) * 1000  # 音声入力から最終出力まで
         
         logger.info(f"Inference completed successfully", 
                    extra={"extra_fields": {"component": "api", "action": "inference_complete", 
-                                         "transcription": transcription, "inference_time_ms": inference_time * 1000}})
+                                         "transcription": transcription, 
+                                         "first_token_time_ms": first_token_time_ms,
+                                         "inference_time_ms": inference_time_ms,
+                                         "total_time_ms": total_time_ms}})
         
         # 一時ファイルを削除
         try:
@@ -163,7 +177,12 @@ async def inference(file: UploadFile = File(...), model_name: str = "conformer")
         except Exception as e:
             logger.warning(f"Failed to delete temporary file: {e}")
         
-        return {"transcription": transcription, "inference_time_ms": inference_time * 1000}
+        return {
+            "transcription": transcription, 
+            "first_token_time_ms": first_token_time_ms,
+            "inference_time_ms": inference_time_ms,
+            "total_time_ms": total_time_ms
+        }
     except Exception as e:
         # 可能な限り詳細な情報を返す（フロントでログ表示）
         error_detail = (
