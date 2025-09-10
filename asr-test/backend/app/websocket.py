@@ -6,6 +6,7 @@ import logging
 import torch
 import torchaudio
 from . import config_loader
+import traceback
 
 router = APIRouter()
 # WebSocket専用のロガー
@@ -63,7 +64,7 @@ async def websocket_endpoint(websocket: WebSocket):
     client_info = getattr(websocket, "client", None)
     await manager.connect(websocket)
     
-    logger.info("WebSocket connection established", 
+    logger.info("🔌 WebSocket connection established", 
                 extra={"extra_fields": {"component": "websocket", "action": "connect", 
                                       "client": str(client_info), "connection_count": len(manager.active_connections)}})
 
@@ -123,7 +124,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             input_dtype = "i16"
                         
                         # モデル・リサンプラ初期化
-                        logger.info("Starting audio streaming", 
+                        logger.info("🚀 Starting audio streaming", 
                                    extra={"extra_fields": {"component": "websocket", "action": "start_streaming", 
                                                          "model_name": model_name, "sample_rate": input_sample_rate, 
                                                          "format": input_dtype, "client": str(client_info)}})
@@ -154,7 +155,9 @@ async def websocket_endpoint(websocket: WebSocket):
                                 await websocket.send_text(json.dumps({"type": "error", "payload": {"message": str(e)}}))
                         buffer.clear()
                         model = None
-                        logger.info("Stop streaming and cleared state")
+                        logger.info("🛑 Stop streaming and cleared state", 
+                                   extra={"extra_fields": {"component": "websocket", "action": "stop_streaming", 
+                                                         "client": str(client_info)}})
                         print("[WS] stop streaming")
                         await websocket.send_text(json.dumps({"type": "status", "payload": {"status": "stopped"}}))
                         continue
@@ -174,9 +177,7 @@ async def websocket_endpoint(websocket: WebSocket):
                                    extra={"extra_fields": {"component": "websocket", "action": "empty_chunk"}})
                         continue
                     
-                    logger.debug("Received audio chunk", 
-                               extra={"extra_fields": {"component": "websocket", "action": "audio_chunk_received", 
-                                                     "size_bytes": len(raw), "format": input_dtype}})
+                    # 音声フレーム受信（ログ削除）
                     # バイナリをテンソル化
                     if input_dtype == "i16":
                         tensor = torch.frombuffer(raw, dtype=torch.int16).to(torch.float32) / 32768.0
@@ -197,9 +198,9 @@ async def websocket_endpoint(websocket: WebSocket):
 
                     buffer.append(tensor)
                     total_samples = sum(t.numel() for t in buffer)
-                    logger.debug("Audio buffered", 
-                               extra={"extra_fields": {"component": "websocket", "action": "audio_buffered", 
-                                                     "total_samples": total_samples, "buffer_chunks": len(buffer)}})
+                    total_duration_sec = total_samples / 16000  # 16kHz前提
+                    
+                    # バッファリング状況（ログ削除）
 
                     # 一定間隔で部分推論
                     now = asyncio.get_event_loop().time()
@@ -208,27 +209,21 @@ async def websocket_endpoint(websocket: WebSocket):
                         try:
                             waveform = torch.cat(buffer) if len(buffer) > 1 else buffer[0]
                             
-                            logger.info("Running partial inference", 
-                                       extra={"extra_fields": {"component": "websocket", "action": "partial_inference_start", 
-                                                             "samples": waveform.numel(), "duration_sec": waveform.numel() / 16000}})
+                            # 部分推論開始（ログ削除）
                             
                             import time
                             start_time = time.time()
                             transcription = model.inference(waveform)
                             inference_time = time.time() - start_time
                             
-                            logger.info("Partial inference completed", 
-                                       extra={"extra_fields": {"component": "websocket", "action": "partial_inference_complete", 
-                                                             "transcription": transcription, "inference_time_ms": inference_time * 1000}})
+                            # 部分推論完了（ログ削除）
                             
                             if transcription and transcription.strip():  # 空でない場合のみ送信
                                 await websocket.send_text(json.dumps({"type": "partial", "payload": {"text": transcription}}))
-                                logger.debug("Partial result sent to client", 
-                                           extra={"extra_fields": {"component": "websocket", "action": "partial_result_sent", 
-                                                                 "transcription": transcription}})
+                                # 部分結果送信（ログ削除）
                             else:
-                                logger.debug("Transcription is empty, not sending", 
-                                           extra={"extra_fields": {"component": "websocket", "action": "empty_transcription"}})
+                                # 空の文字起こし（ログ削除）
+                                pass
                         except Exception as e:
                             logger.error("Partial inference error", 
                                        extra={"extra_fields": {"component": "websocket", "action": "partial_inference_error", 
@@ -256,7 +251,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             logger.debug("Trimmed buffer to last %d seconds", max_seconds)
                         continue
     except WebSocketDisconnect:
-        logger.info("WebSocket disconnected", 
+        logger.info("🔌 WebSocket disconnected", 
                    extra={"extra_fields": {"component": "websocket", "action": "disconnect", 
                                          "client": str(getattr(websocket, "client", None))}})
     except Exception as e:
@@ -265,5 +260,5 @@ async def websocket_endpoint(websocket: WebSocket):
                                          "error": str(e), "traceback": traceback.format_exc()}})
     finally:
         manager.disconnect(websocket)
-        logger.info("WebSocket cleanup completed", 
+        logger.info("🧹 WebSocket cleanup completed", 
                    extra={"extra_fields": {"component": "websocket", "action": "cleanup"}})
