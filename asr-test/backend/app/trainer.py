@@ -20,11 +20,31 @@ logger = logging.getLogger("asr-api")
 # --- ヘルパー関数 ---
 
 def get_latest_checkpoint(model_name: str, dataset_name: str, checkpoints_dir: str = "./checkpoints") -> str:
-    pattern = f"{checkpoints_dir}/{model_name}-{dataset_name}-epoch-*.pt"
-    checkpoints = glob.glob(pattern)
-    if not checkpoints:
+    # ディレクトリ形式のチェックポイントを探す（新しい形式）
+    dir_pattern = f"{checkpoints_dir}/{model_name}-{dataset_name}-epoch-*.pt"
+    dir_checkpoints = glob.glob(dir_pattern)
+    
+    # ファイル形式のチェックポイントを探す（旧形式）
+    file_pattern = f"{checkpoints_dir}/{model_name}-{dataset_name}-epoch-*.pt"
+    file_checkpoints = glob.glob(file_pattern)
+    
+    all_checkpoints = []
+    
+    # ディレクトリ形式のチェックポイントを追加
+    for checkpoint in dir_checkpoints:
+        if os.path.isdir(checkpoint):
+            all_checkpoints.append(checkpoint)
+    
+    # ファイル形式のチェックポイントを追加（ディレクトリでないもの）
+    for checkpoint in file_checkpoints:
+        if not os.path.isdir(checkpoint):
+            all_checkpoints.append(checkpoint)
+    
+    if not all_checkpoints:
         return None
-    return max(checkpoints, key=lambda p: int(re.search(r"epoch-(\d+)\.pt", p).group(1)))
+    
+    # エポック番号でソートして最新を返す
+    return max(all_checkpoints, key=lambda p: int(re.search(r"epoch-(\d+)", p).group(1)))
 
 def save_checkpoint(model, optimizer, epoch, model_name, dataset_name, checkpoints_dir="./checkpoints"):
     if not os.path.exists(checkpoints_dir):

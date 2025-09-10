@@ -50,7 +50,28 @@ def get_model_for_inference(model_name: str) -> BaseASRModel:
                    extra={"extra_fields": {"component": "api", "action": "load_model_class", "model_name": model_name, "class_name": ModelClass.__name__}})
         
         model = ModelClass(model_config)
-        # TODO: 最新のチェックポイントをロードするロジック
+        
+        # 最新のチェックポイントをロードするロジック
+        from .trainer import get_latest_checkpoint
+        latest_checkpoint_path = get_latest_checkpoint(model_name, "ljspeech")
+        if latest_checkpoint_path:
+            logger.info(f"Loading checkpoint: {latest_checkpoint_path}", 
+                       extra={"extra_fields": {"component": "api", "action": "load_checkpoint", 
+                                             "model_name": model_name, "checkpoint_path": latest_checkpoint_path}})
+            try:
+                model.load_checkpoint(latest_checkpoint_path)
+                logger.info(f"Checkpoint loaded successfully", 
+                           extra={"extra_fields": {"component": "api", "action": "checkpoint_loaded", 
+                                                 "model_name": model_name}})
+            except Exception as e:
+                logger.warning(f"Failed to load checkpoint: {e}", 
+                              extra={"extra_fields": {"component": "api", "action": "checkpoint_load_failed", 
+                                                    "model_name": model_name, "error": str(e)}})
+        else:
+            logger.info(f"No checkpoint found for model: {model_name}", 
+                       extra={"extra_fields": {"component": "api", "action": "no_checkpoint", 
+                                             "model_name": model_name}})
+        
         model.eval() # 推論モード
         _model_cache[model_name] = model
         

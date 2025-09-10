@@ -365,6 +365,78 @@ class RealtimeASRModel(BaseASRModel):
             recognized_text: 認識された文字列
         """
         return self.inference(audio_chunk)
+    
+    def save_checkpoint(self, path: str, optimizer: torch.optim.Optimizer, epoch: int):
+        """realtimeモデルのチェックポイントをディレクトリ形式で保存"""
+        import os
+        import json
+        
+        # ディレクトリを作成
+        os.makedirs(path, exist_ok=True)
+        
+        # モデルの状態辞書を保存
+        torch.save(self.state_dict(), os.path.join(path, "model.safetensors"))
+        
+        # 設定を保存
+        with open(os.path.join(path, "config.json"), "w") as f:
+            json.dump(self.config, f, indent=2)
+        
+        # 語彙を保存
+        with open(os.path.join(path, "vocab.json"), "w") as f:
+            json.dump(self.vocab, f, indent=2)
+        
+        # 特殊トークンマップを保存
+        special_tokens_map = {
+            "blank_token": self.blank_token,
+            "pad_token": self.pad_token,
+            "unk_token": self.unk_token
+        }
+        with open(os.path.join(path, "special_tokens_map.json"), "w") as f:
+            json.dump(special_tokens_map, f, indent=2)
+        
+        # 前処理設定を保存
+        preprocessor_config = {
+            "chunk_size_ms": self.chunk_size_ms,
+            "sample_rate": self.sample_rate,
+            "n_mels": self.n_mels,
+            "n_fft": self.n_fft,
+            "hop_length": self.hop_length
+        }
+        with open(os.path.join(path, "preprocessor_config.json"), "w") as f:
+            json.dump(preprocessor_config, f, indent=2)
+        
+        # トークナイザー設定を保存
+        tokenizer_config = {
+            "vocab_size": len(self.vocab),
+            "blank_token": self.blank_token,
+            "pad_token": self.pad_token,
+            "unk_token": self.unk_token
+        }
+        with open(os.path.join(path, "tokenizer_config.json"), "w") as f:
+            json.dump(tokenizer_config, f, indent=2)
+        
+        # オプティマイザーを保存
+        super().save_checkpoint(os.path.join(path, "optimizer.pt"), optimizer, epoch)
+    
+    def load_checkpoint(self, path: str, optimizer: torch.optim.Optimizer = None):
+        """realtimeモデルのチェックポイントをディレクトリ形式から読み込み"""
+        import os
+        import json
+        
+        # モデルの状態辞書を読み込み
+        model_path = os.path.join(path, "model.safetensors")
+        if os.path.exists(model_path):
+            self.load_state_dict(torch.load(model_path, map_location=lambda storage, loc: storage))
+        else:
+            # 旧形式の単一ファイルの場合のフォールバック
+            return super().load_checkpoint(path, optimizer)
+        
+        # オプティマイザーを読み込み
+        optimizer_path = os.path.join(path, "optimizer.pt")
+        if os.path.exists(optimizer_path) and optimizer:
+            return super().load_checkpoint(optimizer_path, optimizer)
+        
+        return 0
 
 
 class RealtimeASRPipeline:

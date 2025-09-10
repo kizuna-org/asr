@@ -95,6 +95,24 @@ async def websocket_endpoint(websocket: WebSocket):
             logger.info("Loading model class: %s", class_name)
             print(f"[WS] Loading model class: {class_name}")
             m = ModelClass(model_config)
+            
+            # 最新のチェックポイントをロードするロジック
+            from .trainer import get_latest_checkpoint
+            latest_checkpoint_path = get_latest_checkpoint(model_name, "ljspeech")
+            if latest_checkpoint_path:
+                logger.info("Loading checkpoint: %s", latest_checkpoint_path)
+                print(f"[WS] Loading checkpoint: {latest_checkpoint_path}")
+                try:
+                    m.load_checkpoint(latest_checkpoint_path)
+                    logger.info("Checkpoint loaded successfully")
+                    print(f"[WS] Checkpoint loaded successfully")
+                except Exception as e:
+                    logger.warning("Failed to load checkpoint: %s", e)
+                    print(f"[WS] Failed to load checkpoint: {e}")
+            else:
+                logger.info("No checkpoint found for model: %s", model_name)
+                print(f"[WS] No checkpoint found for model: {model_name}")
+            
             m.eval()
             _model_cache[model_name] = m
             print(f"[WS] Model {model_name} loaded and cached successfully")
