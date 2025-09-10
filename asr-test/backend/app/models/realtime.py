@@ -91,28 +91,36 @@ class RealtimeCTCDecoder(nn.Module):
         
         return log_probs
     
-    def decode_realtime(self, log_probs: torch.Tensor, threshold: float = 0.5) -> List[int]:
+    def decode_realtime(self, log_probs: torch.Tensor, threshold: float = -10.0) -> List[int]:
         """
         リアルタイムデコード（簡易版）
         
         Args:
             log_probs: [seq_len, vocab_size + 1]
-            threshold: 文字検出の閾値
+            threshold: 文字検出の閾値（対数確率）
         
         Returns:
             detected_chars: 検出された文字のリスト
         """
         detected_chars = []
-        blank_id = self.vocab_size  # 最後のインデックスがblank
+        blank_id = len(self.vocab)  # 最後のインデックスがblank
+        
+        logger.info(f"Decoding realtime with threshold: {threshold}, log_probs shape: {log_probs.shape}")
         
         for t in range(log_probs.size(0)):
             # 最大確率の文字を取得
             max_prob, max_char = torch.max(log_probs[t], dim=-1)
             
-            # 閾値を超え、かつblankでない場合
+            # デバッグ情報
+            if t < 5:  # 最初の5ステップのみログ出力
+                logger.info(f"Step {t}: max_prob={max_prob.item():.3f}, max_char={max_char.item()}, blank_id={blank_id}")
+            
+            # 閾値を超え、かつblankでない場合（対数確率なので閾値は負の値）
             if max_prob > threshold and max_char != blank_id:
                 detected_chars.append(max_char.item())
+                logger.info(f"Detected char: {max_char.item()} at step {t}")
         
+        logger.info(f"Total detected chars: {len(detected_chars)}")
         return detected_chars
 
 
@@ -163,6 +171,12 @@ class RealtimeASRModel(BaseASRModel):
         # 語彙マッピング（簡易版）
         self.vocab = self._create_simple_vocab(decoder_config.get('vocab_size', 1000))
         self.id_to_char = {i: char for i, char in enumerate(self.vocab)}
+        
+        # 特殊トークンの設定
+        self.blank_token = decoder_config.get('blank_token', '_')
+        self.pad_token = '<pad>'
+        self.unk_token = '<unk>'
+        self.vocab_size = len(self.vocab)
         
         logger.info("RealtimeASRModel initialized successfully", 
                    extra={"extra_fields": {"component": "model", "action": "init_complete", 
@@ -304,18 +318,24 @@ class RealtimeASRModel(BaseASRModel):
             
             # 特徴抽出
             features = self.extract_features(waveform)
+            logger.info(f"Extracted features shape: {features.shape}")
             
             # エンコーダ処理
             encoder_output, self.hidden_state = self.encoder(features, self.hidden_state)
+            logger.info(f"Encoder output shape: {encoder_output.shape}")
             
             # CTCデコード
             log_probs = self.decoder(encoder_output)
+            logger.info(f"CTC log_probs shape: {log_probs.shape}")
+            logger.info(f"CTC log_probs min/max: {log_probs.min().item():.3f}/{log_probs.max().item():.3f}")
             
             # リアルタイムデコード
             detected_chars = self.decoder.decode_realtime(log_probs[0])
+            logger.info(f"Detected chars: {detected_chars}")
             
             # 後処理
             recognized_text = self._post_process_ctc_output(detected_chars)
+            logger.info(f"Post-processed text: '{recognized_text}'")
             
             logger.info("Realtime inference completed successfully", 
                        extra={"extra_fields": {"component": "model", "action": "inference_complete", 
@@ -375,7 +395,19 @@ class RealtimeASRModel(BaseASRModel):
         os.makedirs(path, exist_ok=True)
         
         # モデルの状態辞書を保存
-        torch.save(self.state_dict(), os.path.join(path, "model.safetensors"))
+        try:
+            # safetensorsファイルとして保存
+            from safetensors.torch import save_file
+            save_file(self.state_dict(), os.path.join(path, "model.safetensors"))
+            logger.info(f"Successfully saved safetensors checkpoint to {path}")
+        except ImportError:
+            # safetensorsが利用できない場合は、通常のtorch.saveを使用
+            logger.warning("safetensors not available, falling back to torch.save")
+            torch.save(self.state_dict(), os.path.join(path, "model.safetensors"))
+            logger.info(f"Successfully saved torch checkpoint to {path}")
+        except Exception as e:
+            logger.error(f"Failed to save checkpoint to {path}: {e}")
+            raise
         
         # 設定を保存
         with open(os.path.join(path, "config.json"), "w") as f:
@@ -426,7 +458,25 @@ class RealtimeASRModel(BaseASRModel):
         # モデルの状態辞書を読み込み
         model_path = os.path.join(path, "model.safetensors")
         if os.path.exists(model_path):
-            self.load_state_dict(torch.load(model_path, map_location=lambda storage, loc: storage))
+            try:
+                # safetensorsファイルの読み込み
+                from safetensors.torch import load_file
+                state_dict = load_file(model_path)
+                self.load_state_dict(state_dict)
+                logger.info(f"Successfully loaded safetensors checkpoint from {model_path}")
+            except ImportError:
+                # safetensorsが利用できない場合は、通常のtorch.loadを試す
+                logger.warning("safetensors not available, falling back to torch.load")
+                try:
+                    state_dict = torch.load(model_path, map_location=lambda storage, loc: storage)
+                    self.load_state_dict(state_dict)
+                    logger.info(f"Successfully loaded torch checkpoint from {model_path}")
+                except Exception as e:
+                    logger.error(f"Failed to load checkpoint from {model_path}: {e}")
+                    raise
+            except Exception as e:
+                logger.error(f"Failed to load safetensors checkpoint from {model_path}: {e}")
+                raise
         else:
             # 旧形式の単一ファイルの場合のフォールバック
             return super().load_checkpoint(path, optimizer)
