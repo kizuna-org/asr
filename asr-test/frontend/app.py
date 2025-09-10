@@ -524,10 +524,10 @@ st.title("ASR 学習ダッシュボード")
 st.markdown("---")
 col_nav1, col_nav2, col_nav3 = st.columns(3)
 with col_nav1:
-    if st.button("🏠 メインダッシュボード", use_container_width=True):
+    if st.button("🏠 メインダッシュボード", use_container_width=True, key="nav_main_top"):
         st.switch_page("app.py")
 with col_nav2:
-    if st.button("🤖 モデル管理", use_container_width=True):
+    if st.button("🤖 モデル管理", use_container_width=True, key="nav_model_top"):
         st.switch_page("pages/model_management.py")
 with col_nav3:
     st.markdown("### 📊 現在のページ: メインダッシュボード")
@@ -538,9 +538,9 @@ with st.sidebar:
     st.header("📋 ナビゲーション")
     
     # ページ間のナビゲーション
-    if st.button("🏠 メインダッシュボード", use_container_width=True, disabled=True):
+    if st.button("🏠 メインダッシュボード", use_container_width=True, disabled=True, key="nav_main_sidebar"):
         pass  # 現在のページなので無効化
-    if st.button("🤖 モデル管理", use_container_width=True):
+    if st.button("🤖 モデル管理", use_container_width=True, key="nav_model_sidebar"):
         st.switch_page("pages/model_management.py")
     
     st.markdown("---")

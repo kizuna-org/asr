@@ -99,10 +99,10 @@ st.title("🤖 学習済みモデル管理")
 st.markdown("---")
 col_nav1, col_nav2, col_nav3 = st.columns(3)
 with col_nav1:
-    if st.button("🏠 メインダッシュボード", use_container_width=True):
+    if st.button("🏠 メインダッシュボード", use_container_width=True, key="nav_main_top_model"):
         st.switch_page("app.py")
 with col_nav2:
-    if st.button("🤖 モデル管理", use_container_width=True, disabled=True):
+    if st.button("🤖 モデル管理", use_container_width=True, disabled=True, key="nav_model_top_model"):
         pass  # 現在のページなので無効化
 with col_nav3:
     st.markdown("### 📊 現在のページ: モデル管理")
@@ -113,9 +113,9 @@ with st.sidebar:
     st.header("📋 ナビゲーション")
     
     # ページ間のナビゲーション
-    if st.button("🏠 メインダッシュボード", use_container_width=True):
+    if st.button("🏠 メインダッシュボード", use_container_width=True, key="nav_main_sidebar_model"):
         st.switch_page("app.py")
-    if st.button("🤖 モデル管理", use_container_width=True, disabled=True):
+    if st.button("🤖 モデル管理", use_container_width=True, disabled=True, key="nav_model_sidebar_model"):
         pass  # 現在のページなので無効化
     
     st.markdown("---")
@@ -138,7 +138,7 @@ st.markdown("""
 """)
 
 # モデル一覧の取得
-if st.button("🔄 モデル一覧を更新", type="primary"):
+if st.button("🔄 モデル一覧を更新", type="primary", key="refresh_models"):
     st.rerun()
 
 models = get_models()
@@ -214,7 +214,7 @@ else:
             )
             
             # 削除ボタン
-            if st.button("🗑️ モデルを削除", type="secondary", disabled=confirm_text != selected_model):
+            if st.button("🗑️ モデルを削除", type="secondary", disabled=confirm_text != selected_model, key="delete_model_button"):
                 if confirm_text == selected_model:
                     with st.spinner("モデルを削除中..."):
                         success, message = delete_model(selected_model)
