@@ -103,7 +103,7 @@ class RealtimeCTCDecoder(nn.Module):
             detected_chars: 検出された文字のリスト
         """
         detected_chars = []
-        blank_id = len(self.vocab)  # 最後のインデックスがblank
+        blank_id = self.vocab_size  # 最後のインデックスがblank
         
         logger.info(f"Decoding realtime with threshold: {threshold}, log_probs shape: {log_probs.shape}")
         
