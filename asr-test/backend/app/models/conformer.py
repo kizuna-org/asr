@@ -3,6 +3,7 @@ import torch
 from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC
 from typing import Dict, Any, List
 import logging
+import traceback
 
 from .interface import BaseASRModel
 

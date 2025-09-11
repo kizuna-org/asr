@@ -67,9 +67,9 @@ def setup_logging():
     root_logger.addHandler(console_handler)
     
     # 特定のロガーのレベル設定
-    logging.getLogger("asr-api").setLevel(logging.INFO)
+    logging.getLogger("asr-api").setLevel(logging.DEBUG)
     logging.getLogger("websocket").setLevel(logging.INFO)
-    logging.getLogger("model").setLevel(logging.INFO)
+    logging.getLogger("model").setLevel(logging.DEBUG)
     logging.getLogger("audio").setLevel(logging.INFO)
     
     # 外部ライブラリのログレベル調整
