@@ -731,27 +731,29 @@ if current_page == "main":
                     inference_ms = result.get("inference_time_ms")
                     total_ms = result.get("total_time_ms")
                     
+                    # 推論が完了した場合（空の結果も含む）
+                    st.success("推論完了")
+                    
+                    # 使用したモデル情報を表示
+                    st.info(f"使用モデル: **{selected_inference_model}**")
+                    
+                    # 3種類の時間を表示
+                    st.subheader("⏱️ パフォーマンス情報")
+                    col_time1, col_time2, col_time3 = st.columns(3)
+                    with col_time1:
+                        if first_token_ms is not None:
+                            st.metric(label="最初の出力まで", value=f"{first_token_ms:.0f} ms")
+                    with col_time2:
+                        if inference_ms is not None:
+                            st.metric(label="推論時間", value=f"{inference_ms:.0f} ms")
+                    with col_time3:
+                        if total_ms is not None:
+                            st.metric(label="総時間", value=f"{total_ms:.0f} ms")
+                    
+                    # 文字起こし結果
+                    st.subheader("📝 文字起こし結果")
                     if transcription:
-                        st.success("推論完了")
-                        
-                        # 使用したモデル情報を表示
-                        st.info(f"使用モデル: **{selected_inference_model}**")
-                        
-                        # 3種類の時間を表示
-                        st.subheader("⏱️ パフォーマンス情報")
-                        col_time1, col_time2, col_time3 = st.columns(3)
-                        with col_time1:
-                            if first_token_ms is not None:
-                                st.metric(label="最初の出力まで", value=f"{first_token_ms:.0f} ms")
-                        with col_time2:
-                            if inference_ms is not None:
-                                st.metric(label="推論時間", value=f"{inference_ms:.0f} ms")
-                        with col_time3:
-                            if total_ms is not None:
-                                st.metric(label="総時間", value=f"{total_ms:.0f} ms")
-                        
-                        # 文字起こし結果
-                        st.subheader("📝 文字起こし結果")
+                        # 正常な文字起こし結果がある場合
                         st.text_area(
                             "文字起こし結果", 
                             value=transcription, 
@@ -764,7 +766,16 @@ if current_page == "main":
                         if st.button("📋 結果をコピー", key="copy_result_button"):
                             st.write("結果をクリップボードにコピーしました（手動でコピーしてください）")
                     else:
-                        st.error("推論に失敗しました。ログを確認してください。")
+                        # 空の推論結果の場合
+                        st.warning("⚠️ 推論結果が空です")
+                        st.text_area(
+                            "文字起こし結果", 
+                            value="（音声から認識されたテキストがありません）", 
+                            height=120,
+                            key="inference_result_text_empty",
+                            help="音声から認識されたテキストがありません。音声の品質やモデルの学習状況を確認してください。"
+                        )
+                        st.info("💡 **推奨事項**: 音声の品質を確認するか、別のモデルで試してみてください。")
 
     # 上部メトリクス表示（学習中のみ）
     if st.session_state.is_training:
