@@ -95,3 +95,7 @@ training:
   grad_clip_thresh: 1.0 # 勾配クリッピングの閾値
   log_interval: 10 # ログを記録するステップ間隔 (steps)
   checkpoint_interval: 1 # チェックポイントを保存する間隔 (epochs)
+
+  # --- 学習再開設定 ---
+  auto_resume: true # 学習開始時に自動的に最新のチェックポイントから再開するかどうか
+  checkpoint_retention: 5 # 保持するチェックポイントの数（古いものは自動削除）

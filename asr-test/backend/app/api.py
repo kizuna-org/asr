@@ -91,12 +91,22 @@ def start_training(params: Dict, background_tasks: BackgroundTasks):
     
     model_name = params.get("model_name")
     dataset_name = params.get("dataset_name")
+    resume_from_checkpoint = params.get("resume_from_checkpoint", True)  # デフォルトで再開を有効
+    specific_checkpoint = params.get("specific_checkpoint")  # 特定のチェックポイントを指定
     
     if not model_name or not config_loader.get_model_config(model_name):
         raise HTTPException(status_code=400, detail=f"Model '{model_name}' is not a valid model name.")
     
     if not dataset_name or not config_loader.get_dataset_config(dataset_name):
         raise HTTPException(status_code=400, detail=f"Dataset '{dataset_name}' is not a valid dataset name.")
+
+    # 特定のチェックポイントが指定された場合の検証
+    if specific_checkpoint:
+        checkpoint_path = Path("/app/checkpoints") / specific_checkpoint
+        if not checkpoint_path.exists():
+            raise HTTPException(status_code=404, detail=f"Specified checkpoint '{specific_checkpoint}' not found.")
+        if not checkpoint_path.is_dir():
+            raise HTTPException(status_code=400, detail=f"'{specific_checkpoint}' is not a valid checkpoint directory.")
 
     logger.info(f"/train/start called with params: {params}")
     # 即時にフラグを立て、初期状態をセットしてリロード時の不一致を防止
@@ -108,18 +118,96 @@ def start_training(params: Dict, background_tasks: BackgroundTasks):
     training_status["progress"] = 0.0
     training_status.setdefault("latest_logs", [])
     training_status.pop("latest_error", None)
+    
+    # 学習再開の情報をログに記録
+    if resume_from_checkpoint:
+        if specific_checkpoint:
+            logger.info(f"Training will resume from specific checkpoint: {specific_checkpoint}")
+        else:
+            logger.info("Training will resume from latest checkpoint if available")
+    else:
+        logger.info("Training will start from scratch (no checkpoint resume)")
+    
     try:
         websocket_manager.broadcast_sync({
             "type": "status",
             "payload": {
                 "status": "starting",
-                "message": f"学習開始リクエスト受理: model={model_name}, dataset={dataset_name}"
+                "message": f"学習開始リクエスト受理: model={model_name}, dataset={dataset_name}, resume={resume_from_checkpoint}"
             }
         })
     except Exception:
         pass
     background_tasks.add_task(trainer.start_training, params)
     return {"message": "Training started in background."}
+
+@router.post("/train/resume", summary="学習再開")
+def resume_training(params: Dict, background_tasks: BackgroundTasks):
+    """学習をチェックポイントから再開する"""
+    if training_status["is_training"]:
+        raise HTTPException(status_code=409, detail="Training is already in progress.")
+    
+    model_name = params.get("model_name")
+    dataset_name = params.get("dataset_name")
+    specific_checkpoint = params.get("specific_checkpoint")  # 特定のチェックポイントを指定
+    
+    if not model_name or not config_loader.get_model_config(model_name):
+        raise HTTPException(status_code=400, detail=f"Model '{model_name}' is not a valid model name.")
+    
+    if not dataset_name or not config_loader.get_dataset_config(dataset_name):
+        raise HTTPException(status_code=400, detail=f"Dataset '{dataset_name}' is not a valid dataset name.")
+
+    # チェックポイントの検証
+    if specific_checkpoint:
+        checkpoint_path = Path("/app/checkpoints") / specific_checkpoint
+        if not checkpoint_path.exists():
+            raise HTTPException(status_code=404, detail=f"Specified checkpoint '{specific_checkpoint}' not found.")
+        if not checkpoint_path.is_dir():
+            raise HTTPException(status_code=400, detail=f"'{specific_checkpoint}' is not a valid checkpoint directory.")
+    else:
+        # 最新のチェックポイントを探す
+        from .trainer import get_latest_checkpoint
+        latest_checkpoint = get_latest_checkpoint(model_name, dataset_name)
+        if not latest_checkpoint:
+            raise HTTPException(status_code=404, detail=f"No checkpoint found for model '{model_name}' and dataset '{dataset_name}'.")
+
+    # 学習再開パラメータを設定
+    resume_params = {
+        "model_name": model_name,
+        "dataset_name": dataset_name,
+        "resume_from_checkpoint": True,
+        "specific_checkpoint": specific_checkpoint,
+        "epochs": params.get("epochs", 10),
+        "batch_size": params.get("batch_size", 32),
+        "lightweight": params.get("lightweight", False),
+        "limit_samples": params.get("limit_samples")
+    }
+
+    logger.info(f"/train/resume called with params: {resume_params}")
+    
+    # 即時にフラグを立て、初期状態をセット
+    training_status["is_training"] = True
+    training_status["current_epoch"] = 0
+    training_status["current_step"] = 0
+    training_status["current_loss"] = 0.0
+    training_status["current_learning_rate"] = 0.0
+    training_status["progress"] = 0.0
+    training_status.setdefault("latest_logs", [])
+    training_status.pop("latest_error", None)
+    
+    try:
+        websocket_manager.broadcast_sync({
+            "type": "status",
+            "payload": {
+                "status": "resuming",
+                "message": f"学習再開リクエスト受理: model={model_name}, dataset={dataset_name}, checkpoint={specific_checkpoint or 'latest'}"
+            }
+        })
+    except Exception:
+        pass
+    
+    background_tasks.add_task(trainer.start_training, resume_params)
+    return {"message": "Training resumed from checkpoint in background."}
 
 @router.post("/train/stop", summary="学習停止")
 def stop_training():
@@ -317,6 +405,76 @@ def download_dataset(params: Dict):
         )
         raise HTTPException(status_code=500, detail=error_detail)
 
+@router.get("/checkpoints", summary="チェックポイント一覧取得")
+def get_checkpoints(model_name: str = None, dataset_name: str = None):
+    """利用可能なチェックポイントの一覧を取得する"""
+    try:
+        checkpoints_dir = Path("/app/checkpoints")
+        if not checkpoints_dir.exists():
+            return {"checkpoints": []}
+        
+        checkpoints = []
+        for checkpoint_path in checkpoints_dir.iterdir():
+            if checkpoint_path.is_dir():
+                # チェックポイント名からモデル名、データセット名、エポック情報を抽出
+                checkpoint_name = checkpoint_path.name
+                
+                # パターン: {model_name}-{dataset_name}-epoch-{epoch}.pt
+                if "-epoch-" in checkpoint_name:
+                    try:
+                        parts = checkpoint_name.split("-")
+                        if len(parts) >= 4:
+                            # モデル名とデータセット名を抽出
+                            model_part = parts[0]
+                            dataset_part = parts[1]
+                            epoch_part = parts[3].replace(".pt", "")
+                            
+                            # フィルタリング
+                            if model_name and model_part != model_name:
+                                continue
+                            if dataset_name and dataset_part != dataset_name:
+                                continue
+                            
+                            # チェックポイントディレクトリ内のファイルを確認
+                            checkpoint_files = list(checkpoint_path.glob("*"))
+                            if checkpoint_files:  # ファイルが存在する場合のみ追加
+                                # ファイルサイズを計算
+                                total_size = sum(f.stat().st_size for f in checkpoint_files if f.is_file())
+                                size_mb = total_size / (1024 * 1024)
+                                
+                                # 作成日時を取得
+                                created_time = checkpoint_path.stat().st_ctime
+                                
+                                checkpoints.append({
+                                    "name": checkpoint_name,
+                                    "model_name": model_part,
+                                    "dataset_name": dataset_part,
+                                    "epoch": int(epoch_part),
+                                    "path": str(checkpoint_path),
+                                    "size_mb": round(size_mb, 2),
+                                    "file_count": len(checkpoint_files),
+                                    "created_at": created_time,
+                                    "files": [f.name for f in checkpoint_files if f.is_file()]
+                                })
+                    except (ValueError, IndexError):
+                        # パースに失敗した場合はスキップ
+                        continue
+        
+        # エポック番号でソート（新しい順）
+        checkpoints.sort(key=lambda x: x["epoch"], reverse=True)
+        
+        logger.info(f"Found {len(checkpoints)} checkpoints", 
+                   extra={"extra_fields": {"component": "api", "action": "list_checkpoints", 
+                                         "count": len(checkpoints), "model_name": model_name, "dataset_name": dataset_name}})
+        
+        return {"checkpoints": checkpoints}
+        
+    except Exception as e:
+        logger.error(f"Error listing checkpoints", 
+                    extra={"extra_fields": {"component": "api", "action": "list_checkpoints_error", 
+                                          "error": str(e), "traceback": traceback.format_exc()}})
+        raise HTTPException(status_code=500, detail=f"Failed to list checkpoints: {str(e)}")
+
 @router.get("/models", summary="学習済みモデル一覧取得")
 def get_models():
     """学習済みモデルの一覧を取得する"""
@@ -409,4 +567,17 @@ def delete_model(model_name: str):
 @router.get("/test", summary="テスト用エンドポイント")
 def test_endpoint():
     """テスト用のエンドポイント"""
-    return {"message": "Test endpoint is working", "endpoints": ["/config", "/status", "/progress", "/train/start", "/train/stop", "/dataset/download", "/models"]}
+    return {
+        "message": "Test endpoint is working", 
+        "endpoints": [
+            "/config", 
+            "/status", 
+            "/progress", 
+            "/train/start", 
+            "/train/resume", 
+            "/train/stop", 
+            "/dataset/download", 
+            "/models",
+            "/checkpoints"
+        ]
+    }

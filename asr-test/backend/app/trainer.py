@@ -101,9 +101,47 @@ def save_checkpoint(model, optimizer, epoch, model_name, dataset_name, scheduler
     if os.path.lexists(latest_path):
         os.remove(latest_path)
     os.symlink(os.path.basename(checkpoint_path), latest_path)
+    
+    # 古いチェックポイントの自動削除
+    cleanup_old_checkpoints(model_name, dataset_name, checkpoints_dir)
+    
     message = f"チェックポイントを保存しました: {checkpoint_path}"
     logger.info(message)
     websocket_manager.broadcast_sync({"type": "log", "payload": {"level": "INFO", "message": message}})
+
+def cleanup_old_checkpoints(model_name, dataset_name, checkpoints_dir="./checkpoints"):
+    """古いチェックポイントを自動削除する"""
+    try:
+        # 設定から保持数を取得
+        training_config = config_loader.get_training_config()
+        retention_count = training_config.get('checkpoint_retention', 5)
+        
+        # 該当するチェックポイントを検索
+        pattern = f"{checkpoints_dir}/{model_name}-{dataset_name}-epoch-*.pt"
+        checkpoints = glob.glob(pattern)
+        
+        if len(checkpoints) <= retention_count:
+            return  # 保持数以下の場合は何もしない
+        
+        # エポック番号でソート
+        def extract_epoch(path):
+            match = re.search(r"epoch-(\d+)", path)
+            return int(match.group(1)) if match else 0
+        
+        checkpoints.sort(key=extract_epoch, reverse=True)
+        
+        # 古いチェックポイントを削除
+        checkpoints_to_delete = checkpoints[retention_count:]
+        for checkpoint_path in checkpoints_to_delete:
+            try:
+                if os.path.exists(checkpoint_path):
+                    os.remove(checkpoint_path)
+                    logger.info(f"古いチェックポイントを削除しました: {checkpoint_path}")
+            except Exception as e:
+                logger.warning(f"チェックポイントの削除に失敗しました: {checkpoint_path}, エラー: {e}")
+                
+    except Exception as e:
+        logger.warning(f"チェックポイントの自動削除中にエラーが発生しました: {e}")
 
 @torch.no_grad()
 def run_validation(model, loader, device):
@@ -201,18 +239,44 @@ def start_training(params: Dict):
             logger.info(f"WarmupLRスケジューラーを初期化しました: warmup_steps={warmup_steps}, base_lr={training_config['learning_rate']}")
 
         start_epoch = 0
-        latest_checkpoint_path = get_latest_checkpoint(model_name, dataset_name)
-        if latest_checkpoint_path:
-            websocket_manager.broadcast_sync({"type": "log", "payload": {"level": "INFO", "message": f"チェックポイントを読み込んでいます: {latest_checkpoint_path}"}})
-            start_epoch = model.load_checkpoint(latest_checkpoint_path, optimizer)
-            
-            # スケジューラーの状態も復元
-            if scheduler is not None:
-                checkpoint = torch.load(latest_checkpoint_path, map_location=lambda storage, loc: storage)
-                if 'scheduler_state_dict' in checkpoint:
-                    scheduler_state = checkpoint['scheduler_state_dict']
-                    scheduler.step_count = scheduler_state['step_count']
-                    logger.info(f"スケジューラーの状態を復元しました: step_count={scheduler.step_count}")
+        resume_from_checkpoint = params.get("resume_from_checkpoint", True)
+        specific_checkpoint = params.get("specific_checkpoint")
+        
+        if resume_from_checkpoint:
+            if specific_checkpoint:
+                # 特定のチェックポイントから再開
+                checkpoint_path = f"./checkpoints/{specific_checkpoint}"
+                if os.path.exists(checkpoint_path):
+                    websocket_manager.broadcast_sync({"type": "log", "payload": {"level": "INFO", "message": f"指定されたチェックポイントを読み込んでいます: {checkpoint_path}"}})
+                    start_epoch = model.load_checkpoint(checkpoint_path, optimizer)
+                    
+                    # スケジューラーの状態も復元
+                    if scheduler is not None:
+                        checkpoint = torch.load(checkpoint_path, map_location=lambda storage, loc: storage)
+                        if 'scheduler_state_dict' in checkpoint:
+                            scheduler_state = checkpoint['scheduler_state_dict']
+                            scheduler.step_count = scheduler_state['step_count']
+                            logger.info(f"スケジューラーの状態を復元しました: step_count={scheduler.step_count}")
+                else:
+                    logger.warning(f"指定されたチェックポイントが見つかりません: {checkpoint_path}")
+            else:
+                # 最新のチェックポイントから再開
+                latest_checkpoint_path = get_latest_checkpoint(model_name, dataset_name)
+                if latest_checkpoint_path:
+                    websocket_manager.broadcast_sync({"type": "log", "payload": {"level": "INFO", "message": f"最新のチェックポイントを読み込んでいます: {latest_checkpoint_path}"}})
+                    start_epoch = model.load_checkpoint(latest_checkpoint_path, optimizer)
+                    
+                    # スケジューラーの状態も復元
+                    if scheduler is not None:
+                        checkpoint = torch.load(latest_checkpoint_path, map_location=lambda storage, loc: storage)
+                        if 'scheduler_state_dict' in checkpoint:
+                            scheduler_state = checkpoint['scheduler_state_dict']
+                            scheduler.step_count = scheduler_state['step_count']
+                            logger.info(f"スケジューラーの状態を復元しました: step_count={scheduler.step_count}")
+                else:
+                    logger.info("チェックポイントが見つからないため、最初から学習を開始します")
+        else:
+            logger.info("チェックポイントからの再開が無効化されているため、最初から学習を開始します")
 
         num_epochs = training_config['num_epochs']
         training_status['total_epochs'] = num_epochs

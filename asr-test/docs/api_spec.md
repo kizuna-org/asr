@@ -17,12 +17,24 @@
 ```json
 {
   "model_name": "conformer",
-  "dataset_name": "ljspeech"
+  "dataset_name": "ljspeech",
+  "epochs": 10,
+  "batch_size": 32,
+  "resume_from_checkpoint": true,
+  "specific_checkpoint": "conformer-ljspeech-epoch-5.pt",
+  "lightweight": false,
+  "limit_samples": null
 }
 ```
 
 -   `model_name` (string, required): 使用するモデル名。`config.yaml`の`available_models`に定義されている必要があります。
 -   `dataset_name` (string, required): 使用するデータセット名。`config.yaml`の`available_datasets`に定義されている必要があります。
+-   `epochs` (integer, optional): 学習エポック数。デフォルトは設定ファイルの値。
+-   `batch_size` (integer, optional): バッチサイズ。デフォルトは設定ファイルの値。
+-   `resume_from_checkpoint` (boolean, optional): チェックポイントから学習を再開するかどうか。デフォルトは`true`。
+-   `specific_checkpoint` (string, optional): 特定のチェックポイントから再開する場合のチェックポイント名。
+-   `lightweight` (boolean, optional): 軽量実行モード（サンプル数を制限）。デフォルトは`false`。
+-   `limit_samples` (integer, optional): 学習に使用するサンプル数の上限。`lightweight`が`true`の場合は10に設定される。
 
 **レスポンス**
 
@@ -44,6 +56,44 @@
       "detail": "Training is already in progress."
     }
     ```
+
+#### `POST /train/resume`
+
+学習をチェックポイントから再開します。
+
+**リクエストボディ (application/json)**
+
+```json
+{
+  "model_name": "conformer",
+  "dataset_name": "ljspeech",
+  "specific_checkpoint": "conformer-ljspeech-epoch-5.pt",
+  "epochs": 10,
+  "batch_size": 32,
+  "lightweight": false,
+  "limit_samples": null
+}
+```
+
+-   `model_name` (string, required): 使用するモデル名。
+-   `dataset_name` (string, required): 使用するデータセット名。
+-   `specific_checkpoint` (string, optional): 特定のチェックポイントから再開する場合のチェックポイント名。省略時は最新のチェックポイントを使用。
+-   `epochs` (integer, optional): 学習エポック数。デフォルトは10。
+-   `batch_size` (integer, optional): バッチサイズ。デフォルトは32。
+-   `lightweight` (boolean, optional): 軽量実行モード。デフォルトは`false`。
+-   `limit_samples` (integer, optional): 学習に使用するサンプル数の上限。
+
+**レスポンス**
+
+-   **200 OK**: 学習再開が正常に開始された場合。
+    ```json
+    {
+      "message": "Training resumed from checkpoint in background."
+    }
+    ```
+-   **400 Bad Request**: リクエストボディが不正な場合。
+-   **404 Not Found**: 指定されたチェックポイントが存在しない場合。
+-   **409 Conflict**: 既に学習プロセスが実行中の場合。
 
 #### `POST /train/stop`
 
@@ -169,7 +219,48 @@
 -   既存時 200: `message`, `path`, `num_wavs`
 -   エラー時 4xx/5xx: `detail` にメッセージ
 
-### 1.6. 学習済みモデル管理
+### 1.6. チェックポイント管理
+
+#### `GET /checkpoints`
+
+利用可能なチェックポイントの一覧を取得します。
+
+**クエリパラメータ**
+
+-   `model_name` (string, optional): モデル名でフィルタリング
+-   `dataset_name` (string, optional): データセット名でフィルタリング
+
+**レスポンス**
+
+-   **200 OK**: チェックポイント一覧の取得成功
+    ```json
+    {
+      "checkpoints": [
+        {
+          "name": "conformer-ljspeech-epoch-10.pt",
+          "model_name": "conformer",
+          "dataset_name": "ljspeech",
+          "epoch": 10,
+          "path": "/app/checkpoints/conformer-ljspeech-epoch-10.pt",
+          "size_mb": 245.67,
+          "file_count": 7,
+          "created_at": 1719555555.12,
+          "files": ["config.json", "model.safetensors", "optimizer.pt", "preprocessor_config.json", "special_tokens_map.json", "tokenizer_config.json", "vocab.json"]
+        }
+      ]
+    }
+    ```
+    - `name` (string): チェックポイント名
+    - `model_name` (string): モデル名
+    - `dataset_name` (string): データセット名
+    - `epoch` (integer): エポック数
+    - `path` (string): チェックポイントファイルのパス
+    - `size_mb` (number): チェックポイントサイズ（MB）
+    - `file_count` (number): 含まれるファイル数
+    - `created_at` (number): 作成日時（Unix timestamp）
+    - `files` (array): 含まれるファイル名のリスト
+
+### 1.7. 学習済みモデル管理
 
 #### `GET /models`
 
@@ -231,13 +322,13 @@
     ```
 -   **500 Internal Server Error**: 削除処理中にエラーが発生した場合
 
-### 1.7. テスト
+### 1.8. テスト
 
 #### `GET /api/test`
 
 疎通確認用エンドポイント。利用可能なAPIのリストを返します。
 ```json
-{ "message": "Test endpoint is working", "endpoints": ["/config", "/status", "/progress", "/train/start", "/train/stop", "/dataset/download", "/models"] }
+{ "message": "Test endpoint is working", "endpoints": ["/config", "/status", "/progress", "/train/start", "/train/resume", "/train/stop", "/dataset/download", "/models", "/checkpoints"] }
 ```
 
 ## 2. WebSocket API

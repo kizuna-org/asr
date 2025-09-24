@@ -273,21 +273,32 @@ def get_status():
         log_detailed_error("ステータス取得", e)
         st.session_state.consecutive_errors += 1
 
-def start_training(model_name: str, dataset_name: str, epochs: int, batch_size: int, lightweight: bool = False, limit_samples: int = 0):
+def start_training(model_name: str, dataset_name: str, epochs: int, batch_size: int, lightweight: bool = False, limit_samples: int = 0, resume_from_checkpoint: bool = True, specific_checkpoint: str = None):
     """学習を開始"""
     try:
         params = {
             "model_name": model_name,
             "dataset_name": dataset_name,
             "epochs": epochs,
-            "batch_size": batch_size
+            "batch_size": batch_size,
+            "resume_from_checkpoint": resume_from_checkpoint
         }
         # 軽量モード/サンプル制限の付与
         if lightweight:
             params["lightweight"] = True
         if isinstance(limit_samples, int) and limit_samples > 0:
             params["limit_samples"] = int(limit_samples)
+        if specific_checkpoint:
+            params["specific_checkpoint"] = specific_checkpoint
+            
         st.session_state.logs.append(f"🚀 学習開始リクエスト送信中... URL: {BACKEND_URL}/train/start")
+        if resume_from_checkpoint:
+            if specific_checkpoint:
+                st.session_state.logs.append(f"📂 チェックポイントから再開: {specific_checkpoint}")
+            else:
+                st.session_state.logs.append("📂 最新のチェックポイントから再開")
+        else:
+            st.session_state.logs.append("🆕 最初から学習を開始")
         
         # プロキシ設定を適用
         request_proxies = proxies if should_use_proxy(BACKEND_URL) else None
@@ -295,6 +306,14 @@ def start_training(model_name: str, dataset_name: str, epochs: int, batch_size: 
         
         if response.status_code == 200:
             st.session_state.is_training = True
+            # 学習再開情報を保存
+            if resume_from_checkpoint:
+                if specific_checkpoint:
+                    st.session_state.resume_info = f"Epoch {specific_checkpoint.split('-epoch-')[1].replace('.pt', '')}"
+                else:
+                    st.session_state.resume_info = "最新"
+            else:
+                st.session_state.resume_info = "新規"
             st.session_state.logs.append("✅ 学習を開始しました")
             return True
         else:
@@ -314,6 +333,58 @@ def start_training(model_name: str, dataset_name: str, epochs: int, batch_size: 
         log_detailed_error("学習開始", e)
         return False
 
+def resume_training(model_name: str, dataset_name: str, epochs: int, batch_size: int, specific_checkpoint: str = None, lightweight: bool = False, limit_samples: int = 0):
+    """学習を再開"""
+    try:
+        params = {
+            "model_name": model_name,
+            "dataset_name": dataset_name,
+            "epochs": epochs,
+            "batch_size": batch_size
+        }
+        if specific_checkpoint:
+            params["specific_checkpoint"] = specific_checkpoint
+        if lightweight:
+            params["lightweight"] = True
+        if isinstance(limit_samples, int) and limit_samples > 0:
+            params["limit_samples"] = int(limit_samples)
+            
+        st.session_state.logs.append(f"🔄 学習再開リクエスト送信中... URL: {BACKEND_URL}/train/resume")
+        if specific_checkpoint:
+            st.session_state.logs.append(f"📂 指定されたチェックポイントから再開: {specific_checkpoint}")
+        else:
+            st.session_state.logs.append("📂 最新のチェックポイントから再開")
+        
+        # プロキシ設定を適用
+        request_proxies = proxies if should_use_proxy(BACKEND_URL) else None
+        response = requests.post(f"{BACKEND_URL}/train/resume", json=params, timeout=30, proxies=request_proxies)
+        
+        if response.status_code == 200:
+            st.session_state.is_training = True
+            # 学習再開情報を保存
+            if specific_checkpoint:
+                st.session_state.resume_info = f"Epoch {specific_checkpoint.split('-epoch-')[1].replace('.pt', '')}"
+            else:
+                st.session_state.resume_info = "最新"
+            st.session_state.logs.append("✅ 学習を再開しました")
+            return True
+        else:
+            log_detailed_error("学習再開", Exception(f"HTTP {response.status_code}"), response)
+            return False
+            
+    except requests.exceptions.ConnectionError as e:
+        log_detailed_error("学習再開", e)
+        return False
+    except requests.exceptions.Timeout as e:
+        log_detailed_error("学習再開", e)
+        return False
+    except requests.exceptions.RequestException as e:
+        log_detailed_error("学習再開", e)
+        return False
+    except Exception as e:
+        log_detailed_error("学習再開", e)
+        return False
+
 def stop_training():
     """学習を停止"""
     try:
@@ -325,6 +396,9 @@ def stop_training():
         
         if response.status_code == 200:
             st.session_state.is_training = False
+            # 学習再開情報をクリア
+            if "resume_info" in st.session_state:
+                del st.session_state.resume_info
             st.session_state.logs.append("✅ 学習を停止しました")
             return True
         else:
@@ -492,6 +566,33 @@ def update_progress_from_backend():
         return False
 
 # --- モデル管理機能 ---
+def get_checkpoints(model_name: str = None, dataset_name: str = None):
+    """チェックポイント一覧を取得"""
+    try:
+        params = {}
+        if model_name:
+            params["model_name"] = model_name
+        if dataset_name:
+            params["dataset_name"] = dataset_name
+            
+        request_proxies = proxies if should_use_proxy(BACKEND_URL) else None
+        response = requests.get(f"{BACKEND_URL}/checkpoints", params=params, timeout=10, proxies=request_proxies)
+        
+        if response.status_code == 200:
+            return response.json().get("checkpoints", [])
+        else:
+            st.error(f"チェックポイント一覧の取得に失敗しました: HTTP {response.status_code}")
+            return []
+    except requests.exceptions.ConnectionError:
+        st.error("バックエンドに接続できません。バックエンドサービスが起動しているか確認してください。")
+        return []
+    except requests.exceptions.Timeout:
+        st.error("リクエストがタイムアウトしました。")
+        return []
+    except Exception as e:
+        st.error(f"チェックポイント一覧の取得中にエラーが発生しました: {str(e)}")
+        return []
+
 def get_models():
     """学習済みモデル一覧を取得"""
     try:
@@ -586,7 +687,14 @@ with col_nav2:
         st.rerun()
 with col_nav3:
     current_page = st.session_state.get("current_page", "main")
-    page_name = "メインダッシュボード" if current_page == "main" else "モデル管理"
+    if current_page == "main":
+        page_name = "メインダッシュボード"
+    elif current_page == "model_management":
+        page_name = "モデル管理"
+    elif current_page == "checkpoint_management":
+        page_name = "チェックポイント管理"
+    else:
+        page_name = "不明"
     st.markdown(f"### 📊 現在のページ: {page_name}")
 st.markdown("---")
 
@@ -601,6 +709,9 @@ with st.sidebar:
         st.rerun()
     if st.button("🤖 モデル管理", use_container_width=True, disabled=(current_page == "model_management"), key="nav_model_sidebar"):
         st.session_state.current_page = "model_management"
+        st.rerun()
+    if st.button("📂 チェックポイント管理", use_container_width=True, disabled=(current_page == "checkpoint_management"), key="nav_checkpoint_sidebar"):
+        st.session_state.current_page = "checkpoint_management"
         st.rerun()
     
     st.markdown("---")
@@ -641,19 +752,63 @@ with st.sidebar:
     lightweight = st.checkbox("軽量(先頭10件)でテスト実行", value=True)
     limit_samples = st.number_input("使用サンプル数を制限 (0で無効)", min_value=0, value=0)
     
-    # 学習開始/停止ボタン
-    col1, col2 = st.columns(2)
+    # 学習再開オプション
+    st.subheader("🔄 学習再開オプション")
+    resume_from_checkpoint = st.checkbox("チェックポイントから再開", value=True, help="チェックポイントが存在する場合、自動的に再開します")
+    
+    # チェックポイント選択
+    specific_checkpoint = None
+    if resume_from_checkpoint and training_model_name and dataset_name:
+        checkpoints = get_checkpoints(training_model_name, dataset_name)
+        if checkpoints:
+            checkpoint_options = ["最新のチェックポイントから再開"] + [f"{cp['name']} (Epoch {cp['epoch']})" for cp in checkpoints]
+            selected_checkpoint = st.selectbox(
+                "再開するチェックポイントを選択",
+                checkpoint_options,
+                help="特定のチェックポイントから再開する場合は選択してください"
+            )
+            if selected_checkpoint != "最新のチェックポイントから再開":
+                # チェックポイント名を抽出
+                for cp in checkpoints:
+                    if f"{cp['name']} (Epoch {cp['epoch']})" == selected_checkpoint:
+                        specific_checkpoint = cp['name']
+                        break
+        else:
+            st.info("利用可能なチェックポイントがありません。最初から学習を開始します。")
+    
+    # 学習制御ボタン
+    st.subheader("🎮 学習制御")
+    col1, col2, col3 = st.columns(3)
+    
     with col1:
-        if st.button("学習開始", disabled=st.session_state.is_training):
+        if st.button("🆕 新規学習開始", disabled=st.session_state.is_training, help="最初から学習を開始します"):
             if training_model_name and dataset_name:
-                success = start_training(training_model_name, dataset_name, epochs, batch_size, lightweight=lightweight, limit_samples=limit_samples)
+                success = start_training(training_model_name, dataset_name, epochs, batch_size, 
+                                       lightweight=lightweight, limit_samples=limit_samples, 
+                                       resume_from_checkpoint=False)
                 if not success:
                     st.error("学習の開始に失敗しました。ログを確認してください。")
             else:
                 st.error("モデルとデータセットを選択してください")
     
     with col2:
-        if st.button("学習停止", disabled=not st.session_state.is_training):
+        if st.button("🔄 学習再開", disabled=st.session_state.is_training, help="チェックポイントから学習を再開します"):
+            if training_model_name and dataset_name:
+                if resume_from_checkpoint:
+                    success = resume_training(training_model_name, dataset_name, epochs, batch_size,
+                                            specific_checkpoint=specific_checkpoint,
+                                            lightweight=lightweight, limit_samples=limit_samples)
+                else:
+                    success = start_training(training_model_name, dataset_name, epochs, batch_size,
+                                           lightweight=lightweight, limit_samples=limit_samples,
+                                           resume_from_checkpoint=True, specific_checkpoint=specific_checkpoint)
+                if not success:
+                    st.error("学習の再開に失敗しました。ログを確認してください。")
+            else:
+                st.error("モデルとデータセットを選択してください")
+    
+    with col3:
+        if st.button("🛑 学習停止", disabled=not st.session_state.is_training, help="現在の学習を停止します"):
             stop_training()
     
     # 進捗表示
@@ -779,11 +934,17 @@ if current_page == "main":
 
     # 上部メトリクス表示（学習中のみ）
     if st.session_state.is_training:
-        m1, m2 = st.columns(2)
+        m1, m2, m3 = st.columns(3)
         with m1:
             st.metric(label="Epoch", value=f"{st.session_state.current_epoch}/{st.session_state.total_epochs}")
         with m2:
             st.metric(label="Step", value=f"{st.session_state.current_step}/{st.session_state.total_steps}")
+        with m3:
+            # 学習再開情報を表示
+            if "resume_info" in st.session_state:
+                st.metric(label="再開元", value=st.session_state.resume_info)
+            else:
+                st.metric(label="学習状態", value="実行中")
 
     with col1:
         st.header("学習ロス")
@@ -1271,9 +1432,155 @@ if stats:
     if st.session_state.get("realtime_error"):
         st.error(st.session_state.get("realtime_error"))
 
-# --- モデル管理セクション ---
+# --- チェックポイント管理セクション ---
 current_page = st.session_state.get("current_page", "main")
-if current_page == "model_management":
+if current_page == "checkpoint_management":
+    st.markdown("---")
+    st.header("📂 チェックポイント管理")
+    
+    # 説明
+    st.markdown("""
+    このページでは、学習チェックポイントの一覧表示と管理を行うことができます。
+    チェックポイントは学習中に自動的に保存され、学習の再開に使用できます。
+    """)
+    
+    # フィルタリングオプション
+    st.subheader("🔍 フィルタリング")
+    col_filter1, col_filter2 = st.columns(2)
+    
+    with col_filter1:
+        filter_model = st.selectbox(
+            "モデル名でフィルタ",
+            ["全て"] + st.session_state.available_models,
+            key="checkpoint_filter_model"
+        )
+    
+    with col_filter2:
+        filter_dataset = st.selectbox(
+            "データセット名でフィルタ",
+            ["全て"] + st.session_state.available_datasets,
+            key="checkpoint_filter_dataset"
+        )
+    
+    # チェックポイント一覧の取得
+    if st.button("🔄 チェックポイント一覧を更新", type="primary", key="refresh_checkpoints_main"):
+        st.rerun()
+    
+    # フィルタリングパラメータを設定
+    model_filter = filter_model if filter_model != "全て" else None
+    dataset_filter = filter_dataset if filter_dataset != "全て" else None
+    
+    checkpoints = get_checkpoints(model_filter, dataset_filter)
+    
+    if not checkpoints:
+        st.info("チェックポイントが見つかりません。学習を実行してチェックポイントを作成してください。")
+    else:
+        st.success(f"{len(checkpoints)}個のチェックポイントが見つかりました。")
+        
+        # チェックポイント一覧をテーブル形式で表示
+        st.subheader("📋 チェックポイント一覧")
+        
+        # データフレーム用のデータを準備
+        checkpoint_data = []
+        for checkpoint in checkpoints:
+            checkpoint_data.append({
+                "チェックポイント名": checkpoint["name"],
+                "モデル": checkpoint["model_name"],
+                "データセット": checkpoint["dataset_name"],
+                "エポック": checkpoint["epoch"],
+                "サイズ": format_file_size(checkpoint["size_mb"]),
+                "ファイル数": checkpoint["file_count"],
+                "作成日時": format_timestamp(checkpoint["created_at"])
+            })
+        
+        # テーブル表示
+        st.dataframe(
+            checkpoint_data,
+            use_container_width=True,
+            hide_index=True
+        )
+        
+        # チェックポイント詳細と学習再開機能
+        st.subheader("🔄 学習再開")
+        st.info("💡 チェックポイントを選択して学習を再開できます。")
+        
+        # チェックポイント選択
+        checkpoint_names = [cp["name"] for cp in checkpoints]
+        selected_checkpoint = st.selectbox(
+            "学習再開に使用するチェックポイントを選択してください:",
+            checkpoint_names,
+            index=None,
+            placeholder="チェックポイントを選択...",
+            key="checkpoint_selector"
+        )
+        
+        if selected_checkpoint:
+            # 選択されたチェックポイントの詳細を表示
+            selected_checkpoint_info = next((cp for cp in checkpoints if cp["name"] == selected_checkpoint), None)
+            if selected_checkpoint_info:
+                st.markdown("### 選択されたチェックポイントの詳細")
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric("チェックポイント名", selected_checkpoint_info["name"])
+                    st.metric("モデル", selected_checkpoint_info["model_name"])
+                
+                with col2:
+                    st.metric("データセット", selected_checkpoint_info["dataset_name"])
+                    st.metric("エポック", selected_checkpoint_info["epoch"])
+                
+                with col3:
+                    st.metric("サイズ", format_file_size(selected_checkpoint_info["size_mb"]))
+                    st.metric("ファイル数", selected_checkpoint_info["file_count"])
+                
+                # ファイル一覧
+                st.markdown("#### 含まれるファイル:")
+                for file_name in selected_checkpoint_info["files"]:
+                    st.text(f"• {file_name}")
+                
+                # 学習再開パラメータ
+                st.markdown("### 学習再開パラメータ")
+                col_param1, col_param2 = st.columns(2)
+                
+                with col_param1:
+                    resume_epochs = st.number_input("追加エポック数", min_value=1, value=5, key="resume_epochs")
+                    resume_batch_size = st.number_input("バッチサイズ", min_value=1, value=4, key="resume_batch_size")
+                
+                with col_param2:
+                    resume_lightweight = st.checkbox("軽量モード", value=True, key="resume_lightweight")
+                    resume_limit_samples = st.number_input("サンプル数制限", min_value=0, value=0, key="resume_limit_samples")
+                
+                # 学習再開ボタン
+                if st.button("🔄 このチェックポイントから学習を再開", type="primary", disabled=st.session_state.is_training, key="resume_from_checkpoint_button"):
+                    if not st.session_state.is_training:
+                        with st.spinner("学習を再開中..."):
+                            success = resume_training(
+                                selected_checkpoint_info["model_name"],
+                                selected_checkpoint_info["dataset_name"],
+                                resume_epochs,
+                                resume_batch_size,
+                                specific_checkpoint=selected_checkpoint,
+                                lightweight=resume_lightweight,
+                                limit_samples=resume_limit_samples
+                            )
+                            
+                            if success:
+                                st.success("学習を再開しました！")
+                                st.balloons()
+                                # メインダッシュボードに戻る
+                                st.session_state.current_page = "main"
+                                st.rerun()
+                            else:
+                                st.error("学習の再開に失敗しました。ログを確認してください。")
+                    else:
+                        st.error("既に学習が実行中です。現在の学習を停止してから再開してください。")
+    
+    # フッター
+    st.markdown("---")
+    st.markdown("💡 **ヒント**: チェックポイントから学習を再開することで、学習時間を短縮できます。")
+
+# --- モデル管理セクション ---
+elif current_page == "model_management":
     st.markdown("---")
     st.header("🤖 学習済みモデル管理")
     
