@@ -2,12 +2,18 @@
 
 このドキュメントは、バックエンドアプリケーションの設定ファイル `backend/config.yaml` の構造と各パラメータについて詳述します。実体はコンテナ内の作業ディレクトリ直下（相対パス `config.yaml`、実行時は `/app/config.yaml`）で読み込まれます。
 
+## 概要
+
+この設定ファイルは、ASR学習POCアプリケーションの動作を制御するための主要な設定を定義します。モデル、データセット、学習パラメータなどの設定が含まれています。
+
 ## 1. ルートレベル
 
 ```yaml
 # 使用可能なモデルとデータセットのリスト
 available_models:
   - conformer
+  - realtime
+  # - rnn-t  # コメントアウトされたモデル
 
 available_datasets:
   - ljspeech
@@ -25,7 +31,7 @@ training:
   # ... (セクション 4 を参照)
 ```
 
--   `available_models` (list[string], required): API経由で学習を開始できるモデル名のリスト。このリストにないモデルは `POST /api/train/start` で指定できません。
+-   `available_models` (list[string], required): API経由で学習を開始できるモデル名のリスト。このリストにないモデルは `POST /api/train/start` で指定できません。現在利用可能: `conformer`, `realtime`
 -   `available_datasets` (list[string], required): API経由で利用できるデータセット名のリスト。
 
 ## 2. `models` セクション
@@ -50,6 +56,36 @@ models:
       type: "SentencePiece" # "Character", "Word" など
       vocab_size: 5000
       # model_path: "/path/to/tokenizer.model" # SentencePieceモデルのパス（任意）
+
+  # --- リアルタイムモデル設定 ---
+  realtime:
+    # --- アーキテクチャ設定 ---
+    encoder:
+      input_dim: 80 # 入力特徴量の次元数 (メルスペクトログラムの次元)
+      hidden_dim: 256 # エンコーダの隠れ層の次元数
+      num_layers: 3 # エンコーダの層数
+      rnn_type: "GRU" # RNNの種類
+      dropout: 0.1 # ドロップアウト率
+
+    decoder:
+      input_dim: 256 # デコーダの入力次元
+      vocab_size: 1000 # 語彙サイズ
+      blank_token: "_" # 空白トークン
+
+    # --- 処理設定 ---
+    processing:
+      chunk_size_ms: 100 # チャンクサイズ（ミリ秒）
+      sample_rate: 16000 # サンプリングレート
+      feature_type: "mel_spectrogram" # 特徴量の種類
+      n_mels: 80 # メルフィルタバンクの数
+      n_fft: 1024 # FFTのウィンドウサイズ
+      hop_length: 160 # ホップ長
+
+    # --- 最適化設定 ---
+    optimization:
+      precision: "fp16" # 精度（fp16/fp32）
+      batch_size: 1 # バッチサイズ（ストリーミング処理）
+      max_memory_mb: 512 # 最大メモリ使用量（MB）
 ```
 
 -   各パラメータは、対応するモデルクラス (`app/models/{model_name}.py`) の `__init__` メソッドで解釈されます。
@@ -97,7 +133,7 @@ training:
 
   # --- スケジューラ設定 ---
   scheduler: "WarmupLR"   # 学習率スケジューラの名前 (オプション)
-  warmup_steps: 4000      # WarmupLRのウォームアップステップ数
+  warmup_steps: 100       # WarmupLRのウォームアップステップ数
 
   # --- 学習ループ設定 ---
   batch_size: 32          # バッチサイズ（APIからのリクエストで上書き可）
@@ -105,6 +141,10 @@ training:
   grad_clip_thresh: 1.0   # 勾配クリッピングの閾値
   log_interval: 10        # ログを記録するステップ間隔 (steps)
   checkpoint_interval: 1  # チェックポイントを保存する間隔 (epochs)
+
+  # --- 学習再開設定 ---
+  auto_resume: true       # 学習開始時に自動的に最新のチェックポイントから再開するかどうか
+  checkpoint_retention: 5 # 保持するチェックポイントの数（古いものは自動削除）
 ```
 
 -   `optimizer`: `torch.optim` で利用可能なオプティマイザの名前を指定します。

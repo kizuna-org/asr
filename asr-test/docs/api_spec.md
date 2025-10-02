@@ -6,6 +6,32 @@
 
 ベースURL: `http://<backend-host>:<port>/api`
 
+### 1.0. ヘルスチェック・デバッグ
+
+#### `GET /`
+ルートパスへのヘルスチェックエンドポイント。
+
+**レスポンス**
+- **200 OK**: アプリケーションが正常に動作していることを示す
+  ```json
+  {
+    "message": "Welcome to ASR Training POC API"
+  }
+  ```
+
+#### `GET /debug`
+デバッグ情報を返すエンドポイント。
+
+**レスポンス**
+- **200 OK**:
+  ```json
+  {
+    "message": "Debug endpoint is working",
+    "routes": ["/", "/debug", "/api/config", "/api/status", "/api/progress", "/api/train/start", "/api/train/resume", "/api/train/stop", "/api/inference", "/api/dataset/download", "/api/checkpoints", "/api/models", "/api/test", "/ws"],
+    "api_routes": ["/config", "/status", "/progress", "/train/start", "/train/resume", "/train/stop", "/inference", "/dataset/download", "/checkpoints", "/models", "/test"]
+  }
+  ```
+
 ### 1.1. 学習制御
 
 #### `POST /train/start`
@@ -27,7 +53,7 @@
 }
 ```
 
--   `model_name` (string, required): 使用するモデル名。`config.yaml`の`available_models`に定義されている必要があります。
+-   `model_name` (string, required): 使用するモデル名。`config.yaml`の`available_models`に定義されている必要があります。現在利用可能なモデル: `conformer`, `realtime`
 -   `dataset_name` (string, required): 使用するデータセット名。`config.yaml`の`available_datasets`に定義されている必要があります。
 -   `epochs` (integer, optional): 学習エポック数。デフォルトは設定ファイルの値。
 -   `batch_size` (integer, optional): バッチサイズ。デフォルトは設定ファイルの値。
@@ -38,7 +64,7 @@
 
 **レスポンス**
 
--   **202 Accepted**: 学習プロセスが正常にバックグラウンドで開始された場合。
+-   **200 OK**: 学習プロセスが正常にバックグラウンドで開始された場合。
     ```json
     {
       "message": "Training started in background."
@@ -126,8 +152,8 @@
 
 **リクエストボディ (multipart/form-data)**
 
--   `file` (file, required): 推論対象の音声ファイル (WAV, FLACなど)。
--   `model_name` (query, optional): 既定値 `conformer`
+-   `file` (file, required): 推論対象の音声ファイル (WAV, FLAC, MP3, M4A, OGGなど)。
+-   `model_name` (query, optional): 使用するモデル名。既定値 `conformer`。利用可能なモデル: `conformer`, `realtime`
 
 **レスポンス**
 
@@ -141,11 +167,21 @@
     }
     ```
     - `transcription` (string): 文字起こし結果
-    - `first_token_time_ms` (number): 音声入力から最初の出力が来るまでの時間（ミリ秒）
+    - `first_token_time_ms` (number): 音声入力から推論開始までの時間（ミリ秒）
     - `inference_time_ms` (number): 推論処理時間（ミリ秒）
-    - `total_time_ms` (number): 音声入力から最後の出力が来るまでの総時間（ミリ秒）
+    - `total_time_ms` (number): 音声入力から最終出力までの総時間（ミリ秒）
+    
+    **時間計測の詳細:**
+    - `first_token_time_ms`: 音声ファイル受信開始から推論処理開始までの時間
+    - `inference_time_ms`: 推論処理の実行時間（モデル推論のみ）
+    - `total_time_ms`: 音声ファイル受信から最終レスポンス準備完了までの時間
 -   **400 Bad Request**: ファイルが提供されなかった場合。
 -   **500 Internal Server Error**: 推論中にエラーが発生した場合。
+    ```json
+    {
+      "detail": "Inference failed: [エラー詳細]\nTraceback (most recent call last):\n[スタックトレース]"
+    }
+    ```
 
 ### 1.3. 設定情報
 
@@ -156,17 +192,17 @@
 **レスポンス**
 
 -   **200 OK**:
-    ```json
-    {
-      "available_models": ["conformer"],
-      "available_datasets": ["ljspeech"],
-      "training_config": {
-        "learning_rate": 0.001,
-        "batch_size": 32,
-        "optimizer": "AdamW"
-      }
-    }
-    ```
+```json
+{
+  "available_models": ["conformer", "realtime"],
+  "available_datasets": ["ljspeech"],
+  "training_config": {
+    "learning_rate": 0.001,
+    "batch_size": 32,
+    "optimizer": "AdamW"
+  }
+}
+```
 
 ### 1.4. ステータス・進捗
 
@@ -324,12 +360,31 @@
 
 ### 1.8. テスト
 
-#### `GET /api/test`
+#### `GET /test`
 
 疎通確認用エンドポイント。利用可能なAPIのリストを返します。
-```json
-{ "message": "Test endpoint is working", "endpoints": ["/config", "/status", "/progress", "/train/start", "/train/resume", "/train/stop", "/dataset/download", "/models", "/checkpoints"] }
-```
+
+**レスポンス**
+
+-   **200 OK**:
+    ```json
+    {
+      "message": "Test endpoint is working",
+      "endpoints": [
+        "/config",
+        "/status",
+        "/progress",
+        "/train/start",
+        "/train/resume",
+        "/train/stop",
+        "/inference",
+        "/dataset/download",
+        "/models",
+        "/checkpoints",
+        "/test"
+      ]
+    }
+    ```
 
 ## 2. WebSocket API
 
@@ -412,9 +467,11 @@
 
 クライアントは以下のプロトコルでメッセージを送信し、音声をストリーミングして部分/最終の文字起こしを受信できます。
 
+**クライアントからサーバーへのメッセージ:**
+
 - Text(JSON) `start`:
   ```json
-  {"type": "start", "model_name": "conformer", "sample_rate": 48000, "format": "i16"}
+  {"type": "start", "model_name": "conformer", "sample_rate": 48000, "format": "f32"}
   ```
   - `model_name`: 使用するモデル名（省略時 `conformer`）
   - `sample_rate`: クライアント送信のサンプルレート（例: 48000）
@@ -423,13 +480,14 @@
 - Binary 音声フレーム:
   - `start` 後、一定長の音声フレームを連続で送信します。
   - モノラル想定。サーバー側で 16kHz mono へリサンプリング。
+  - フレームは約1秒間隔で部分推論を実行し、結果を返します。
 
 - Text(JSON) `stop`:
   ```json
   {"type": "stop"}
   ```
 
-サーバーからの応答（追加）:
+**サーバーからクライアントへの応答:**
 
 - 部分結果 `partial`:
   ```json
@@ -450,3 +508,12 @@
   ```json
   {"type": "error", "payload": {"message": "Invalid JSON"}}
   ```
+
+**リアルタイム推論の動作:**
+1. クライアントが `start` メッセージを送信
+2. サーバーが `status: ready` を返す
+3. クライアントが音声フレームを連続送信
+4. サーバーが約1秒間隔で部分推論を実行し、`partial` 結果を返す
+5. クライアントが `stop` メッセージを送信
+6. サーバーが最終推論を実行し、`final` 結果を返す
+7. サーバーが `status: stopped` を返す

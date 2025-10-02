@@ -1,9 +1,18 @@
 ASR学習POCアプリケーション 基本設計案 (詳細版)
 1. 目的
-既存の音声認識技術よりもリアルタイムかつ高速に動作するASRモデルの学習・評価サイクルを迅速に回すための、Proof of Concept（概念実証）アプリケーションを構築する。Web GUIを通じて、学習の制御、進捗の可視化、および学習済みモデルのテストを直感的に行えるようにすることを目的とする。
+既存の音声認識技術よりもリアルタイムかつ高速に動作するASRモデルの学習・評価サイクルを迅速に回すための、Proof of Concept（概念実証）アプリケーションを構築する。Web GUIを通じて、学習の制御、進捗の可視化、学習済みモデルのテスト、リアルタイム推論を直感的に行えるようにすることを目的とする。
 
 2. 全体構成案
 Docker Compose でバックエンド(FastAPI)とフロントエンド(Streamlit)を起動します。HTTP API は `/api` プレフィックス、WebSocket は `/ws` を使用します。ホスト公開ポートは `58081`(API) と `58080`(Frontend)。
+
+**主要機能:**
+- 学習制御: 新規学習、チェックポイントからの再開、学習停止（conformer/realtimeモデル対応）
+- 推論機能: ファイルアップロードによる推論、リアルタイム音声推論（WebRTC統合）
+- モデル管理: 学習済みモデルの一覧表示、削除、フィルタリング機能
+- チェックポイント管理: チェックポイントの一覧表示、学習再開、詳細情報表示
+- データセット管理: データセットのダウンロード、自動展開
+- リアルタイム通信: WebSocketによる学習進捗のリアルタイム更新、音声ストリーミング
+- 詳細なログ機能: 構造化ログ、エラーハンドリング、プロキシ対応
 
 3. 各コンポーネント詳細
 3.1. バックエンド (GPUサーバー上のDockerコンテナ)
@@ -149,24 +158,44 @@ def collate_fn(batch):
     pass
 
 3.2. フロントエンド (Web GUI)
-(変更なし)
+
+**主要機能:**
+- メインダッシュボード: 学習制御、推論テスト、リアルタイム推論、進捗表示
+- モデル管理: 学習済みモデルの一覧表示と削除、フィルタリング機能
+- チェックポイント管理: チェックポイントの一覧表示と学習再開、詳細情報表示
+- リアルタイム推論: マイク入力によるリアルタイム音声認識（WebRTC統合）
+- データセット管理: データセットのダウンロード、自動展開
+- 詳細なログ機能: 構造化ログ、エラーハンドリング、プロキシ対応
 
 3.2.1. フロントエンド 詳細な内部構造
-状態管理 (st.session_state):
+
+**状態管理 (st.session_state):**
 
 Streamlitのセッション状態機能を利用して、UIの状態を保持します。
 
-st.session_state.is_training: 学習中かどうかのフラグ
+- `st.session_state.is_training`: 学習中かどうかのフラグ
+- `st.session_state.logs`: バックエンドから受信したログメッセージのリスト
+- `st.session_state.progress_df`: グラフ描画用のロス値などの時系列データフレーム
+- `st.session_state.validation_df`: 検証ロスデータ
+- `st.session_state.lr_df`: 学習率データ
+- `st.session_state.current_page`: 現在のページ（main, model_management, checkpoint_management）
+- `st.session_state.realtime_running`: リアルタイム推論の実行状態
+- `st.session_state.realtime_partial`: リアルタイム推論の部分結果
+- `st.session_state.realtime_final`: リアルタイム推論の最終結果
+- `st.session_state.realtime_status`: リアルタイム推論のステータス情報
+- `st.session_state.realtime_error`: リアルタイム推論のエラーメッセージ
+- `st.session_state.realtime_msg_queue`: リアルタイム推論のメッセージキュー
 
-st.session_state.logs: バックエンドから受信したログメッセージのリスト
+**バックエンドとの通信 (app.py):**
 
-st.session_state.progress_data: グラフ描画用のロス値などの時系列データフレーム
+- **制御系 (HTTP)**: 「学習開始」「停止」ボタンが押されると、requestsライブラリを使ってFastAPIの`/train/start`, `/train/stop`エンドポイントにPOSTリクエストを送信します。
+- **進捗受信用 (WebSocket)**: 学習開始リクエストが成功した後、websocketsライブラリを使ってバックエンドの`/ws`エンドポイントに接続します。非同期処理を用いてWebSocketメッセージを継続的に待ち受け、受信したデータをst.session_stateに格納し、st.rerun()を呼び出して画面を再描画します。
+- **リアルタイム推論**: WebRTCとWebSocketを組み合わせて、マイクからの音声をリアルタイムでサーバーに送信し、部分的な文字起こし結果を受信します。
 
-バックエンドとの通信 (app.py):
-
-制御系 (HTTP): 「学習開始」「停止」ボタンが押されると、requestsライブラリを使ってFastAPIの/train/start, /train/stopエンドポイントにPOSTリクエストを送信します。
-
-進捗受信用 (WebSocket): 学習開始リクエストが成功した後、websocketsライブラリを使ってバックエンドの/wsエンドポイントに接続します。非同期処理を用いてWebSocketメッセージを継続的に待ち受け、受信したデータをst.session_stateに格納し、st.experimental_rerun()を呼び出して画面を再描画します。
+**ログ機能:**
+- 構造化ログ: JSON形式でのログ出力
+- 詳細なエラーハンドリング: 接続エラー、タイムアウト、HTTPエラーの詳細表示
+- プロキシ対応: HTTP_PROXY、HTTPS_PROXY、NO_PROXY環境変数のサポート
 
 4. 開発・デプロイ環境
 (変更なし)
@@ -206,7 +235,7 @@ asr-poc/
 # 使用可能なモデルとデータセットを定義
 available_models:
   - conformer
-  - rnn-t # (例)
+  - realtime
 available_datasets:
   - ljspeech
 
@@ -216,7 +245,33 @@ models:
     input_dim: 80 # メルスペクトログラムの次元数
     encoder_dim: 256
     num_heads: 4
-    # ... その他のハイパーパラメータ
+    huggingface_model_name: "facebook/wav2vec2-base-960h"
+    tokenizer:
+      type: "SentencePiece"
+      vocab_size: 5000
+
+  realtime:
+    encoder:
+      input_dim: 80
+      hidden_dim: 256
+      num_layers: 3
+      rnn_type: "GRU"
+      dropout: 0.1
+    decoder:
+      input_dim: 256
+      vocab_size: 1000
+      blank_token: "_"
+    processing:
+      chunk_size_ms: 100
+      sample_rate: 16000
+      feature_type: "mel_spectrogram"
+      n_mels: 80
+      n_fft: 1024
+      hop_length: 160
+    optimization:
+      precision: "fp16"
+      batch_size: 1
+      max_memory_mb: 512
 
 # データセットごとの設定
 datasets:
@@ -225,28 +280,89 @@ datasets:
     sample_rate: 22050
     n_fft: 1024
     n_mels: 80
+    text_cleaners: ['english_cleaners']
 
 # 学習のグローバル設定
 training:
+  optimizer: "AdamW"
   learning_rate: 0.001
+  weight_decay: 0.01
+  betas: [0.9, 0.98]
+  eps: 1.0e-9
+  scheduler: "WarmupLR"
+  warmup_steps: 100
   batch_size: 32
-  optimizer: "Adam"
+  num_epochs: 100
+  grad_clip_thresh: 1.0
+  log_interval: 10
+  checkpoint_interval: 1
+  auto_resume: true
+  checkpoint_retention: 5
 
 7. 関連ドキュメント
 
 - [リアルタイム性特化型音声認識モデル設計](./realtime_model_design.md): 精度を度外視し、リアルタイム性を最優先とした音声認識モデルの詳細設計仕様
 
-8. 次のステップ
-環境構築: `docker-compose.yml` と各Dockerfileでコンテナを起動できる状態にする。ローカル操作は`run-local.sh`を使用し、直接 `python` は実行しない。
+8. 実装状況
 
-最小限の実装:
+## 8.1. 完了済み機能
 
-backend: conformer.pyとljspeech.pyの骨格をインターフェースに従って実装する。/inference APIがダミーデータで動作するようにする。
+**バックエンド実装:**
+- FastAPI による REST API 実装（学習制御、推論、モデル管理）
+- WebSocket によるリアルタイム通信
+- 構造化ログ機能（JSON形式、詳細なエラーハンドリング）
+- モデル管理機能（一覧、削除、フィルタリング）
+- チェックポイント管理機能（一覧、詳細情報、学習再開）
+- データセットダウンロード機能（自動展開）
+- リアルタイム推論機能（WebSocket経由、conformer/realtimeモデル対応）
+- 学習再開機能（チェックポイントからの再開、特定チェックポイント指定）
+- 推論パフォーマンス計測機能（3種類の時間計測）
+- テストエンドポイント（疎通確認）
+- 詳細なエラーハンドリング（スタックトレース含む）
+- モデルキャッシュ機能（推論性能向上）
 
-frontend: 音声ファイルをアップロードし、/inference APIを呼び出して結果を表示するUI部分を実装する。
+**フロントエンド実装:**
+- Streamlit による Web GUI
+- 学習制御（新規学習、再開、停止、conformer/realtimeモデル対応）
+- 推論テスト（ファイルアップロード、パフォーマンス情報表示）
+- リアルタイム推論（WebRTC統合、conformer/realtimeモデル対応）
+- モデル管理（一覧表示、削除、フィルタリング機能）
+- チェックポイント管理（一覧表示、学習再開、詳細情報表示）
+- データセット管理（ダウンロード、自動展開）
+- 詳細なログ機能（構造化ログ、エラーハンドリング）
+- プロキシ対応（HTTP_PROXY、HTTPS_PROXY、NO_PROXY）
+- ページナビゲーション機能（メインダッシュボード、モデル管理、チェックポイント管理）
+- 進捗表示（学習ロス、学習率のグラフ、リアルタイム更新）
+- WebRTC統合によるリアルタイム音声認識
+- 音声フレーム処理とWebSocket通信の非同期処理
 
-学習機能の実装: trainer.pyに学習ループを実装し、フロントエンドの学習開始ボタンと連携させる。
+**インフラ・デプロイ:**
+- Docker Compose によるコンテナ化
+- GPU 対応設定（NVIDIA Container Runtime）
+- ローカル実行スクリプト（run-local.sh）
+- ポートフォワーディング（SSH ControlMaster）
+- 構造化ログのファイル出力機能
 
-リアルタイム更新の実装: WebSocketによる進捗通知機能を実装し、フロントエンドのグラフやステータスがリアルタイムに更新されるようにする。
+## 8.2. 次のステップ
 
-リアルタイムモデルの実装: [リアルタイム性特化型音声認識モデル設計](./realtime_model_design.md)に基づいて、CTCベースの超低遅延モデルを実装する。
+**機能拡張:**
+- バッチ推論機能の実装
+- モデル比較機能の実装
+- 学習履歴管理機能の実装
+- 設定管理機能の実装
+- リアルタイム推論の性能最適化
+- 音声品質の自動評価機能
+
+**UI/UX改善:**
+- ダークモード対応
+- レスポンシブデザイン対応
+- アクセシビリティ向上
+- 国際化対応
+- リアルタイム推論のUI改善
+- 音声波形の可視化機能
+
+**技術的改善:**
+- モデル推論の最適化
+- WebSocket通信の安定性向上
+- エラーハンドリングの強化
+- ログ機能の拡張
