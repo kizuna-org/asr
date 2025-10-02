@@ -44,6 +44,10 @@ RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 COPY backend/app /app/app
 COPY backend/config.yaml /app/config.yaml
 COPY backend/download_ljspeech.py /app/download_ljspeech.py
+COPY backend/test_realtime_model.py /app/test_realtime_model.py
+COPY backend/demo_realtime.py /app/demo_realtime.py
+COPY backend/test_training_fix.py /app/test_training_fix.py
+COPY backend/migrate_realtime_checkpoints.py /app/migrate_realtime_checkpoints.py
 RUN chmod +x /app/download_ljspeech.py
 
 # ポートを開放 (ドキュメント用、実際にはcomposeでマッピング)

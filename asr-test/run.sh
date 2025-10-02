@@ -16,7 +16,7 @@ start_ssh_master_session() {
     # -f: バックグラウンド実行, -n:標準入力をリダイレクトしない, -N:リモートコマンドを実行しない
     # -M: マスターモード, -S: コントロールソケットのパス
     ssh -f -n -N -M -S "${CONTROL_PATH}" "${SSH_HOST}"
-    
+
     # セッションが確立されたか確認
     if ! ssh -S "${CONTROL_PATH}" -O check "${SSH_HOST}" >/dev/null 2>&1; then
         echo "❌ エラー: SSHマスターセッションの確立に失敗しました。"
@@ -32,7 +32,7 @@ forward_port() {
     echo "🌐 ポート${port}の転送を開始します..."
     # -O forward: 既存のマスターセッションを使ってポート転送を追加
     ssh -S "${CONTROL_PATH}" -O forward -L "${port}:localhost:${port}" "${SSH_HOST}"
-    
+
     # 転送が成功したか確認
     if ! lsof -ti:"${port}" > /dev/null 2>&1; then
         echo "❌ エラー: ポート${port}の転送に失敗しました。"
@@ -45,6 +45,13 @@ forward_port() {
 # クリーンアップ関数
 cleanup() {
     echo "🧹 クリーンアップを実行しています..."
+
+    # ログ表示プロセスを終了
+    if [ ! -z "${LOGS_PID}" ] && kill -0 "${LOGS_PID}" 2>/dev/null; then
+        echo "📋 ログ表示プロセスを終了します..."
+        kill "${LOGS_PID}" 2>/dev/null || true
+    fi
+
     # マスター接続が存在すれば終了させる
     if ssh -S "${CONTROL_PATH}" -O check "${SSH_HOST}" >/dev/null 2>&1; then
         echo "🔌 SSHマスターセッションを終了します..."
@@ -98,6 +105,13 @@ ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo doc
 echo "✅ デプロイが完了しました。"
 echo ""
 
+# バックエンドのログを別プロセスで表示（バックグラウンド）
+echo "📋 バックエンドのログを表示します..."
+ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker compose -f docker-compose.yml -f docker-compose.gpu.yml logs -f asr-api" &
+LOGS_PID=$!
+
+echo ""
+
 # [STEP 2] SSHマスターセッションを開始
 start_ssh_master_session
 
@@ -109,7 +123,8 @@ done
 echo ""
 echo "🎉 全てのポート転送が完了しました。"
 echo "🌐 アプリケーションにアクセスする準備ができました。"
-echo "💡 このスクリプトを終了する（Ctrl+C）と、ポート転送も自動的に停止します。"
+echo "� バックエンドのログは自動的に表示されています。"
+echo "�💡 このスクリプトを終了する（Ctrl+C）と、ポート転送も自動的に停止します。"
 echo ""
 
 # マスターセッションが終了するまで待機
