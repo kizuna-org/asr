@@ -1167,12 +1167,35 @@ st.session_state.setdefault("realtime_msg_queue", queue.Queue())
 
 col_rt1, col_rt2 = st.columns([2, 1])
 with col_rt1:
-    # WebRTC設定 - ICE接続の安定性を向上
+    # WebRTC設定 - SSH tunnel環境用の特別設定
     rtc_configuration = {
         "iceServers": [
-            {"urls": ["stun:stun.l.google.com:19302"]},  # Google STUN server
+            {"urls": ["stun:stun.l.google.com:19302"]},
+            {"urls": ["stun:stun1.l.google.com:19302"]},
+            {"urls": ["stun:stun2.l.google.com:19302"]},
+            {
+                "urls": ["turn:numb.viagenie.ca"],
+                "username": "webrtc@live.com",
+                "credential": "muazkh"
+            },
+            {
+                "urls": ["turn:openrelay.metered.ca:80"],
+                "username": "openrelayproject",
+                "credential": "openrelayproject"
+            },
+            {
+                "urls": ["turn:openrelay.metered.ca:443"],
+                "username": "openrelayproject",
+                "credential": "openrelayproject"
+            },
+            {
+                "urls": ["turn:openrelay.metered.ca:443?transport=tcp"],
+                "username": "openrelayproject",
+                "credential": "openrelayproject"
+            }
         ],
-        "iceTransportPolicy": "all",  # すべてのICE候補を使用
+        "iceTransportPolicy": "all",  # すべての候補を試す（host, srflx, relay）
+        "iceCandidatePoolSize": 10,  # 候補プールを増やす
     }
 
     # CRITICAL: Cache the webrtc context in session state to avoid recreating it
@@ -1183,7 +1206,7 @@ with col_rt1:
             key="asr-audio",
             mode=WebRtcMode.SENDONLY,
             audio_receiver_size=2048,
-            media_stream_constraints={"audio": True, "video": False},
+            media_stream_constraints={"audio": {"echoCancellation": True, "noiseSuppression": True, "autoGainControl": True}, "video": False},
             async_processing=True,
             rtc_configuration=rtc_configuration,  # ICE設定を追加
         )
@@ -1191,6 +1214,19 @@ with col_rt1:
     else:
         # During streaming, reuse the cached context - DON'T call webrtc_streamer again!
         rtc_ctx = st.session_state["_rtc_ctx"]
+
+    # WebRTC状態の詳細表示
+    if rtc_ctx:
+        if rtc_ctx.state.playing:
+            st.success("✅ WebRTC接続: マイク有効")
+        else:
+            st.warning("⚠️ WebRTC接続: マイク無効 (上のSTARTをクリック)")
+
+        # 音声レシーバーの状態
+        if rtc_ctx.audio_receiver:
+            st.info(f"🎤 音声レシーバー: 準備完了 (queue size: {rtc_ctx.audio_receiver.qsize() if hasattr(rtc_ctx.audio_receiver, 'qsize') else 'N/A'})")
+        else:
+            st.error("❌ 音声レシーバー: 未初期化")
 
 with col_rt2:
     st.subheader("🎯 リアルタイム推論設定")
