@@ -1,0 +1,30 @@
+services:
+  asr-api:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    command: uvicorn app.main:app --host 0.0.0.0 --port 58081
+    network_mode: "host"
+    volumes:
+      - ./data:/app/data
+      - ./checkpoints:/app/checkpoints
+      # GPU設定は docker-compose.gpu.yml で上書き
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    command: streamlit run app.py --server.port 58080 --server.address 0.0.0.0
+    network_mode: "host"
+    environment:
+      - BACKEND_HOST=localhost
+      - BACKEND_PORT=58081
+      - NO_PROXY=asr-api,localhost,127.0.0.1
+    depends_on:
+      - asr-api
+
+volumes:
+  data:
+    driver: local
+  checkpoints:
+    driver: local

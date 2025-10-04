@@ -1,0 +1,101 @@
+# backend/config.yaml
+
+# 使用可能なモデルとデータセットのリスト
+available_models:
+  - conformer
+  - realtime
+  # - rnn-t
+
+available_datasets:
+  - ljspeech
+
+# モデルごとの詳細設定
+models:
+  conformer:
+    # --- アーキテクチャ設定 ---
+    input_dim: 80 # 入力特徴量の次元数 (例: メルスペクトログラムの次元)
+    encoder_dim: 256 # エンコーダの隠れ層の次元数
+    num_encoder_layers: 4 # エンコーダブロックの数
+    num_heads: 4 # Multi-Head Attention のヘッド数
+    kernel_size: 31 # Convolutionモジュールのカーネルサイズ
+    dropout: 0.1 # ドロップアウト率
+    # --- 実装用のHFモデル指定（学習のPoCではCTCモデルを流用） ---
+    huggingface_model_name: "facebook/wav2vec2-base-960h"
+
+    # --- トークナイザ設定 ---
+    tokenizer:
+      type: "SentencePiece" # "Character", "Word" など
+      vocab_size: 5000
+      # model_path: "/path/to/tokenizer.model" # SentencePieceモデルのパス
+
+  # --- リアルタイムモデル設定 ---
+  realtime:
+    # --- アーキテクチャ設定 ---
+    encoder:
+      input_dim: 80 # 入力特徴量の次元数 (メルスペクトログラムの次元)
+      hidden_dim: 256 # エンコーダの隠れ層の次元数
+      num_layers: 3 # エンコーダの層数
+      rnn_type: "GRU" # RNNの種類
+      dropout: 0.1 # ドロップアウト率
+
+    decoder:
+      input_dim: 256 # デコーダの入力次元
+      vocab_size: 1000 # 語彙サイズ
+      blank_token: "_" # 空白トークン
+
+    # --- 処理設定 ---
+    processing:
+      chunk_size_ms: 100 # チャンクサイズ（ミリ秒）
+      sample_rate: 16000 # サンプリングレート
+      feature_type: "mel_spectrogram" # 特徴量の種類
+      n_mels: 80 # メルフィルタバンクの数
+      n_fft: 1024 # FFTのウィンドウサイズ
+      hop_length: 160 # ホップ長
+
+    # --- 最適化設定 ---
+    optimization:
+      precision: "fp16" # 精度（fp16/fp32）
+      batch_size: 1 # バッチサイズ（ストリーミング処理）
+      max_memory_mb: 512 # 最大メモリ使用量（MB）
+
+# データセットごとの設定
+datasets:
+  ljspeech:
+    # --- データパス ---
+    path: "/app/data/ljspeech" # Dockerコンテナ内のデータセットルートパス
+
+    # --- 音声前処理設定 ---
+    sample_rate: 22050 # リサンプリングするサンプルレート
+    n_fft: 1024 # STFTのウィンドウサイズ
+    win_length: 1024 # STFTのウィンドウ長
+    hop_length: 256 # STFTのホップ長
+    n_mels: 80 # 生成するメルフィルタバンクの数
+    f_min: 0 # メルスペクトログラムの最小周波数
+    f_max: 8000 # メルスペクトログラムの最大周波数
+
+    # --- テキスト前処理 ---
+    text_cleaners: ['english_cleaners'] # 適用するテキストクリーナーのリスト
+
+# 学習のグローバル設定
+training:
+  # --- オプティマイザ設定 ---
+  optimizer: "AdamW" # 使用するオプティマイザ名 (torch.optim内のクラス名)
+  learning_rate: 0.001 # 学習率
+  weight_decay: 0.01 # AdamWのweight decay
+  betas: [0.9, 0.98] # Adam/AdamWのbetaパラメータ
+  eps: 1.0e-9 # Adam/AdamWのepsilon
+
+  # --- スケジューラ設定 ---
+  scheduler: "WarmupLR" # 学習率スケジューラの名前 (オプション)
+  warmup_steps: 100 # WarmupLRのウォームアップステップ数
+
+  # --- 学習ループ設定 ---
+  batch_size: 32 # バッチサイズ
+  num_epochs: 100 # 総エポック数
+  grad_clip_thresh: 1.0 # 勾配クリッピングの閾値
+  log_interval: 10 # ログを記録するステップ間隔 (steps)
+  checkpoint_interval: 1 # チェックポイントを保存する間隔 (epochs)
+
+  # --- 学習再開設定 ---
+  auto_resume: true # 学習開始時に自動的に最新のチェックポイントから再開するかどうか
+  checkpoint_retention: 5 # 保持するチェックポイントの数（古いものは自動削除）
