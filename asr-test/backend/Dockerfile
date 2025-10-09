@@ -16,8 +16,8 @@ ENV NO_PROXY=${NO_PROXY}
 
 # Configure apt proxy only when proxy is provided
 RUN if [ -n "$HTTP_PROXY" ] || [ -n "$HTTPS_PROXY" ]; then \
-      echo "Acquire::http::Proxy \"${HTTP_PROXY}\";" > /etc/apt/apt.conf.d/01proxy; \
-      echo "Acquire::https::Proxy \"${HTTPS_PROXY}\";" >> /etc/apt/apt.conf.d/01proxy; \
+    echo "Acquire::http::Proxy \"${HTTP_PROXY}\";" > /etc/apt/apt.conf.d/01proxy; \
+    echo "Acquire::https::Proxy \"${HTTPS_PROXY}\";" >> /etc/apt/apt.conf.d/01proxy; \
     fi
 
 # Pythonとpipをインストール
@@ -48,7 +48,9 @@ COPY backend/test_realtime_model.py /app/test_realtime_model.py
 COPY backend/demo_realtime.py /app/demo_realtime.py
 COPY backend/test_training_fix.py /app/test_training_fix.py
 COPY backend/migrate_realtime_checkpoints.py /app/migrate_realtime_checkpoints.py
+COPY gpu_check.py /app/gpu_check.py
 RUN chmod +x /app/download_ljspeech.py
+RUN chmod +x /app/gpu_check.py
 
 # ポートを開放 (ドキュメント用、実際にはcomposeでマッピング)
 EXPOSE 8000

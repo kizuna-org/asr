@@ -3,7 +3,7 @@
 Script to download the LJSpeech dataset directly from the source
 """
 
-SCRIPT_VERSION = "2025-09-08-02"
+SCRIPT_VERSION = "2025-09-24-01"
 
 import os
 import sys
@@ -74,12 +74,30 @@ def download_ljspeech_dataset():
 
     print(f"Downloading to: {data_dir}")
 
-    # Check if dataset already exists
+    # Check if dataset already exists (must include metadata.csv and wavs)
     ljspeech_path = os.path.join(data_dir, "LJSpeech-1.1")
-    if os.path.exists(ljspeech_path):
-        print(f"LJSpeech dataset already exists at {ljspeech_path}")
+    metadata_path = os.path.join(ljspeech_path, "metadata.csv")
+    wavs_dir = os.path.join(ljspeech_path, "wavs")
+
+    def _dataset_complete() -> bool:
+        if not (os.path.isdir(ljspeech_path) and os.path.isdir(wavs_dir) and os.path.exists(metadata_path)):
+            return False
+        # Consider it complete if at least 100 wavs exist
+        try:
+            import glob
+            wav_count = len(glob.glob(os.path.join(wavs_dir, "*.wav")))
+            return wav_count >= 100
+        except Exception:
+            return False
+
+    if _dataset_complete():
+        print(f"LJSpeech dataset is complete at {ljspeech_path}")
         print("Skipping download.")
         return True
+    else:
+        if os.path.isdir(ljspeech_path):
+            print(f"Found existing directory but dataset is incomplete at {ljspeech_path}")
+            print("Will (re)download and extract to fix missing files (e.g., metadata.csv)")
 
     # Candidate mirror URLs (first reachable wins). Allow override via env.
     env_url = os.environ.get("LJSPEECH_URL")
@@ -113,7 +131,7 @@ def download_ljspeech_dataset():
                     pass
 
         # Download the dataset using mirrors if dataset not yet present
-        if not os.path.exists(ljspeech_path):
+        if not _dataset_complete():
             print("Starting download. This may take several minutes...")
             last_err = None
             for url in mirror_urls:
@@ -145,7 +163,7 @@ def download_ljspeech_dataset():
         
         # ダウンロード後の確認
         print("Verifying download...")
-        if os.path.exists(ljspeech_path):
+        if os.path.exists(ljspeech_path) and os.path.isdir(ljspeech_path):
             print(f"✅ Dataset directory found: {ljspeech_path}")
             
             # ディレクトリの内容を確認
@@ -159,6 +177,7 @@ def download_ljspeech_dataset():
                     # ファイル数をカウント
                     wav_files = list(Path(ljspeech_path).glob("wavs/*.wav"))
                     print(f"Number of audio files: {len(wav_files)}")
+                    print(f"metadata.csv exists: {os.path.exists(metadata_path)}")
                     
                 else:
                     print(f"Warning: Could not list directory contents: {result.stderr}")

@@ -79,10 +79,28 @@ sleep 1
 
 # [STEP 1] rsync, docker build, up などのデプロイ処理
 echo "📁 rsyncでファイルをサーバーにコピーします。"
-rsync -avz \
-  --exclude='__pycache__/' \
-  --exclude='models/' \
-  ./ ${SSH_HOST}:/home/students/r03i/r03i18/asr-test/asr/asr-test
+# Gitリポジトリのルートを特定し、ルートの.gitignoreを確実に適用する
+GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null || true)
+if [ -n "${GIT_ROOT}" ] && [ -f "${GIT_ROOT}/.gitignore" ]; then
+    echo "🏷️ Gitリポジトリルートを検出: ${GIT_ROOT} (.gitignore を適用)"
+    CURRENT_DIR=$(pwd)
+    cd "${GIT_ROOT}"
+    rsync -avz \
+      --filter=':- .gitignore' \
+      --exclude='__pycache__/' \
+      --exclude='models/' \
+      --exclude='data/' \
+      asr-test/ ${SSH_HOST}:/home/students/r03i/r03i18/asr-test/asr/asr-test
+    cd "${CURRENT_DIR}"
+else
+    echo "⚠️ Gitルートが見つからない、または .gitignore がありません。カレントディレクトリ基準で実行します。"
+    rsync -avz \
+      --filter=':- .gitignore' \
+      --exclude='__pycache__/' \
+      --exclude='models/' \
+      --exclude='data/' \
+      ./ ${SSH_HOST}:/home/students/r03i/r03i18/asr-test/asr/asr-test
+fi
 
 echo "🛑 コンテナを停止します。"
 ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker compose -f docker-compose.yml -f docker-compose.gpu.yml down"
@@ -95,6 +113,9 @@ ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo doc
 
 echo "🚀 コンテナを起動します。"
 ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d"
+
+echo "⬇️ LJSpeechデータセットを準備します..."
+ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker compose -f docker-compose.yml -f docker-compose.gpu.yml exec asr-api python /app/download_ljspeech.py"
 
 echo "🔍 NVIDIA Container Runtimeの設定を確認します..."
 ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && ./check_nvidia_runtime.sh"
