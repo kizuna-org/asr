@@ -21,7 +21,7 @@ jobs:
       body: ${{ fromJson(steps.check-associated-pr.outputs.info).body }}
       next-tag: ${{ fromJson(steps.check-associated-pr.outputs.info).headRefName }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Check associated Pull Request
@@ -61,7 +61,7 @@ jobs:
       matrix:
         project: ${{ fromJson(needs.get-projects.outputs.updated-projects) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Get next version
         id: get-next-version
         run: |
@@ -110,7 +110,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           persist-credentials: false
       - name: Create release and tag
