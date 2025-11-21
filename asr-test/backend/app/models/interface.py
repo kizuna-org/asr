@@ -1,6 +1,6 @@
 # backend/app/models/interface.py
 from abc import ABC, abstractmethod
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import torch
 import torch.nn as nn
 
@@ -47,3 +47,19 @@ class BaseASRModel(nn.Module, ABC):
         if optimizer and 'optimizer_state_dict' in checkpoint:
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         return checkpoint.get('epoch', 0)
+
+    @torch.no_grad()
+    def inference_stream(self, waveform: torch.Tensor, context: Optional[torch.Tensor] = None) -> str:
+        """
+        ストリーミング推論処理（リアルタイム用）
+        
+        Args:
+            waveform: 単一の音声波形テンソル
+            context: 前のコンテキスト（オプション）
+            
+        Returns:
+            str: 文字起こし結果の文字列
+        """
+        # デフォルト実装では通常のinferenceを呼び出す
+        # サブクラスでオーバーライドしてストリーミング最適化を実装可能
+        return self.inference(waveform)

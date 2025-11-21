@@ -1,10 +1,11 @@
 # backend/app/main.py
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket
 import logging
 import sys
 import json
 from datetime import datetime
 from .api import router as api_router
+from .websocket_handler import handle_realtime_websocket
 from .websocket import router as websocket_router
 
 app = FastAPI(
@@ -87,8 +88,15 @@ print(f"DEBUG: Including API router with prefix '/api'")  # デバッグ用
 app.include_router(api_router, prefix="/api")
 print(f"DEBUG: API router included successfully")  # デバッグ用
 
-# WebSocketエンドポイントをインクルード
+# WebSocketルーターをインクルード
+print(f"DEBUG: Including WebSocket router")  # デバッグ用
 app.include_router(websocket_router)
+print(f"DEBUG: WebSocket router included successfully")  # デバッグ用
+
+# WebSocketエンドポイントを追加
+@app.websocket("/ws/realtime")
+async def websocket_realtime(websocket):
+    await handle_realtime_websocket(websocket)
 
 # デバッグ用：登録されたルートを確認
 print(f"DEBUG: Registered routes:")

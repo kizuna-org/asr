@@ -1,19 +1,22 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import requests
-import asyncio
-import websockets
 import json
 from typing import Dict, Any
 import traceback
 import os
-import threading
-import queue
-import numpy as np
-from streamlit_webrtc import webrtc_streamer, WebRtcMode, AudioProcessorBase
 import logging
 import sys
 from datetime import datetime
+import warnings
+
+# 機能ポリシー警告を抑制
+warnings.filterwarnings('ignore', category=UserWarning)
+warnings.filterwarnings('ignore', category=DeprecationWarning)
+warnings.filterwarnings('ignore', message='.*機能ポリシー.*')
+warnings.filterwarnings('ignore', message='.*Permissions-Policy.*')
+warnings.filterwarnings('ignore', message='.*Feature-Policy.*')
 
 # --- ログ設定 ---
 class StructuredFormatter(logging.Formatter):
@@ -59,8 +62,6 @@ def setup_frontend_logging():
     # 特定のロガーのレベル設定
     logging.getLogger("ui-rt").setLevel(logging.INFO)
     logging.getLogger("audio_puller").setLevel(logging.INFO)
-    logging.getLogger("websocket_loop").setLevel(logging.INFO)
-    logging.getLogger("websocket_sender").setLevel(logging.INFO)
 
 # ログ設定を初期化
 setup_frontend_logging()
@@ -70,7 +71,6 @@ setup_frontend_logging()
 BACKEND_HOST = os.getenv("BACKEND_HOST", "localhost")
 BACKEND_PORT = os.getenv("BACKEND_PORT", "58081")
 BACKEND_URL = f"http://{BACKEND_HOST}:{BACKEND_PORT}/api"
-WEBSOCKET_URL = f"ws://{BACKEND_HOST}:{BACKEND_PORT}/ws"
 
 # プロキシ設定
 HTTP_PROXY = os.getenv("HTTP_PROXY")
@@ -652,6 +652,12 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# 機能ポリシーの警告を抑制するためのHTML
+st.markdown("""
+<meta http-equiv="Permissions-Policy" content="accelerometer=(), ambient-light-sensor=(), autoplay=(), battery=(), clipboard-write=(), document-domain=(), encrypted-media=(), gyroscope=(), layout-animations=(), legacy-image-formats=(), magnetometer=(), midi=(), oversized-images=(), payment=(), picture-in-picture=(), sync-xhr=(), usb=(), vr=(), wake-lock=(), xr-spatial-tracking=()">
+<meta http-equiv="Feature-Policy" content="accelerometer 'none'; ambient-light-sensor 'none'; autoplay 'none'; battery 'none'; clipboard-write 'none'; document-domain 'none'; encrypted-media 'none'; gyroscope 'none'; layout-animations 'none'; legacy-image-formats 'none'; magnetometer 'none'; midi 'none'; oversized-images 'none'; payment 'none'; picture-in-picture 'none'; sync-xhr 'none'; usb 'none'; vr 'none'; wake-lock 'none'; xr-spatial-tracking 'none'">
+""", unsafe_allow_html=True)
 init_session_state()
 
 if not st.session_state.initial_load:
@@ -686,16 +692,23 @@ with col_nav2:
         st.session_state.current_page = "model_management"
         st.rerun()
 with col_nav3:
-    current_page = st.session_state.get("current_page", "main")
-    if current_page == "main":
-        page_name = "メインダッシュボード"
-    elif current_page == "model_management":
-        page_name = "モデル管理"
-    elif current_page == "checkpoint_management":
-        page_name = "チェックポイント管理"
-    else:
-        page_name = "不明"
-    st.markdown(f"### 📊 現在のページ: {page_name}")
+    if st.button("🎤 リアルタイム推論", use_container_width=True, key="nav_realtime_top"):
+        st.session_state.current_page = "realtime"
+        st.rerun()
+
+# 現在のページ表示
+current_page = st.session_state.get("current_page", "main")
+if current_page == "main":
+    page_name = "メインダッシュボード"
+elif current_page == "model_management":
+    page_name = "モデル管理"
+elif current_page == "checkpoint_management":
+    page_name = "チェックポイント管理"
+elif current_page == "realtime":
+    page_name = "リアルタイム推論"
+else:
+    page_name = "不明"
+st.markdown(f"### 📊 現在のページ: {page_name}")
 st.markdown("---")
 
 # サイドバー - 学習制御
@@ -712,6 +725,9 @@ with st.sidebar:
         st.rerun()
     if st.button("📂 チェックポイント管理", use_container_width=True, disabled=(current_page == "checkpoint_management"), key="nav_checkpoint_sidebar"):
         st.session_state.current_page = "checkpoint_management"
+        st.rerun()
+    if st.button("🎤 リアルタイム推論", use_container_width=True, disabled=(current_page == "realtime"), key="nav_realtime_sidebar"):
+        st.session_state.current_page = "realtime"
         st.rerun()
 
     st.markdown("---")
@@ -977,8 +993,7 @@ if current_page == "main":
             st.text(log)
 
 # 学習中の進捗更新
-# Note: リアルタイムストリーミング開始中または実行中は自動ポーリングを停止（WebRTCの安定性のため）
-if st.session_state.is_training and not st.session_state.get("realtime_running", False) and not st.session_state.get("_should_start_realtime", False):
+if st.session_state.is_training:
     # 直近のポーリング時刻を表示（デバッグ/可視化）
     import time
     last_polled = st.session_state.get("last_poll_at")
@@ -997,646 +1012,8 @@ if st.session_state.is_training and not st.session_state.get("realtime_running",
         st.session_state.last_progress_update = current_time
 
     # 確実な1秒ごとのポーリング（スリープ→再実行）
-    # Note: リアルタイムストリーミング中は自動ポーリングを停止（WebRTCの安定性のため）
     time.sleep(1)
     st.rerun()
-
-# --- リアルタイム推論（マイク入力） ---
-if current_page == "main":
-    st.header("リアルタイム推論（マイク入力）")
-
-class MicAudioProcessor(AudioProcessorBase):
-    def __init__(self) -> None:
-        self.frame_queue = None  # type: queue.Queue
-        self.logger = logging.getLogger("ui-rt")
-        self.msg_queue = None  # optional queue to report stats
-        self._frames_sent = 0
-
-        self.logger.info("MicAudioProcessor initialized",
-                        extra={"extra_fields": {"component": "audio_processor", "action": "init"}})
-
-    def recv_audio(self, frames, **kwargs):
-        # frames: list of av.AudioFrame
-        self.logger.debug("Audio frames received",
-                         extra={"extra_fields": {"component": "audio_processor", "action": "frames_received",
-                                               "frame_count": len(frames), "has_queue": self.frame_queue is not None}})
-
-        if self.frame_queue is None:
-            self.logger.debug("Frame queue is None, returning frames without processing",
-                             extra={"extra_fields": {"component": "audio_processor", "action": "no_queue"}})
-            return frames
-
-        for frame in frames:
-            # 32-bit float PCM, shape: (channels, samples)
-            pcm = frame.to_ndarray(format="flt")
-
-            # モノラル化
-            if pcm.ndim == 2 and pcm.shape[0] > 1:
-                pcm_mono = pcm.mean(axis=0)
-            else:
-                pcm_mono = pcm[0] if pcm.ndim == 2 else pcm
-
-            # 送信は float32 little-endian bytes（サーバは f32 をサポート）
-            pcm_f32 = pcm_mono.astype(np.float32)
-
-            try:
-                self.frame_queue.put(pcm_f32.tobytes(), timeout=0.1)
-                self._frames_sent += 1
-
-                # 音声フレーム処理（ログ削除）
-
-                if self.msg_queue and (self._frames_sent % 25 == 0):
-                    # おおよそ定期的に統計を送る
-                    self.msg_queue.put({"type": "stats", "payload": {"frames_sent": self._frames_sent}})
-            except queue.Full:
-                self.logger.warning("Frame queue is full, dropping audio chunk",
-                                  extra={"extra_fields": {"component": "audio_processor", "action": "queue_full"}})
-        return frames
-
-async def stream_audio_to_ws(q: "queue.Queue[bytes]", model_name: str, sample_rate: int, running_event: threading.Event, msg_queue_ref=None):
-    import websockets
-    logger = logging.getLogger("websocket_sender")
-
-    # 接続リトライ（コンテキストマネージャを正しく使用）
-    retries = 0
-    while True:
-        try:
-            async with websockets.connect(
-                WEBSOCKET_URL,
-                ping_interval=30,
-                ping_timeout=30,
-                open_timeout=10,
-                close_timeout=10,
-            ) as ws:
-                # 接続開始メッセージを送信
-                start_msg = {"type": "start", "model_name": model_name, "sample_rate": sample_rate, "format": "f32"}
-                await ws.send(json.dumps(start_msg))
-
-                logger.info("WebSocket start message sent",
-                           extra={"extra_fields": {"component": "websocket", "action": "start_sent",
-                                                 "model_name": model_name, "sample_rate": sample_rate}})
-
-                # 受信タスク
-                async def receiver():
-                    try:
-                        while True:
-                            msg = await ws.recv()
-                            try:
-                                data = json.loads(msg)
-                                logger.debug("WebSocket message received",
-                                           extra={"extra_fields": {"component": "websocket", "action": "message_received",
-                                                                 "message_type": data.get("type")}})
-                                # メインスレッドで処理するため、ローカル参照キューに積む
-                                try:
-                                    if msg_queue_ref is not None:
-                                        msg_queue_ref.put(data)
-                                except Exception:
-                                    pass
-                            except Exception as e:
-                                logger.error("Error parsing WebSocket message",
-                                           extra={"extra_fields": {"component": "websocket", "action": "parse_error",
-                                                                 "error": str(e), "message": msg}})
-                                try:
-                                    if msg_queue_ref is not None:
-                                        msg_queue_ref.put({"type": "error", "payload": {"message": f"invalid message: {msg}"}})
-                                except Exception:
-                                    pass
-                                pass
-                    except Exception as e:
-                        logger.error("WebSocket receiver error",
-                                   extra={"extra_fields": {"component": "websocket", "action": "receiver_error",
-                                                         "error": str(e)}})
-                        return
-
-                recv_task = asyncio.create_task(receiver())
-
-                try:
-                    while running_event.is_set():
-                        try:
-                            chunk = q.get(timeout=0.1)  # タイムアウトを短縮
-                            # 音声チャンク送信（ログ削除）
-                            await ws.send(chunk)
-                            # 音声チャンク送信完了（ログ削除）
-                            # 送信カウンタのUI更新はスレッド外で実施するため、ここではログのみ
-                        except queue.Empty:
-                            # サイレント時も接続維持
-                            await asyncio.sleep(0.01)  # 待機時間を短縮
-                            continue
-                        except Exception as e:
-                            logger.error("Error sending audio chunk",
-                                       extra={"extra_fields": {"component": "websocket", "action": "chunk_send_error",
-                                                             "error": str(e)}})
-                            break
-                except asyncio.CancelledError:
-                    pass
-                finally:
-                    try:
-                        await ws.send(json.dumps({"type": "stop"}))
-                        logger.info("WebSocket stop message sent",
-                                   extra={"extra_fields": {"component": "websocket", "action": "stop_sent"}})
-                    except Exception:
-                        pass
-                    recv_task.cancel()
-                    with contextlib.suppress(Exception):
-                        await recv_task
-                return
-        except Exception as e:
-            retries += 1
-            logger.error("WebSocket connection error",
-                        extra={"extra_fields": {"component": "websocket", "action": "connection_error",
-                                              "retry_count": retries, "error": str(e)}})
-            try:
-                if msg_queue_ref is not None:
-                    msg_queue_ref.put({"type": "error", "payload": {"message": f"ws session error (retry {retries}): {e}"}})
-            except Exception:
-                pass
-            if retries >= 5:
-                logger.error("Max retries reached, giving up",
-                            extra={"extra_fields": {"component": "websocket", "action": "max_retries_reached"}})
-                return
-            await asyncio.sleep(min(1.0 * retries, 5.0))
-
-import contextlib
-
-st.session_state.setdefault("realtime_running", False)
-st.session_state.setdefault("realtime_partial", "")
-st.session_state.setdefault("realtime_final", "")
-st.session_state.setdefault("realtime_status", {})
-st.session_state.setdefault("realtime_error", "")
-st.session_state.setdefault("realtime_msg_queue", queue.Queue())
-
-col_rt1, col_rt2 = st.columns([2, 1])
-with col_rt1:
-    # WebRTC設定 - SSH tunnel環境用の特別設定
-    rtc_configuration = {
-        "iceServers": [
-            {"urls": ["stun:stun.l.google.com:19302"]},
-            {"urls": ["stun:stun1.l.google.com:19302"]},
-            {"urls": ["stun:stun2.l.google.com:19302"]},
-            {
-                "urls": ["turn:numb.viagenie.ca"],
-                "username": "webrtc@live.com",
-                "credential": "muazkh"
-            },
-            {
-                "urls": ["turn:openrelay.metered.ca:80"],
-                "username": "openrelayproject",
-                "credential": "openrelayproject"
-            },
-            {
-                "urls": ["turn:openrelay.metered.ca:443"],
-                "username": "openrelayproject",
-                "credential": "openrelayproject"
-            },
-            {
-                "urls": ["turn:openrelay.metered.ca:443?transport=tcp"],
-                "username": "openrelayproject",
-                "credential": "openrelayproject"
-            }
-        ],
-        "iceTransportPolicy": "all",  # すべての候補を試す（host, srflx, relay）
-        "iceCandidatePoolSize": 10,  # 候補プールを増やす
-    }
-
-    # CRITICAL: Cache the webrtc context in session state to avoid recreating it
-    # Recreating webrtc_streamer on every rerun closes the ICE connection
-    if "_rtc_ctx" not in st.session_state or not st.session_state.get("realtime_running", False):
-        # Only create/update webrtc_streamer when NOT actively streaming
-        rtc_ctx = webrtc_streamer(
-            key="asr-audio",
-            mode=WebRtcMode.SENDONLY,
-            audio_receiver_size=2048,
-            media_stream_constraints={"audio": {"echoCancellation": True, "noiseSuppression": True, "autoGainControl": True}, "video": False},
-            async_processing=True,
-            rtc_configuration=rtc_configuration,  # ICE設定を追加
-        )
-        st.session_state["_rtc_ctx"] = rtc_ctx
-    else:
-        # During streaming, reuse the cached context - DON'T call webrtc_streamer again!
-        rtc_ctx = st.session_state["_rtc_ctx"]
-
-    # WebRTC状態の詳細表示
-    if rtc_ctx:
-        if rtc_ctx.state.playing:
-            st.success("✅ WebRTC接続: マイク有効")
-        else:
-            st.warning("⚠️ WebRTC接続: マイク無効 (上のSTARTをクリック)")
-
-        # 音声レシーバーの状態
-        if rtc_ctx.audio_receiver:
-            st.info(f"🎤 音声レシーバー: 準備完了 (queue size: {rtc_ctx.audio_receiver.qsize() if hasattr(rtc_ctx.audio_receiver, 'qsize') else 'N/A'})")
-        else:
-            st.error("❌ 音声レシーバー: 未初期化")
-
-with col_rt2:
-    st.subheader("🎯 リアルタイム推論設定")
-
-    # リアルタイム用モデル選択
-    if st.session_state.available_models:
-        selected_realtime_model = st.selectbox(
-            "リアルタイム用モデル",
-            st.session_state.available_models,
-            index=0,
-            key="realtime_model_selector",
-            help="リアルタイム推論に使用するモデルを選択してください"
-        )
-        st.info(f"選択されたモデル: **{selected_realtime_model}**")
-    else:
-        st.warning("利用可能なモデルがありません")
-        selected_realtime_model = None
-
-    # 音声設定
-    st.subheader("🔊 音声設定")
-    sample_rate = st.number_input(
-        "送信サンプルレート",
-        min_value=16000,
-        max_value=48000,
-        value=48000,
-        step=1000,
-        key="realtime_sample_rate",
-        help="マイクから送信する音声のサンプルレート"
-    )
-
-    # 制御ボタン
-    st.subheader("🎮 制御")
-
-    # ボタンを有効にする条件をより厳密に
-    can_start = (
-        not st.session_state.get("realtime_running", False) and
-        rtc_ctx.state.playing and
-        rtc_ctx.audio_receiver is not None and
-        selected_realtime_model is not None
-    )
-
-    start_btn = st.button(
-        "リアルタイム開始",
-        disabled=not can_start,
-        key="realtime_start_button",
-        use_container_width=True,
-        help="マイクを有効にしてモデルを選択してからクリックしてください"
-    )
-    stop_btn = st.button(
-        "リアルタイム停止",
-        disabled=not st.session_state.get("realtime_running", False),
-        key="realtime_stop_button",
-        use_container_width=True
-    )
-
-    # デバッグ情報を表示
-    with st.expander("🔍 デバッグ情報", expanded=False):
-        st.write(f"- start_btn: {start_btn}")
-        st.write(f"- rtc_ctx: {rtc_ctx is not None}")
-        st.write(f"- rtc_ctx.state.playing: {rtc_ctx.state.playing if rtc_ctx else 'N/A'}")
-        st.write(f"- rtc_ctx.audio_receiver: {rtc_ctx.audio_receiver is not None if rtc_ctx else 'N/A'}")
-        st.write(f"- realtime_running: {st.session_state.get('realtime_running', False)}")
-
-    # 重要な注意事項を表示
-    if not st.session_state.get('realtime_running', False):
-        if rtc_ctx.state.playing:
-            st.success("✅ マイクが有効です。'リアルタイム開始'ボタンをクリックしてください。")
-            st.info("💡 **重要:** モデルの読み込みに約15秒かかります。その間マイクをONのままにしてください。")
-        else:
-            st.warning("⚠️ 先に上の'START'ボタンをクリックしてマイクを有効にしてください。")
-
-    # 既に実行中の場合の警告と自動リセット
-    if st.session_state.get('realtime_running', False):
-        if not rtc_ctx.state.playing:
-            st.error("⚠️ ストリーミング中にWebRTCが停止しました。自動的にリセットします...")
-            # 自動リセット
-            st.session_state["realtime_running"] = False
-            # Clear the running event to stop threads
-            running_event = st.session_state.get("_running_event")
-            if running_event:
-                running_event.clear()
-            st.info("💡 'START'ボタンをもう一度クリックしてから、'リアルタイム開始'をクリックしてください。")
-            st.rerun()
-
-    if start_btn:
-        if not rtc_ctx:
-            st.error("❌ WebRTCコンテキストが初期化されていません")
-        elif not rtc_ctx.state.playing:
-            st.error("❌ マイクが有効になっていません。上の'START'ボタンを先にクリックしてください。")
-        elif not rtc_ctx.audio_receiver:
-            st.error("❌ オーディオレシーバーが初期化されていません。ページを再読み込みしてください。")
-        elif st.session_state.get("realtime_running", False):
-            st.warning("⚠️ すでにストリーミング中です。")
-        else:
-            # START THREADS IMMEDIATELY - don't defer to next rerun!
-            # 送信キューとスレッド/タスクの初期化（キューサイズを大幅に増加）
-            send_queue = queue.Queue(maxsize=1000)
-            # 先にランニングフラグとカウンタを立ててからスレッドを開始
-            st.session_state["realtime_running"] = True
-            st.session_state["_rt_chunks_sent"] = 0
-            st.session_state["_model_loading_start_time"] = __import__('time').time()
-            # 既存のエラーメッセージ/ステータスをリセット
-            st.session_state["realtime_error"] = ""
-            st.session_state["realtime_partial"] = ""
-            st.session_state["realtime_final"] = ""
-
-            # スレッド間で共有するためのローカル変数
-            msg_queue = st.session_state["realtime_msg_queue"]
-            # threading.Eventを使用してスレッド間でrunning状態を共有
-            running_event = threading.Event()
-            running_event.set()  # Start as running
-            st.session_state["_running_event"] = running_event
-
-            # audio_receiverから直接フレームを取得するスレッド
-            def pull_audio_frames():
-                import time as _time
-                import logging
-                import sys
-                frames_sent = 0
-
-                # ログ設定
-                logging.basicConfig(level=logging.INFO, stream=sys.stderr, force=True)
-                logger = logging.getLogger("audio_puller")
-
-                # Force flush to stderr
-                sys.stderr.write("[FRONTEND] 🎙️ Audio puller thread started!\n")
-                sys.stderr.write(f"[FRONTEND] WebRTC state: {rtc_ctx.state if rtc_ctx else 'No context'}\n")
-                sys.stderr.write(f"[FRONTEND] Has receiver: {rtc_ctx.audio_receiver is not None if rtc_ctx else False}\n")
-                sys.stderr.write(f"[FRONTEND] Running event is set: {running_event.is_set()}\n")
-                sys.stderr.flush()
-
-                logger.info("Starting audio puller thread",
-                           extra={"extra_fields": {"component": "audio_puller", "action": "thread_start"}})
-                logger.info("Audio puller context info",
-                           extra={"extra_fields": {"component": "audio_puller", "action": "context_info",
-                                                 "rtc_state": str(rtc_ctx.state), "has_receiver": rtc_ctx.audio_receiver is not None}})
-
-                consecutive_errors = 0
-                max_consecutive_errors = 50  # 50回連続エラーで停止
-                loop_count = 0
-
-                sys.stderr.write("[FRONTEND] 🔄 Entering while loop...\n")
-                sys.stderr.flush()
-
-                while running_event.is_set():
-                    if loop_count == 0:  # First iteration
-                        sys.stderr.write(f"[FRONTEND] 🔄 First loop iteration! rtc_ctx.state.playing = {rtc_ctx.state.playing}\n")
-                        sys.stderr.flush()
-
-                    loop_count += 1
-                    if loop_count % 100 == 0:  # Every 100 iterations
-                        sys.stderr.write(f"[FRONTEND] Audio puller loop iteration {loop_count}\n")
-                        sys.stderr.flush()
-
-                    # WebRTC接続状態をチェック
-                    if not rtc_ctx.state.playing:
-                        sys.stderr.write(f"[FRONTEND] ❌ WebRTC NOT playing! Stopping puller. (iteration {loop_count})\n")
-                        sys.stderr.flush()
-                        logger.warning("WebRTC connection lost (not playing), stopping puller",
-                                     extra={"extra_fields": {"component": "audio_puller", "action": "connection_lost"}})
-                        if msg_queue:
-                            try:
-                                msg_queue.put({"type": "error", "payload": {"message": "WebRTC接続が切断されました"}})
-                            except Exception:
-                                pass
-                        break
-
-                    if rtc_ctx.audio_receiver:
-                        try:
-                            # streamlit-webrtcの正しい使用方法に修正
-                            frames = []
-                            try:
-                                # streamlit-webrtcでは引数なしでget_frames()を呼び出す
-                                frames = rtc_ctx.audio_receiver.get_frames()
-                                if frames:
-                                    sys.stderr.write(f"[FRONTEND] 🎤 Got {len(frames)} frames from WebRTC!\n")
-                                    sys.stderr.flush()
-                                    logger.info(f"🎤 Got {len(frames)} audio frames from WebRTC",
-                                              extra={"extra_fields": {"component": "audio_puller", "action": "frames_received",
-                                                                    "frame_count": len(frames)}})
-                                elif loop_count % 500 == 0:  # Log every 500 empty iterations
-                                    sys.stderr.write(f"[FRONTEND] ⚠️ get_frames() returned empty (iteration {loop_count})\n")
-                                    sys.stderr.flush()
-                            except Exception as get_frames_error:
-                                # ログレベルを下げて、頻繁なエラーログを抑制
-                                logger.debug("get_frames() failed, trying alternative approach",
-                                             extra={"extra_fields": {"component": "audio_puller", "action": "get_frames_alternative",
-                                                                   "error": str(get_frames_error), "error_type": type(get_frames_error).__name__}})
-                                # 代替方法: 引数なしで再試行
-                                try:
-                                    frames = rtc_ctx.audio_receiver.get_frames()
-                                except Exception as alt_error:
-                                    logger.debug("Alternative frame getting failed",
-                                               extra={"extra_fields": {"component": "audio_puller", "action": "alt_get_frames_error",
-                                                                     "error": str(alt_error), "error_type": type(alt_error).__name__}})
-                                    _time.sleep(0.1)
-                                    continue
-                            if frames:
-                                # フレーム受信（ログ削除）
-
-                                for frame in frames:
-                                    try:
-                                        pcm = frame.to_ndarray(format="flt")
-
-                                        if pcm.ndim == 2 and pcm.shape[0] > 1:
-                                            pcm_mono = pcm.mean(axis=0)
-                                        else:
-                                            pcm_mono = pcm[0] if pcm.ndim == 2 else pcm
-
-                                        pcm_f32 = pcm_mono.astype(np.float32)
-
-                                        # 音声フレーム処理（ログ削除）
-                                        # キューサイズをチェックして、満杯の場合は古いフレームをドロップ
-                                        if send_queue.qsize() > 800:  # 80%以上の場合
-                                            try:
-                                                send_queue.get_nowait()  # 古いフレームを1つ削除
-                                                # 古いフレームドロップ（ログ削除）
-                                            except queue.Empty:
-                                                pass
-
-                                        # 送信キューに積む（満杯時は例外処理）
-                                        try:
-                                            send_queue.put(pcm_f32.tobytes(), timeout=0.05)  # タイムアウトを短縮
-                                            frames_sent += 1
-                                            consecutive_errors = 0  # 成功したらエラーカウントリセット
-                                        except queue.Full:
-                                            logger.warning("Send queue is full, dropping frame",
-                                                         extra={"extra_fields": {"component": "audio_puller", "action": "queue_full",
-                                                                               "queue_size": send_queue.qsize()}})
-                                            consecutive_errors += 1
-
-                                        # 統計情報をメッセージキューに送信
-                                        try:
-                                            if msg_queue is not None:
-                                                msg_queue.put({"type": "stats", "payload": {
-                                                    "frames_sent": frames_sent,
-                                                    "queue_size": send_queue.qsize(),
-                                                    "queue_capacity": send_queue.maxsize
-                                                }})
-                                        except Exception:
-                                            pass
-                                    except Exception as e:
-                                        consecutive_errors += 1
-                                        logger.debug("Error processing audio frame",
-                                                   extra={"extra_fields": {"component": "audio_puller", "action": "frame_error",
-                                                                         "error": str(e), "consecutive_errors": consecutive_errors}})
-
-                                        # 連続エラーが多すぎる場合は停止
-                                        if consecutive_errors >= max_consecutive_errors:
-                                            logger.error("Too many consecutive errors, stopping puller",
-                                                       extra={"extra_fields": {"component": "audio_puller", "action": "error_threshold",
-                                                                             "consecutive_errors": consecutive_errors}})
-                                            if msg_queue:
-                                                try:
-                                                    msg_queue.put({"type": "error", "payload": {"message": "音声処理エラーが多発しています"}})
-                                                except Exception:
-                                                    pass
-                                            break
-                                        continue
-                            else:
-                                # フレームが取得できない場合は短い間隔で待機
-                                _time.sleep(0.02)  # 待機時間を少し長くして負荷軽減
-                        except Exception as e:
-                            # ログレベルを下げて、頻繁なエラーログを抑制
-                            logger.debug("Error getting frames from audio_receiver",
-                                       extra={"extra_fields": {"component": "audio_puller", "action": "get_frames_error",
-                                                             "error": str(e), "error_type": type(e).__name__, "traceback": traceback.format_exc()}})
-                            _time.sleep(0.1)
-                    else:
-                        logger.debug("No audio_receiver available, waiting",
-                                   extra={"extra_fields": {"component": "audio_puller", "action": "no_receiver"}})
-                        _time.sleep(0.05)
-
-            # WebSocket sender thread - use asyncio.run() instead of managing event loop manually
-            def run_websocket_sender():
-                import logging
-                logger = logging.getLogger("websocket_loop")
-
-                try:
-                    logger.info("Starting WebSocket loop",
-                               extra={"extra_fields": {"component": "websocket_loop", "action": "loop_start",
-                                                     "model": selected_realtime_model or "conformer", "sample_rate": int(sample_rate)}})
-                    # Use asyncio.run() which properly manages the event loop
-                    asyncio.run(stream_audio_to_ws(send_queue, selected_realtime_model or "conformer", int(sample_rate), running_event, msg_queue))
-                except Exception as e:
-                    logger.error("WebSocket loop error",
-                               extra={"extra_fields": {"component": "websocket_loop", "action": "loop_error",
-                                                     "error": str(e), "traceback": traceback.format_exc()}})
-
-            # Start threads WITHOUT triggering Streamlit reruns (no st.write after starting threads!)
-            t = threading.Thread(target=run_websocket_sender, daemon=True)
-            p = threading.Thread(target=pull_audio_frames, daemon=True)
-
-            # Start both threads
-            t.start()
-            p.start()
-
-            # Save to session state (note: we don't save 'loop' anymore since asyncio.run manages it)
-            st.session_state["realtime_thread"] = t
-            st.session_state["realtime_puller"] = p
-
-            # Set a flag to indicate threads just started - DON'T check WebRTC state yet
-            st.session_state["_threads_just_started"] = True
-
-            # CRITICAL: After starting threads, rerun immediately to refresh UI
-            # This prevents the status monitoring code below from running with stale rtc_ctx
-            st.rerun()
-
-    # Show streaming status
-    if st.session_state.get("realtime_running", False):
-        # Clear the "just started" flag after first status display
-        if st.session_state.pop("_threads_just_started", False):
-            # Threads just started - show status but DON'T check WebRTC state yet
-            st.info("🎙️ リアルタイムストリーミング開始しました！モデルを読み込み中...")
-            # Don't check rtc_ctx.state yet - it might be stale
-        else:
-            # Normal status monitoring
-            st.info("🎙️ リアルタイムストリーミング実行中... 話してください！")
-
-            # WebRTC接続状態を監視 (only after threads have settled)
-            if rtc_ctx and rtc_ctx.state:
-                if not rtc_ctx.state.playing:
-                    st.warning("⚠️ WebRTC接続が切断されました。STARTボタンを押して再接続してください。")
-                    # 自動的にストリーミングを停止
-                    if st.session_state.get("realtime_running"):
-                        logger = logging.getLogger("ui-rt")
-                        logger.warning("WebRTC disconnected, stopping streaming",
-                                     extra={"extra_fields": {"component": "ui", "action": "webrtc_disconnect_stop"}})
-                        st.session_state["realtime_running"] = False
-                        # Clear the threading event
-                        running_event = st.session_state.get("_running_event")
-                        if running_event:
-                            running_event.clear()
-                        loop = st.session_state.get("realtime_loop")
-                        if loop and loop.is_running():
-                            loop.call_soon_threadsafe(loop.stop)
-                elif rtc_ctx.audio_receiver is None:
-                    st.warning("⚠️ オーディオレシーバーが利用できません。")
-    elif st.session_state.get("_should_start_realtime", False):
-        # Model loading phase - show progress
-        if "_model_loading_start_time" in st.session_state:
-            elapsed = __import__('time').time() - st.session_state["_model_loading_start_time"]
-            progress = min(elapsed / 15.0, 1.0)  # 15 seconds expected
-
-            st.progress(progress)
-            st.info(f"⏳ モデル読み込み中... {elapsed:.1f}秒 / ~15秒 ({progress*100:.0f}%)")
-            st.warning("💡 **重要:** マイクをONのまま待ってください！")
-
-            # Check if WebRTC is still alive
-            if not rtc_ctx.state.playing:
-                st.error(f"❌ マイクが {elapsed:.1f}秒後に切断されました！")
-                st.info("💡 'START'ボタンをもう一度クリックして、マイクを再度ONにしてください。")
-
-    if stop_btn and st.session_state.get("realtime_running", False):
-        # 送信停止: スレッドとループを停止
-        logger = logging.getLogger("ui-rt")
-        logger.info("Stopping realtime streaming",
-                   extra={"extra_fields": {"component": "ui", "action": "stop_streaming"}})
-
-        st.session_state["realtime_running"] = False
-
-        # Clear the threading event to stop threads
-        running_event = st.session_state.get("_running_event")
-        if running_event:
-            running_event.clear()
-
-        # スレッドの停止を待つ
-        loop = st.session_state.get("realtime_loop")
-        if loop and loop.is_running():
-            loop.call_soon_threadsafe(loop.stop)
-
-        # puller スレッドはフラグで停止。追加の操作は不要。
-        st.success("✅ リアルタイム推論を停止しました。")
-        st.info("💡 最終結果が下に表示されます。")
-
-# メインスレッドでメッセージキューをドレインし、UI状態を更新
-while not st.session_state["realtime_msg_queue"].empty():
-    try:
-        data = st.session_state["realtime_msg_queue"].get_nowait()
-    except Exception:
-        break
-    if data.get("type") == "partial":
-        st.session_state["realtime_partial"] = data["payload"].get("text", "")
-    elif data.get("type") == "final":
-        st.session_state["realtime_final"] = data["payload"].get("text", "")
-    elif data.get("type") == "status":
-        st.session_state["realtime_status"] = data.get("payload", {})
-    elif data.get("type") == "error":
-        st.session_state["realtime_error"] = data.get("payload", {}).get("message", "error")
-    elif data.get("type") == "stats":
-        st.session_state["realtime_stats"] = data.get("payload", {})
-
-st.text_area("部分結果", value=st.session_state.get("realtime_partial", ""), height=80)
-st.text_area("最終結果", value=st.session_state.get("realtime_final", ""), height=80)
-
-stats = st.session_state.get("realtime_stats", {})
-if stats:
-    col_s1, col_s2, col_s3 = st.columns(3)
-    with col_s1:
-        st.metric("frames_sent", value=f"{stats.get('frames_sent', 0)}")
-    with col_s2:
-        st.metric("chunks_sent", value=f"{stats.get('chunks_sent', st.session_state.get('_rt_chunks_sent', 0))}")
-    with col_s3:
-        # キューサイズの表示（デバッグ用）
-        queue_size = stats.get('queue_size', 0)
-        queue_status = "🟢 Normal" if queue_size < 500 else "🟡 High" if queue_size < 800 else "🔴 Critical"
-        st.metric("Queue Size", value=f"{queue_size}/1000", help=f"Status: {queue_status}")
-
-    if st.session_state.get("realtime_error"):
-        st.error(st.session_state.get("realtime_error"))
 
 # --- チェックポイント管理セクション ---
 current_page = st.session_state.get("current_page", "main")
@@ -1647,7 +1024,6 @@ if current_page == "checkpoint_management":
     # 説明
     st.markdown("""
     このページでは、学習チェックポイントの一覧表示と管理を行うことができます。
-    チェックポイントは学習中に自動的に保存され、学習の再開に使用できます。
     """)
 
     # フィルタリングオプション
@@ -1669,228 +1045,596 @@ if current_page == "checkpoint_management":
         )
 
     # チェックポイント一覧の取得
-    if st.button("🔄 チェックポイント一覧を更新", type="primary", key="refresh_checkpoints_main"):
-        st.rerun()
+    with st.spinner("チェックポイント一覧を取得中..."):
+        try:
+            checkpoints = get_checkpoints(
+                model_name=filter_model if filter_model != "全て" else None,
+                dataset_name=filter_dataset if filter_dataset != "全て" else None
+            )
+        except Exception as e:
+            st.error(f"チェックポイント一覧の取得に失敗しました: {e}")
+            checkpoints = []
 
-    # フィルタリングパラメータを設定
-    model_filter = filter_model if filter_model != "全て" else None
-    dataset_filter = filter_dataset if filter_dataset != "全て" else None
-
-    checkpoints = get_checkpoints(model_filter, dataset_filter)
-
-    if not checkpoints:
-        st.info("チェックポイントが見つかりません。学習を実行してチェックポイントを作成してください。")
-    else:
-        st.success(f"{len(checkpoints)}個のチェックポイントが見つかりました。")
-
-        # チェックポイント一覧をテーブル形式で表示
-        st.subheader("📋 チェックポイント一覧")
-
-        # データフレーム用のデータを準備
+    # チェックポイント一覧の表示
+    if checkpoints:
+        st.subheader(f"📋 チェックポイント一覧 ({len(checkpoints)}件)")
+        
+        # チェックポイント情報をテーブル形式で表示
         checkpoint_data = []
-        for checkpoint in checkpoints:
+        for cp in checkpoints:
             checkpoint_data.append({
-                "チェックポイント名": checkpoint["name"],
-                "モデル": checkpoint["model_name"],
-                "データセット": checkpoint["dataset_name"],
-                "エポック": checkpoint["epoch"],
-                "サイズ": format_file_size(checkpoint["size_mb"]),
-                "ファイル数": checkpoint["file_count"],
-                "作成日時": format_timestamp(checkpoint["created_at"])
+                "名前": cp["name"],
+                "モデル": cp["model_name"],
+                "データセット": cp["dataset_name"],
+                "エポック": cp["epoch"],
+                "サイズ": f"{cp['size_mb']:.1f} MB",
+                "ファイル数": cp["file_count"],
+                "作成日時": format_timestamp(cp["created_at"])
             })
-
-        # テーブル表示
-        st.dataframe(
-            checkpoint_data,
-            use_container_width=True,
-            hide_index=True
-        )
-
-        # チェックポイント詳細と学習再開機能
-        st.subheader("🔄 学習再開")
-        st.info("💡 チェックポイントを選択して学習を再開できます。")
-
-        # チェックポイント選択
-        checkpoint_names = [cp["name"] for cp in checkpoints]
-        selected_checkpoint = st.selectbox(
-            "学習再開に使用するチェックポイントを選択してください:",
-            checkpoint_names,
-            index=None,
-            placeholder="チェックポイントを選択...",
-            key="checkpoint_selector"
-        )
-
-        if selected_checkpoint:
-            # 選択されたチェックポイントの詳細を表示
-            selected_checkpoint_info = next((cp for cp in checkpoints if cp["name"] == selected_checkpoint), None)
-            if selected_checkpoint_info:
-                st.markdown("### 選択されたチェックポイントの詳細")
-                col1, col2, col3 = st.columns(3)
-
-                with col1:
-                    st.metric("チェックポイント名", selected_checkpoint_info["name"])
-                    st.metric("モデル", selected_checkpoint_info["model_name"])
-
-                with col2:
-                    st.metric("データセット", selected_checkpoint_info["dataset_name"])
-                    st.metric("エポック", selected_checkpoint_info["epoch"])
-
-                with col3:
-                    st.metric("サイズ", format_file_size(selected_checkpoint_info["size_mb"]))
-                    st.metric("ファイル数", selected_checkpoint_info["file_count"])
-
+        
+        df = pd.DataFrame(checkpoint_data)
+        st.dataframe(df, use_container_width=True)
+        
+        # チェックポイントの詳細表示
+        if checkpoints:
+            st.subheader("🔍 チェックポイント詳細")
+            selected_checkpoint = st.selectbox(
+                "詳細を表示するチェックポイントを選択",
+                [cp["name"] for cp in checkpoints],
+                key="checkpoint_detail_selector"
+            )
+            
+            if selected_checkpoint:
+                selected_cp = next(cp for cp in checkpoints if cp["name"] == selected_checkpoint)
+                
+                col_detail1, col_detail2 = st.columns(2)
+                
+                with col_detail1:
+                    st.write("**基本情報:**")
+                    st.write(f"- 名前: {selected_cp['name']}")
+                    st.write(f"- モデル: {selected_cp['model_name']}")
+                    st.write(f"- データセット: {selected_cp['dataset_name']}")
+                    st.write(f"- エポック: {selected_cp['epoch']}")
+                
+                with col_detail2:
+                    st.write("**ファイル情報:**")
+                    st.write(f"- サイズ: {selected_cp['size_mb']:.1f} MB")
+                    st.write(f"- ファイル数: {selected_cp['file_count']}")
+                    st.write(f"- 作成日時: {format_timestamp(selected_cp['created_at'])}")
+                
                 # ファイル一覧
-                st.markdown("#### 含まれるファイル:")
-                for file_name in selected_checkpoint_info["files"]:
-                    st.text(f"• {file_name}")
-
-                # 学習再開パラメータ
-                st.markdown("### 学習再開パラメータ")
-                col_param1, col_param2 = st.columns(2)
-
-                with col_param1:
-                    resume_epochs = st.number_input("追加エポック数", min_value=1, value=5, key="resume_epochs")
-                    resume_batch_size = st.number_input("バッチサイズ", min_value=1, value=4, key="resume_batch_size")
-
-                with col_param2:
-                    resume_lightweight = st.checkbox("軽量モード", value=True, key="resume_lightweight")
-                    resume_limit_samples = st.number_input("サンプル数制限", min_value=0, value=0, key="resume_limit_samples")
-
-                # 学習再開ボタン
-                if st.button("🔄 このチェックポイントから学習を再開", type="primary", disabled=st.session_state.is_training, key="resume_from_checkpoint_button"):
-                    if not st.session_state.is_training:
-                        with st.spinner("学習を再開中..."):
-                            success = resume_training(
-                                selected_checkpoint_info["model_name"],
-                                selected_checkpoint_info["dataset_name"],
-                                resume_epochs,
-                                resume_batch_size,
-                                specific_checkpoint=selected_checkpoint,
-                                lightweight=resume_lightweight,
-                                limit_samples=resume_limit_samples
-                            )
-
-                            if success:
-                                st.success("学習を再開しました！")
-                                st.balloons()
-                                # メインダッシュボードに戻る
-                                st.session_state.current_page = "main"
-                                st.rerun()
-                            else:
-                                st.error("学習の再開に失敗しました。ログを確認してください。")
-                    else:
-                        st.error("既に学習が実行中です。現在の学習を停止してから再開してください。")
-
-    # フッター
-    st.markdown("---")
-    st.markdown("💡 **ヒント**: チェックポイントから学習を再開することで、学習時間を短縮できます。")
+                if selected_cp.get("files"):
+                    st.write("**ファイル一覧:**")
+                    for file in selected_cp["files"]:
+                        st.write(f"- {file}")
+                
+                # チェックポイントの操作
+                st.subheader("⚙️ 操作")
+                col_action1, col_action2 = st.columns(2)
+                
+                with col_action1:
+                    if st.button("📥 ダウンロード", key=f"download_{selected_checkpoint}"):
+                        st.info("ダウンロード機能は実装中です")
+                
+                with col_action2:
+                    if st.button("🗑️ 削除", key=f"delete_{selected_checkpoint}"):
+                        if st.session_state.get(f"confirm_delete_{selected_checkpoint}", False):
+                            with st.spinner("チェックポイントを削除中..."):
+                                try:
+                                    import shutil
+                                    import os
+                                    checkpoint_path = selected_cp["path"]
+                                    shutil.rmtree(checkpoint_path)
+                                    st.success("チェックポイントを削除しました")
+                                    st.balloons()
+                                    time.sleep(1)
+                                    st.rerun()
+                                except Exception as e:
+                                    st.error(f"削除に失敗しました: {e}")
+                        else:
+                            st.session_state[f"confirm_delete_{selected_checkpoint}"] = True
+                            st.warning("⚠️ 削除を確認するには、もう一度削除ボタンをクリックしてください")
+                            st.rerun()
+    else:
+        st.info("チェックポイントが見つかりませんでした")
+        st.write("学習を開始すると、チェックポイントが自動的に作成されます。")
 
 # --- モデル管理セクション ---
 elif current_page == "model_management":
     st.markdown("---")
-    st.header("🤖 学習済みモデル管理")
+    st.header("🤖 モデル管理")
 
     # 説明
     st.markdown("""
-    このページでは、学習済みモデルの一覧表示と削除を行うことができます。
-    モデルは学習完了時に自動的に保存され、ここで管理できます。
+    このページでは、学習済みモデルの一覧表示と管理を行うことができます。
     """)
 
     # モデル一覧の取得
-    if st.button("🔄 モデル一覧を更新", type="primary", key="refresh_models_main"):
-        st.rerun()
+    with st.spinner("モデル一覧を取得中..."):
+        try:
+            models = get_models()
+        except Exception as e:
+            st.error(f"モデル一覧の取得に失敗しました: {e}")
+            models = []
 
-    models = get_models()
-
-    if not models:
-        st.info("学習済みモデルが見つかりません。学習を実行してモデルを作成してください。")
-    else:
-        st.success(f"{len(models)}個の学習済みモデルが見つかりました。")
-
-        # モデル一覧をテーブル形式で表示
-        st.subheader("📋 モデル一覧")
-
-        # データフレーム用のデータを準備
+    # モデル一覧の表示
+    if models:
+        st.subheader(f"📋 モデル一覧 ({len(models)}件)")
+        
+        # モデル情報をテーブル形式で表示
         model_data = []
         for model in models:
             model_data.append({
-                "モデル名": model["name"],
-                "エポック": model["epoch"] if model["epoch"] else "不明",
-                "サイズ": format_file_size(model["size_mb"]),
+                "名前": model["name"],
+                "エポック": model["epoch"] or "不明",
+                "サイズ": f"{model['size_mb']:.1f} MB",
                 "ファイル数": model["file_count"],
-                "作成日時": format_timestamp(model["created_at"]),
-                "パス": model["path"]
+                "作成日時": format_timestamp(model["created_at"])
             })
-
-        # テーブル表示
-        st.dataframe(
-            model_data,
-            use_container_width=True,
-            hide_index=True
-        )
-
-        # モデル詳細と削除機能
-        st.subheader("🗑️ モデル削除")
-        st.warning("⚠️ モデルを削除すると復元できません。削除前に十分確認してください。")
-
-        # モデル選択
-        model_names = [model["name"] for model in models]
-        selected_model = st.selectbox(
-            "削除するモデルを選択してください:",
-            model_names,
-            index=None,
-            placeholder="モデルを選択...",
-            key="model_selector"
-        )
-
-        if selected_model:
-            # 選択されたモデルの詳細を表示
-            selected_model_info = next((m for m in models if m["name"] == selected_model), None)
-            if selected_model_info:
-                st.markdown("### 選択されたモデルの詳細")
-                col1, col2, col3 = st.columns(3)
-
-                with col1:
-                    st.metric("モデル名", selected_model_info["name"])
-                    st.metric("エポック", selected_model_info["epoch"] if selected_model_info["epoch"] else "不明")
-
-                with col2:
-                    st.metric("サイズ", format_file_size(selected_model_info["size_mb"]))
-                    st.metric("ファイル数", selected_model_info["file_count"])
-
-                with col3:
-                    st.metric("作成日時", format_timestamp(selected_model_info["created_at"]))
-
+        
+        df = pd.DataFrame(model_data)
+        st.dataframe(df, use_container_width=True)
+        
+        # モデルの詳細表示
+        if models:
+            st.subheader("🔍 モデル詳細")
+            selected_model = st.selectbox(
+                "詳細を表示するモデルを選択",
+                [model["name"] for model in models],
+                key="model_detail_selector"
+            )
+            
+            if selected_model:
+                selected_model_info = next(model for model in models if model["name"] == selected_model)
+                
+                col_detail1, col_detail2 = st.columns(2)
+                
+                with col_detail1:
+                    st.write("**基本情報:**")
+                    st.write(f"- 名前: {selected_model_info['name']}")
+                    st.write(f"- エポック: {selected_model_info['epoch'] or '不明'}")
+                    st.write(f"- サイズ: {selected_model_info['size_mb']:.1f} MB")
+                
+                with col_detail2:
+                    st.write("**ファイル情報:**")
+                    st.write(f"- ファイル数: {selected_model_info['file_count']}")
+                    st.write(f"- 作成日時: {format_timestamp(selected_model_info['created_at'])}")
+                
                 # ファイル一覧
-                st.markdown("#### 含まれるファイル:")
-                for file_name in selected_model_info["files"]:
-                    st.text(f"• {file_name}")
+                if selected_model_info.get("files"):
+                    st.write("**ファイル一覧:**")
+                    for file in selected_model_info["files"]:
+                        st.write(f"- {file}")
+                
+                # モデルの操作
+                st.subheader("⚙️ 操作")
+                col_action1, col_action2 = st.columns(2)
+                
+                with col_action1:
+                    if st.button("📥 ダウンロード", key=f"download_model_{selected_model}"):
+                        st.info("ダウンロード機能は実装中です")
+                
+                with col_action2:
+                    if st.button("🗑️ 削除", key=f"delete_model_{selected_model}"):
+                        if st.session_state.get(f"confirm_delete_model_{selected_model}", False):
+                            with st.spinner("モデルを削除中..."):
+                                success, message = delete_model(selected_model)
 
-                # 削除確認
-                st.markdown("### 削除確認")
-                confirm_text = st.text_input(
-                    f"削除を確認するために、モデル名 '{selected_model}' を入力してください:",
-                    placeholder="モデル名を入力...",
-                    key="confirm_delete"
-                )
+                                if success:
+                                    st.success(message)
+                                    st.balloons()
+                                    # 削除後、ページを更新
+                                    time.sleep(1)
+                                    st.rerun()
+                                else:
+                                    st.error(message)
+                        else:
+                            st.session_state[f"confirm_delete_model_{selected_model}"] = True
+                            st.warning("⚠️ 削除を確認するには、もう一度削除ボタンをクリックしてください")
+                            st.rerun()
+    else:
+        st.info("モデルが見つかりませんでした")
+        st.write("学習を完了すると、モデルが自動的に作成されます。")
 
-                # 削除ボタン
-                if st.button("🗑️ モデルを削除", type="secondary", disabled=confirm_text != selected_model, key="delete_model_button_main"):
-                    if confirm_text == selected_model:
-                        with st.spinner("モデルを削除中..."):
-                            success, message = delete_model(selected_model)
-
-                            if success:
-                                st.success(message)
-                                st.balloons()
-                                # 削除後、ページを更新
-                                time.sleep(1)
-                                st.rerun()
-                            else:
-                                st.error(message)
-                    else:
-                        st.error("モデル名が一致しません。正確に入力してください。")
-
-    # フッター
+# --- リアルタイム推論セクション ---
+elif current_page == "realtime":
     st.markdown("---")
-    st.markdown("💡 **ヒント**: モデルを削除する前に、必要に応じてバックアップを取ることをお勧めします。")
+    st.header("🎤 リアルタイム音声認識")
+    
+    # 説明
+    st.markdown("""
+    このページでは、マイクからの音声をリアルタイムで文字起こしできます。
+    ブラウザのマイクアクセス許可が必要です。
+    """)
+    
+    # 推論用モデル選択
+    st.subheader("📋 推論設定")
+    col_model_select, col_model_info = st.columns([1, 2])
+    
+    with col_model_select:
+        # 利用可能なモデル一覧を取得
+        available_models = st.session_state.available_models
+        if available_models:
+            selected_realtime_model = st.selectbox(
+                "リアルタイム推論に使用するモデル:",
+                available_models,
+                index=0,
+                key="realtime_model_selector",
+                help="リアルタイム推論に使用するモデルを選択してください"
+            )
+        else:
+            st.warning("利用可能なモデルがありません")
+            selected_realtime_model = None
+    
+    with col_model_info:
+        if selected_realtime_model:
+            st.info(f"選択されたモデル: **{selected_realtime_model}**")
+        else:
+            st.warning("モデルを選択してください")
+    
+    # リアルタイム推論コントロール
+    st.subheader("🎮 リアルタイム推論制御")
+    
+    col_control1, col_control2, col_control3 = st.columns(3)
+    
+    with col_control1:
+        if st.button("🎤 開始", key="realtime_start", type="primary", disabled=not selected_realtime_model):
+            st.session_state.realtime_running = True
+            st.session_state.realtime_partial = ""
+            st.session_state.realtime_final = ""
+            st.session_state.realtime_status = "接続中..."
+            st.rerun()
+    
+    with col_control2:
+        if st.button("⏹️ 停止", key="realtime_stop", disabled=not st.session_state.get("realtime_running", False)):
+            st.session_state.realtime_running = False
+            st.session_state.realtime_status = "停止中..."
+            st.rerun()
+    
+    with col_control3:
+        if st.button("🗑️ クリア", key="realtime_clear"):
+            st.session_state.realtime_partial = ""
+            st.session_state.realtime_final = ""
+            st.rerun()
+    
+    # リアルタイム推論の状態表示
+    if st.session_state.get("realtime_running", False):
+        st.success("🎤 リアルタイム推論が実行中です")
+        
+        # ステータス表示
+        status = st.session_state.get("realtime_status", "不明")
+        st.info(f"ステータス: {status}")
+        
+        # リアルタイム推論コンポーネント
+        st.subheader("🎵 音声認識結果")
+        
+        # 部分的な結果（リアルタイム更新）
+        st.write("**部分的な結果（リアルタイム）:**")
+        partial_text = st.session_state.get("realtime_partial", "")
+        st.text_area(
+            "部分的な認識結果",
+            value=partial_text,
+            height=100,
+            key="realtime_partial_display",
+            help="リアルタイムで更新される部分的な認識結果"
+        )
+        
+        # 最終的な結果
+        st.write("**最終的な結果:**")
+        final_text = st.session_state.get("realtime_final", "")
+        st.text_area(
+            "最終的な認識結果",
+            value=final_text,
+            height=150,
+            key="realtime_final_display",
+            help="確定された認識結果"
+        )
+        
+        # エラーメッセージ
+        error_msg = st.session_state.get("realtime_error", "")
+        if error_msg:
+            st.error(f"エラー: {error_msg}")
+        
+        # JavaScriptコンポーネントを埋め込み
+        st.components.v1.html("""
+        <script>
+        // グローバル変数として定義
+        window.realtimeAudioRecognition = null;
+        
+        class RealtimeAudioRecognition {
+            constructor() {
+                this.websocket = null;
+                this.mediaRecorder = null;
+                this.audioContext = null;
+                this.isRecording = false;
+                this.audioChunks = [];
+            }
+            
+            async start() {
+                console.log('Starting realtime audio recognition...');
+                try {
+                    // WebSocket接続を先に確立
+                    this.connectWebSocket();
+                    
+                    // 少し待ってからマイクアクセス許可を取得
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    
+                    // マイクアクセス許可を取得
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        audio: {
+                            sampleRate: 16000,
+                            channelCount: 1,
+                            echoCancellation: true,
+                            noiseSuppression: true
+                        }
+                    });
+                    
+                    // MediaRecorderで音声をキャプチャ
+                    this.mediaRecorder = new MediaRecorder(stream, {
+                        mimeType: 'audio/webm;codecs=opus'
+                    });
+                    
+                    this.mediaRecorder.ondataavailable = (event) => {
+                        if (event.data.size > 0) {
+                            this.sendAudioChunk(event.data);
+                        }
+                    };
+                    
+                    // 1秒ごとに音声チャンクを送信
+                    this.mediaRecorder.start(1000);
+                    this.isRecording = true;
+                    
+                    console.log('リアルタイム音声認識を開始しました');
+                    
+                } catch (error) {
+                    console.error('マイクアクセスエラー:', error);
+                    this.showError('マイクアクセスに失敗しました: ' + error.message);
+                }
+            }
+            
+            connectWebSocket() {
+                // 既存のWebSocketエンドポイントに接続
+                const wsUrl = 'ws://localhost:58081/ws';
+                
+                console.log('=== WebSocket Connection Debug ===');
+                console.log('Connecting to WebSocket:', wsUrl);
+                console.log('Current time:', new Date().toISOString());
+                
+                try {
+                    this.websocket = new WebSocket(wsUrl);
+                    console.log('WebSocket object created:', this.websocket);
+                    console.log('WebSocket readyState:', this.websocket.readyState);
+                } catch (error) {
+                    console.error('Failed to create WebSocket:', error);
+                    this.showError('WebSocket作成エラー: ' + error.message);
+                    return;
+                }
+                
+                // 接続タイムアウトを設定
+                const connectionTimeout = setTimeout(() => {
+                    if (this.websocket.readyState === WebSocket.CONNECTING) {
+                        console.error('WebSocket connection timeout');
+                        this.showError('WebSocket接続がタイムアウトしました');
+                        this.websocket.close();
+                    }
+                }, 10000); // 10秒でタイムアウト
+                
+                this.websocket.onopen = () => {
+                    console.log('=== WebSocket Connected ===');
+                    console.log('WebSocket接続が確立されました');
+                    console.log('WebSocket readyState:', this.websocket.readyState);
+                    clearTimeout(connectionTimeout); // タイムアウトをクリア
+                    this.updateStatus('接続済み');
+                    
+                    // 既存のWebSocketプロトコルに合わせて開始メッセージを送信
+                    const startMessage = {
+                        type: 'start',
+                        model_name: 'conformer',
+                        sample_rate: 16000,
+                        format: 'i16'
+                    };
+                    console.log('Sending start message:', startMessage);
+                    this.websocket.send(JSON.stringify(startMessage));
+                    console.log('Start message sent successfully');
+                    
+                    // ステータス更新
+                    this.updateStatus('モデル初期化中...');
+                };
+                
+                this.websocket.onmessage = (event) => {
+                    console.log('WebSocket message received:', event.data);
+                    try {
+                        const data = JSON.parse(event.data);
+                        this.handleMessage(data);
+                    } catch (error) {
+                        console.error('Failed to parse WebSocket message:', error);
+                    }
+                };
+                
+                this.websocket.onclose = (event) => {
+                    console.log('WebSocket接続が閉じられました:', event.code, event.reason);
+                    clearTimeout(connectionTimeout); // タイムアウトをクリア
+                    this.updateStatus('接続切断');
+                };
+                
+                this.websocket.onerror = (error) => {
+                    console.error('WebSocketエラー:', error);
+                    clearTimeout(connectionTimeout); // タイムアウトをクリア
+                    this.showError('WebSocket接続エラー: ' + error.message);
+                };
+            }
+            
+            async sendAudioChunk(audioBlob) {
+                if (!this.websocket || this.websocket.readyState !== WebSocket.OPEN) {
+                    console.log('WebSocket not ready, skipping audio chunk');
+                    return;
+                }
+                
+                try {
+                    // BlobをArrayBufferに変換
+                    const arrayBuffer = await audioBlob.arrayBuffer();
+                    
+                    // 既存のWebSocketプロトコルに合わせてバイナリデータを直接送信
+                    console.log('Sending audio chunk, size:', arrayBuffer.byteLength);
+                    this.websocket.send(arrayBuffer);
+                    
+                } catch (error) {
+                    console.error('音声データ送信エラー:', error);
+                    this.showError('音声データ送信エラー: ' + error.message);
+                }
+            }
+            
+            handleMessage(data) {
+                console.log('Handling message:', data);
+                switch (data.type) {
+                    case 'partial':
+                        console.log('Partial result:', data.payload.text);
+                        this.updatePartialResult(data.payload.text);
+                        break;
+                    case 'final':
+                        console.log('Final result:', data.payload.text);
+                        this.updateFinalResult(data.payload.text);
+                        break;
+                    case 'error':
+                        console.log('Error:', data.payload.message);
+                        this.showError(data.payload.message);
+                        break;
+                    case 'status':
+                        console.log('Status update:', data.payload.status);
+                        this.updateStatus(data.payload.status);
+                        break;
+                    default:
+                        console.log('Unknown message type:', data.type);
+                }
+            }
+            
+            updatePartialResult(text) {
+                // Streamlitのセッション状態を更新
+                const event = new CustomEvent('realtime-update', {
+                    detail: { type: 'partial', text: text }
+                });
+                window.dispatchEvent(event);
+            }
+            
+            updateFinalResult(text) {
+                // Streamlitのセッション状態を更新
+                const event = new CustomEvent('realtime-update', {
+                    detail: { type: 'final', text: text }
+                });
+                window.dispatchEvent(event);
+            }
+            
+            updateStatus(status) {
+                console.log('Status update:', status);
+                const event = new CustomEvent('realtime-update', {
+                    detail: { type: 'status', status: status }
+                });
+                window.dispatchEvent(event);
+            }
+            
+            showError(message) {
+                const event = new CustomEvent('realtime-update', {
+                    detail: { type: 'error', message: message }
+                });
+                window.dispatchEvent(event);
+            }
+            
+            stop() {
+                if (this.mediaRecorder && this.isRecording) {
+                    this.mediaRecorder.stop();
+                    this.isRecording = false;
+                }
+                
+                if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
+                    // 既存のWebSocketプロトコルに合わせて停止メッセージを送信
+                    const stopMessage = {
+                        type: 'stop'
+                    };
+                    this.websocket.send(JSON.stringify(stopMessage));
+                    console.log('Sent stop message:', stopMessage);
+                }
+                
+                if (this.websocket) {
+                    this.websocket.close();
+                }
+                
+                console.log('リアルタイム音声認識を停止しました');
+            }
+        }
+        
+        // グローバルインスタンス
+        window.realtimeAudio = new RealtimeAudioRecognition();
+        
+        // イベントリスナー
+        window.addEventListener('realtime-update', (event) => {
+            const { type, text, status, message } = event.detail;
+            
+            // Streamlitのセッション状態を更新するためのカスタムイベント
+            const updateEvent = new CustomEvent('streamlit:update', {
+                detail: { 
+                    type: type,
+                    text: text,
+                    status: status,
+                    message: message
+                }
+            });
+            window.parent.dispatchEvent(updateEvent);
+        });
+        
+                // 自動開始（ページロード時）
+                if (window.location.hash === '#realtime') {
+                    setTimeout(() => {
+                        console.log('Auto-starting realtime audio recognition...');
+                        window.realtimeAudio.start();
+                    }, 1000);
+                }
+                
+                // デバッグ用：グローバル関数を追加
+                window.testWebSocket = function() {
+                    console.log('Testing WebSocket connection...');
+                    window.realtimeAudio.connectWebSocket();
+                };
+                
+                window.testStart = function() {
+                    console.log('Testing start function...');
+                    window.realtimeAudio.start();
+                };
+                
+                // グローバルインスタンスを作成
+                window.realtimeAudioRecognition = new RealtimeAudioRecognition();
+                
+                // ページロード時のテスト
+                console.log('=== JavaScript loaded ===');
+                console.log('RealtimeAudioRecognition class:', typeof RealtimeAudioRecognition);
+                console.log('window.realtimeAudioRecognition:', window.realtimeAudioRecognition);
+                
+                // 簡単なテスト
+                setTimeout(() => {
+                    console.log('=== Auto-test after 2 seconds ===');
+                    console.log('Testing basic functionality...');
+                    console.log('Available methods:', Object.getOwnPropertyNames(RealtimeAudioRecognition.prototype));
+                }, 2000);
+        </script>
+        """, height=0)
+        
+    else:
+        st.info("🎤 ボタンをクリックしてリアルタイム音声認識を開始してください")
+        
+        # 使用方法の説明
+        st.subheader("📖 使用方法")
+        st.markdown("""
+        1. **モデル選択**: 上記で推論に使用するモデルを選択してください
+        2. **開始ボタン**: 「開始」ボタンをクリックしてリアルタイム推論を開始します
+        3. **マイク許可**: ブラウザからマイクアクセスの許可を求められたら「許可」をクリックしてください
+        4. **音声認識**: マイクに向かって話すと、リアルタイムで文字起こし結果が表示されます
+        5. **停止**: 「停止」ボタンで推論を停止できます
+        6. **クリア**: 「クリア」ボタンで結果をクリアできます
+        """)
+        
+        st.subheader("⚠️ 注意事項")
+        st.markdown("""
+        - ブラウザのマイクアクセス許可が必要です
+        - HTTPS環境での使用を推奨します
+        - 音声の品質によって認識精度が変わります
+        - ネットワーク接続が必要です
+        """)

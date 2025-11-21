@@ -78,34 +78,32 @@ def get_latest_checkpoint(model_name: str, dataset_name: str, checkpoints_dir: s
 def save_checkpoint(model, optimizer, epoch, model_name, dataset_name, scheduler=None, checkpoints_dir="./checkpoints"):
     if not os.path.exists(checkpoints_dir):
         os.makedirs(checkpoints_dir)
-    checkpoint_path = os.path.join(checkpoints_dir, f"{model_name}-{dataset_name}-epoch-{epoch}.pt")
     
-    # チェックポイントデータを準備
-    checkpoint_data = {
-        'epoch': epoch,
-        'model_state_dict': model.state_dict(),
-        'optimizer_state_dict': optimizer.state_dict(),
-    }
+    # モデル固有の保存形式を使用
+    checkpoint_dir = os.path.join(checkpoints_dir, f"{model_name}-{dataset_name}-epoch-{epoch}")
     
-    # スケジューラーの状態も保存
+    # モデルのsave_checkpointメソッドを使用（ディレクトリ形式で保存）
+    model.save_checkpoint(checkpoint_dir, optimizer, epoch)
+    
+    # スケジューラーの状態も保存（オプション）
     if scheduler is not None:
-        checkpoint_data['scheduler_state_dict'] = {
+        scheduler_data = {
             'step_count': scheduler.step_count,
             'warmup_steps': scheduler.warmup_steps,
             'base_lr': scheduler.base_lr
         }
+        torch.save(scheduler_data, os.path.join(checkpoint_dir, "scheduler.pt"))
     
-    torch.save(checkpoint_data, checkpoint_path)
-    
-    latest_path = os.path.join(checkpoints_dir, f"{model_name}-{dataset_name}-latest.pt")
-    if os.path.lexists(latest_path):
-        os.remove(latest_path)
-    os.symlink(os.path.basename(checkpoint_path), latest_path)
+    # 最新チェックポイントへのシンボリックリンクを作成
+    latest_dir = os.path.join(checkpoints_dir, f"{model_name}-{dataset_name}-latest")
+    if os.path.lexists(latest_dir):
+        os.remove(latest_dir)
+    os.symlink(os.path.basename(checkpoint_dir), latest_dir)
     
     # 古いチェックポイントの自動削除
     cleanup_old_checkpoints(model_name, dataset_name, checkpoints_dir)
     
-    message = f"チェックポイントを保存しました: {checkpoint_path}"
+    message = f"チェックポイントを保存しました: {checkpoint_dir}"
     logger.info(message)
     websocket_manager.broadcast_sync({"type": "log", "payload": {"level": "INFO", "message": message}})
 

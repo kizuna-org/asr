@@ -16,7 +16,6 @@ import traceback
 from . import trainer, config_loader
 from .models.interface import BaseASRModel
 from .state import training_status, _model_cache
-from .websocket import manager as websocket_manager
 
 router = APIRouter()
 logger = logging.getLogger("asr-api")
@@ -41,10 +40,7 @@ def get_model_for_inference(model_name: str) -> BaseASRModel:
         
         # 動的にモデルクラスをインポート
         import importlib
-        if model_name == "realtime":
-            ModelClass = getattr(importlib.import_module(f".models.{model_name}", "app"), "RealtimeASRModel")
-        else:
-            ModelClass = getattr(importlib.import_module(f".models.{model_name}", "app"), f"{model_name.capitalize()}ASRModel")
+        ModelClass = getattr(importlib.import_module(f".models.{model_name}", "app"), f"{model_name.capitalize()}ASRModel")
         
         logger.info(f"Loading model class: {ModelClass.__name__}", 
                    extra={"extra_fields": {"component": "api", "action": "load_model_class", "model_name": model_name, "class_name": ModelClass.__name__}})
@@ -128,16 +124,6 @@ def start_training(params: Dict, background_tasks: BackgroundTasks):
     else:
         logger.info("Training will start from scratch (no checkpoint resume)")
     
-    try:
-        websocket_manager.broadcast_sync({
-            "type": "status",
-            "payload": {
-                "status": "starting",
-                "message": f"学習開始リクエスト受理: model={model_name}, dataset={dataset_name}, resume={resume_from_checkpoint}"
-            }
-        })
-    except Exception:
-        pass
     background_tasks.add_task(trainer.start_training, params)
     return {"message": "Training started in background."}
 
@@ -195,16 +181,6 @@ def resume_training(params: Dict, background_tasks: BackgroundTasks):
     training_status.setdefault("latest_logs", [])
     training_status.pop("latest_error", None)
     
-    try:
-        websocket_manager.broadcast_sync({
-            "type": "status",
-            "payload": {
-                "status": "resuming",
-                "message": f"学習再開リクエスト受理: model={model_name}, dataset={dataset_name}, checkpoint={specific_checkpoint or 'latest'}"
-            }
-        })
-    except Exception:
-        pass
     
     background_tasks.add_task(trainer.start_training, resume_params)
     return {"message": "Training resumed from checkpoint in background."}
