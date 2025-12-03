@@ -44,9 +44,11 @@ RUN pip install --no-cache-dir --break-system-packages -r requirements.txt
 COPY backend/app /app/app
 COPY backend/config.yaml /app/config.yaml
 COPY backend/download_ljspeech.py /app/download_ljspeech.py
+COPY backend/download_jsut.py /app/download_jsut.py
 COPY backend/test_training_fix.py /app/test_training_fix.py
 COPY gpu_check.py /app/gpu_check.py
 RUN chmod +x /app/download_ljspeech.py
+RUN chmod +x /app/download_jsut.py
 RUN chmod +x /app/gpu_check.py
 
 # ポートを開放 (ドキュメント用、実際にはcomposeでマッピング)

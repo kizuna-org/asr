@@ -418,6 +418,27 @@ def stop_training():
         log_detailed_error("学習停止", e)
         return False
 
+def get_datasets():
+    """データセット一覧を取得"""
+    try:
+        request_proxies = proxies if should_use_proxy(BACKEND_URL) else None
+        response = requests.get(f"{BACKEND_URL}/datasets", timeout=10, proxies=request_proxies)
+
+        if response.status_code == 200:
+            return response.json().get("datasets", [])
+        else:
+            st.error(f"データセット一覧の取得に失敗しました: HTTP {response.status_code}")
+            return []
+    except requests.exceptions.ConnectionError:
+        st.error("バックエンドに接続できません。バックエンドサービスが起動しているか確認してください。")
+        return []
+    except requests.exceptions.Timeout:
+        st.error("リクエストがタイムアウトしました。")
+        return []
+    except Exception as e:
+        st.error(f"データセット一覧の取得中にエラーが発生しました: {str(e)}")
+        return []
+
 def download_dataset(dataset_name: str):
     """データセットをダウンロード"""
     try:
@@ -726,7 +747,7 @@ st.title("ASR 学習ダッシュボード")
 
 # ナビゲーション
 st.markdown("---")
-col_nav1, col_nav2, col_nav3 = st.columns(3)
+col_nav1, col_nav2, col_nav3, col_nav4 = st.columns(4)
 with col_nav1:
     if st.button("🏠 メインダッシュボード", use_container_width=True, key="nav_main_top"):
         st.session_state.current_page = "main"
@@ -736,6 +757,10 @@ with col_nav2:
         st.session_state.current_page = "model_management"
         st.rerun()
 with col_nav3:
+    if st.button("📊 データセット管理", use_container_width=True, key="nav_dataset_top"):
+        st.session_state.current_page = "dataset_management"
+        st.rerun()
+with col_nav4:
     if st.button("🎤 リアルタイム推論", use_container_width=True, key="nav_realtime_top"):
         st.session_state.current_page = "realtime"
         st.rerun()
@@ -748,6 +773,8 @@ elif current_page == "model_management":
     page_name = "モデル管理"
 elif current_page == "checkpoint_management":
     page_name = "チェックポイント管理"
+elif current_page == "dataset_management":
+    page_name = "データセット管理"
 elif current_page == "realtime":
     page_name = "リアルタイム推論"
 else:
@@ -769,6 +796,9 @@ with st.sidebar:
         st.rerun()
     if st.button("📂 チェックポイント管理", use_container_width=True, disabled=(current_page == "checkpoint_management"), key="nav_checkpoint_sidebar"):
         st.session_state.current_page = "checkpoint_management"
+        st.rerun()
+    if st.button("📊 データセット管理", use_container_width=True, disabled=(current_page == "dataset_management"), key="nav_dataset_sidebar"):
+        st.session_state.current_page = "dataset_management"
         st.rerun()
     if st.button("🎤 リアルタイム推論", use_container_width=True, disabled=(current_page == "realtime"), key="nav_realtime_sidebar"):
         st.session_state.current_page = "realtime"
@@ -1492,6 +1522,137 @@ elif current_page == "model_management":
     else:
         st.info("モデルが見つかりませんでした")
         st.write("学習を完了すると、モデルが自動的に作成されます。")
+
+# --- データセット管理セクション ---
+elif current_page == "dataset_management":
+    st.markdown("---")
+    st.header("📊 データセット管理")
+
+    # 説明
+    st.markdown("""
+    このページでは、利用可能なデータセットの一覧表示と管理を行うことができます。
+    データセットのダウンロード、状態確認、削除などが可能です。
+    """)
+
+    # データセット一覧の取得
+    with st.spinner("データセット一覧を取得中..."):
+        try:
+            datasets = get_datasets()
+        except Exception as e:
+            st.error(f"データセット一覧の取得に失敗しました: {e}")
+            datasets = []
+
+    # データセット一覧の表示
+    if datasets:
+        st.subheader(f"📋 データセット一覧 ({len(datasets)}件)")
+        
+        # データセット情報をテーブル形式で表示
+        dataset_data = []
+        for dataset in datasets:
+            status_icon = "✅" if dataset["status"] == "downloaded" else "❌"
+            status_text = "ダウンロード済み" if dataset["status"] == "downloaded" else "未ダウンロード"
+            
+            dataset_data.append({
+                "名前": dataset["name"],
+                "状態": f"{status_icon} {status_text}",
+                "ファイル数": f"{dataset['num_files']:,}" if dataset["num_files"] > 0 else "-",
+                "サイズ": f"{dataset['size_mb']:.1f} MB" if dataset["size_mb"] > 0 else "-",
+                "パス": dataset["path"] or "-"
+            })
+        
+        df = pd.DataFrame(dataset_data)
+        st.dataframe(df, use_container_width=True)
+        
+        st.markdown("---")
+        
+        # データセットの詳細表示と操作
+        if datasets:
+            st.subheader("🔍 データセット詳細・操作")
+            selected_dataset = st.selectbox(
+                "操作するデータセットを選択",
+                [ds["name"] for ds in datasets],
+                key="dataset_detail_selector"
+            )
+            
+            if selected_dataset:
+                selected_ds = next(ds for ds in datasets if ds["name"] == selected_dataset)
+                
+                col_detail1, col_detail2 = st.columns(2)
+                
+                with col_detail1:
+                    st.write("**基本情報:**")
+                    st.write(f"- 名前: {selected_ds['name']}")
+                    status_icon = "✅" if selected_ds["status"] == "downloaded" else "❌"
+                    status_text = "ダウンロード済み" if selected_ds["status"] == "downloaded" else "未ダウンロード"
+                    st.write(f"- 状態: {status_icon} {status_text}")
+                    st.write(f"- ファイル数: {selected_ds['num_files']:,}" if selected_ds["num_files"] > 0 else "- ファイル数: -")
+                    st.write(f"- サイズ: {selected_ds['size_mb']:.1f} MB" if selected_ds["size_mb"] > 0 else "- サイズ: -")
+                
+                with col_detail2:
+                    st.write("**パス情報:**")
+                    st.write(f"- パス: {selected_ds['path'] or '未設定'}")
+                    if selected_ds.get("config"):
+                        config = selected_ds["config"]
+                        st.write(f"- サンプルレート: {config.get('sample_rate', '不明')}")
+                        st.write(f"- 検証セット割合: {config.get('validation_size', 0.05) * 100:.1f}%")
+                
+                # データセット設定の表示
+                if selected_ds.get("config"):
+                    st.markdown("---")
+                    with st.expander("**データセット設定を表示**"):
+                        st.json(selected_ds["config"])
+                
+                # データセットの操作
+                st.markdown("---")
+                st.subheader("⚙️ 操作")
+                col_action1, col_action2 = st.columns(2)
+                
+                with col_action1:
+                    if st.button("📥 ダウンロード", key=f"download_{selected_dataset}", use_container_width=True):
+                        with st.spinner(f"データセット '{selected_dataset}' をダウンロード中..."):
+                            success = download_dataset(selected_dataset)
+                            if success:
+                                st.success(f"データセット '{selected_dataset}' のダウンロードが完了しました")
+                                st.balloons()
+                                # ページを更新して最新の状態を表示
+                                import time
+                                time.sleep(1)
+                                st.rerun()
+                            else:
+                                st.error(f"データセット '{selected_dataset}' のダウンロードに失敗しました")
+                
+                with col_action2:
+                    if selected_ds["status"] == "downloaded":
+                        if st.button("🗑️ 削除", key=f"delete_{selected_dataset}", use_container_width=True, type="primary"):
+                            if st.session_state.get(f"confirm_delete_dataset_{selected_dataset}", False):
+                                with st.spinner(f"データセット '{selected_dataset}' を削除中..."):
+                                    try:
+                                        import shutil
+                                        if selected_ds["path"] and os.path.exists(selected_ds["path"]):
+                                            # 親ディレクトリを削除（例: /app/data/ljspeech 全体）
+                                            parent_dir = os.path.dirname(selected_ds["path"])
+                                            if os.path.exists(parent_dir):
+                                                shutil.rmtree(parent_dir)
+                                                st.success(f"データセット '{selected_dataset}' を削除しました")
+                                                st.balloons()
+                                                import time
+                                                time.sleep(1)
+                                                st.rerun()
+                                            else:
+                                                st.error("データセットのパスが見つかりません")
+                                        else:
+                                            st.error("データセットのパスが設定されていません")
+                                    except Exception as e:
+                                        st.error(f"削除に失敗しました: {e}")
+                            else:
+                                st.session_state[f"confirm_delete_dataset_{selected_dataset}"] = True
+                                st.warning("⚠️ 削除を確認するには、もう一度削除ボタンをクリックしてください")
+                                st.rerun()
+                    else:
+                        st.info("データセットがダウンロードされていないため、削除できません")
+    else:
+        st.info("データセットが見つかりませんでした")
+        st.write("設定ファイル（config.yaml）にデータセットが定義されているか確認してください。")
 
 # --- リアルタイム推論セクション ---
 elif current_page == "realtime":

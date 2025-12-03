@@ -319,6 +319,65 @@ def get_progress():
     data["server_time"] = time.time()
     return data
 
+@router.get("/datasets", summary="データセット一覧取得")
+def get_datasets():
+    """利用可能なデータセットの一覧と状態を取得"""
+    try:
+        config = config_loader.load_config()
+        available_datasets = config.get("available_datasets", [])
+        datasets_info = []
+        
+        for dataset_name in available_datasets:
+            dataset_config = config_loader.get_dataset_config(dataset_name)
+            if not dataset_config:
+                continue
+            
+            dataset_path = dataset_config.get("path", f"/app/data/{dataset_name}")
+            status = "not_downloaded"
+            num_files = 0
+            size_mb = 0.0
+            path = None
+            
+            # データセットの状態を確認
+            if dataset_name == "ljspeech":
+                final_dir = os.path.join(dataset_path, "LJSpeech-1.1")
+                if os.path.exists(final_dir):
+                    wav_files = list(Path(final_dir).glob("wavs/*.wav"))
+                    if wav_files:
+                        status = "downloaded"
+                        num_files = len(wav_files)
+                        path = final_dir
+                        # ディレクトリサイズを計算
+                        for file_path in Path(final_dir).rglob("*"):
+                            if file_path.is_file():
+                                size_mb += file_path.stat().st_size / (1024 * 1024)
+            elif dataset_name == "jsut":
+                final_dir = os.path.join(dataset_path, "jsut_ver1.1")
+                if os.path.exists(final_dir):
+                    wav_files = list(Path(final_dir).glob("**/wav/*.wav"))
+                    if wav_files:
+                        status = "downloaded"
+                        num_files = len(wav_files)
+                        path = final_dir
+                        # ディレクトリサイズを計算
+                        for file_path in Path(final_dir).rglob("*"):
+                            if file_path.is_file():
+                                size_mb += file_path.stat().st_size / (1024 * 1024)
+            
+            datasets_info.append({
+                "name": dataset_name,
+                "status": status,
+                "num_files": num_files,
+                "size_mb": round(size_mb, 2),
+                "path": path,
+                "config": dataset_config
+            })
+        
+        return {"datasets": datasets_info}
+    except Exception as e:
+        logger.error(f"Failed to get datasets: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to get datasets: {str(e)}")
+
 @router.post("/dataset/download", summary="データセットダウンロード")
 def download_dataset(params: Dict):
     """指定されたデータセットをダウンロードする"""
@@ -365,6 +424,52 @@ def download_dataset(params: Dict):
                 raise HTTPException(status_code=500, detail=f"Download finished but target dir not found: {final_dir}")
 
             wav_count = len(list(Path(final_dir).glob("wavs/*.wav")))
+            return {
+                "message": f"Dataset '{dataset_name}' downloaded successfully",
+                "path": final_dir,
+                "num_wavs": wav_count,
+            }
+        elif dataset_name == "jsut":
+            # スクリプトをサブプロセス経由で実行してダウンロード
+            script_path = "/app/download_jsut.py"
+            data_root = "/app/data"
+            jsut_root = os.path.join(data_root, "jsut")
+            final_dir = os.path.join(jsut_root, "jsut_ver1.1")
+
+            os.makedirs(jsut_root, exist_ok=True)
+
+            # 既に展開済みならスキップ
+            if os.path.exists(final_dir):
+                wav_count = len(list(Path(final_dir).glob("**/wav/*.wav")))
+                return {"message": f"Dataset '{dataset_name}' already exists", "path": final_dir, "num_wavs": wav_count}
+
+            try:
+                # 環境の python パスで実行（compose/uvicorn 環境に追従）
+                python_exe = os.environ.get("PYTHON", "python3")
+                result = subprocess.run([
+                    python_exe, script_path
+                ], capture_output=True, text=True, timeout=3600)
+            except subprocess.TimeoutExpired as e:
+                raise HTTPException(status_code=504, detail=f"Download script timeout: {str(e)}")
+
+            if result.returncode != 0:
+                # スクリプトの出力をすべて返す（クライアント側でスタックトレースを確認可能にする）
+                stdout_text = result.stdout or ""
+                stderr_text = result.stderr or ""
+                raise HTTPException(
+                    status_code=500,
+                    detail=(
+                        f"Download script failed (exit={result.returncode})\n"
+                        f"STDOUT:\n{stdout_text}\n"
+                        f"STDERR:\n{stderr_text}"
+                    ),
+                )
+
+            # 成功時の検査
+            if not os.path.exists(final_dir):
+                raise HTTPException(status_code=500, detail=f"Download finished but target dir not found: {final_dir}")
+
+            wav_count = len(list(Path(final_dir).glob("**/wav/*.wav")))
             return {
                 "message": f"Dataset '{dataset_name}' downloaded successfully",
                 "path": final_dir,

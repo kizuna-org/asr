@@ -83,6 +83,44 @@ def setup_logging():
 setup_logging()
 logger = logging.getLogger("asr-api")
 
+# 起動時のデータセットチェック（非同期、エラーは無視）
+async def check_datasets_on_startup():
+    """起動時にデータセットの存在をチェック（警告のみ、エラーは無視）"""
+    import os
+    from pathlib import Path
+    
+    datasets_to_check = [
+        ("ljspeech", "/app/data/ljspeech/LJSpeech-1.1"),
+        ("jsut", "/app/data/jsut/jsut_ver1.1"),
+    ]
+    
+    for dataset_name, dataset_path in datasets_to_check:
+        if not os.path.exists(dataset_path):
+            logger.warning(
+                f"Dataset '{dataset_name}' not found at {dataset_path}. "
+                f"Use /api/dataset/download endpoint to download it."
+            )
+        else:
+            # データセットが存在する場合、ファイル数を確認
+            try:
+                if dataset_name == "ljspeech":
+                    wav_count = len(list(Path(dataset_path).glob("wavs/*.wav")))
+                elif dataset_name == "jsut":
+                    wav_count = len(list(Path(dataset_path).glob("**/wav/*.wav")))
+                else:
+                    wav_count = 0
+                logger.info(f"Dataset '{dataset_name}' found with {wav_count} audio files")
+            except Exception as e:
+                logger.debug(f"Could not count files for {dataset_name}: {e}")
+
+@app.on_event("startup")
+async def startup_event():
+    """アプリケーション起動時のイベントハンドラー"""
+    logger.info("ASR API is starting up...")
+    # データセットチェックは非同期で実行（起動をブロックしない）
+    import asyncio
+    asyncio.create_task(check_datasets_on_startup())
+
 # HTTP APIエンドポイントをインクルード
 print(f"DEBUG: Including API router with prefix '/api'")  # デバッグ用
 app.include_router(api_router, prefix="/api")

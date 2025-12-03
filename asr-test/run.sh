@@ -119,6 +119,9 @@ ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo doc
 echo "⬇️ LJSpeechデータセットを準備します..."
 ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker compose -f docker-compose.yml -f docker-compose.gpu.yml exec asr-api python /app/download_ljspeech.py"
 
+echo "⬇️ JSUTデータセットを準備します..."
+ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && sudo docker compose -f docker-compose.yml -f docker-compose.gpu.yml exec asr-api python /app/download_jsut.py || echo '⚠️ JSUTデータセットのダウンロードに失敗しました（オプション）'"
+
 echo "🔍 NVIDIA Container Runtimeの設定を確認します..."
 ssh ${SSH_HOST} "cd /home/students/r03i/r03i18/asr-test/asr/asr-test && ./check_nvidia_runtime.sh"
 

@@ -7,6 +7,7 @@ available_models:
 
 available_datasets:
   - ljspeech
+  - jsut
 
 # モデルごとの詳細設定
 models:
@@ -44,6 +45,30 @@ datasets:
 
     # --- テキスト前処理 ---
     text_cleaners: ["english_cleaners"] # 適用するテキストクリーナーのリスト
+
+  jsut:
+    # --- データパス ---
+    path: "/app/data/jsut" # Dockerコンテナ内のデータセットルートパス
+
+    # --- JSUTサブディレクトリ設定 ---
+    subdirs: ["basic5000"] # 使用するJSUTのサブディレクトリ（basic5000, onomatopee300など）
+
+    # --- 音声前処理設定 ---
+    sample_rate: 16000 # リサンプリングするサンプルレート
+    n_fft: 1024 # STFTのウィンドウサイズ
+    win_length: 1024 # STFTのウィンドウ長
+    hop_length: 256 # STFTのホップ長
+    n_mels: 80 # 生成するメルフィルタバンクの数
+    f_min: 0 # メルスペクトログラムの最小周波数
+    f_max: 8000 # メルスペクトログラムの最大周波数
+
+    # --- テキスト前処理 ---
+    # JSUTは日本語なので、テキストクリーナーは必要に応じて設定
+    # text_cleaners: [] # 日本語用のテキストクリーナー（必要に応じて設定）
+
+    # --- データ分割設定 ---
+    validation_size: 0.05 # 検証セットの割合
+    random_seed: 42 # データ分割のランダムシード
 
 # 学習のグローバル設定
 training:

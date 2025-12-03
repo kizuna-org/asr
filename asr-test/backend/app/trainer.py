@@ -227,6 +227,8 @@ def start_training(params: Dict):
         # データセット名に応じてクラス名を適切に設定
         if dataset_name == "ljspeech":
             class_name = "LJSpeechDataset"
+        elif dataset_name == "jsut":
+            class_name = "JSUTDataset"
         else:
             class_name = f"{dataset_name.capitalize()}Dataset"
         DatasetClass = getattr(importlib.import_module(f".datasets.{dataset_name}", "app"), class_name)
