@@ -632,6 +632,50 @@ def delete_model(model_name):
     except Exception as e:
         return False, f"削除中にエラーが発生しました: {str(e)}"
 
+def delete_models_bulk(model_names):
+    """指定された複数のモデルを一括削除"""
+    try:
+        request_proxies = proxies if should_use_proxy(BACKEND_URL) else None
+        response = requests.delete(f"{BACKEND_URL}/models", json=model_names, timeout=60, proxies=request_proxies)
+
+        if response.status_code == 200:
+            result = response.json()
+            deleted_count = len(result.get("deleted", []))
+            failed_count = len(result.get("failed", []))
+            if failed_count == 0:
+                return True, f"{deleted_count}個のモデルが正常に削除されました。"
+            else:
+                return True, f"{deleted_count}個のモデルが削除されました。{failed_count}個のモデルの削除に失敗しました。"
+        else:
+            error_detail = response.json().get("detail", "不明なエラー")
+            return False, f"一括削除に失敗しました: {error_detail}"
+    except requests.exceptions.ConnectionError:
+        return False, "バックエンドに接続できません。"
+    except requests.exceptions.Timeout:
+        return False, "リクエストがタイムアウトしました。"
+    except Exception as e:
+        return False, f"一括削除中にエラーが発生しました: {str(e)}"
+
+def download_models_bulk(model_names):
+    """指定された複数のモデルをZIPファイルとして一括ダウンロード"""
+    try:
+        request_proxies = proxies if should_use_proxy(BACKEND_URL) else None
+        # クエリパラメータとしてモデル名を送信（FastAPIのList[str]形式）
+        params = {"model_names": model_names}
+        response = requests.get(f"{BACKEND_URL}/models/bulk-download", params=params, timeout=300, proxies=request_proxies, stream=True)
+
+        if response.status_code == 200:
+            return True, response
+        else:
+            error_detail = response.json().get("detail", "不明なエラー")
+            return False, f"一括ダウンロードに失敗しました: {error_detail}"
+    except requests.exceptions.ConnectionError:
+        return False, "バックエンドに接続できません。"
+    except requests.exceptions.Timeout:
+        return False, "リクエストがタイムアウトしました。"
+    except Exception as e:
+        return False, f"一括ダウンロード中にエラーが発生しました: {str(e)}"
+
 def format_file_size(size_mb):
     """ファイルサイズを適切な単位でフォーマット"""
     if size_mb < 1:
@@ -1161,20 +1205,175 @@ elif current_page == "model_management":
     if models:
         st.subheader(f"📋 モデル一覧 ({len(models)}件)")
         
-        # モデル情報をテーブル形式で表示
+        # 一括操作セクション
+        st.markdown("### 🔧 一括操作")
+        
+        # 選択状態の初期化
+        if "selected_models" not in st.session_state:
+            st.session_state.selected_models = []
+        if "model_selection_df" not in st.session_state:
+            st.session_state.model_selection_df = None
+        
+        # モデル情報をテーブル形式で準備（チェックボックス列を含む）
         model_data = []
         for model in models:
+            is_selected = model["name"] in st.session_state.selected_models
+            # データセット統計情報を取得
+            dataset_stats = ""
+            if model.get("training_metadata") and model["training_metadata"].get("dataset_statistics"):
+                stats = model["training_metadata"]["dataset_statistics"]
+                total_samples = stats.get("total_samples", 0)
+                if total_samples > 0:
+                    dataset_stats = f"{total_samples:,} samples"
+            
             model_data.append({
+                "選択": is_selected,
                 "名前": model["name"],
                 "エポック": model["epoch"] or "不明",
                 "データセット": model.get("dataset_name") or "不明",
+                "サンプル数": dataset_stats or "不明",
                 "サイズ": f"{model['size_mb']:.1f} MB",
                 "ファイル数": model["file_count"],
                 "作成日時": format_timestamp(model["created_at"])
             })
         
         df = pd.DataFrame(model_data)
-        st.dataframe(df, use_container_width=True)
+        
+        # 全選択/全解除ボタン
+        col_select_all, col_deselect_all, col_bulk_actions = st.columns([1, 1, 2])
+        with col_select_all:
+            if st.button("✅ すべて選択", key="select_all_models"):
+                st.session_state.selected_models = [model["name"] for model in models]
+                st.rerun()
+        with col_deselect_all:
+            if st.button("❌ すべて解除", key="deselect_all_models"):
+                st.session_state.selected_models = []
+                st.rerun()
+        
+        # 編集可能なテーブルでチェックボックスを表示
+        edited_df = st.data_editor(
+            df,
+            use_container_width=True,
+            hide_index=True,
+            column_config={
+                "選択": st.column_config.CheckboxColumn(
+                    "選択",
+                    help="モデルを選択",
+                    default=False,
+                ),
+                "名前": st.column_config.TextColumn(
+                    "名前",
+                    help="モデル名",
+                ),
+                "エポック": st.column_config.TextColumn(
+                    "エポック",
+                    help="エポック番号",
+                ),
+                "データセット": st.column_config.TextColumn(
+                    "データセット",
+                    help="学習に使用したデータセット",
+                ),
+                "サンプル数": st.column_config.TextColumn(
+                    "サンプル数",
+                    help="学習に使用したデータセットのサンプル数",
+                ),
+                "サイズ": st.column_config.TextColumn(
+                    "サイズ",
+                    help="モデルファイルのサイズ",
+                ),
+                "ファイル数": st.column_config.NumberColumn(
+                    "ファイル数",
+                    help="モデルに含まれるファイル数",
+                ),
+                "作成日時": st.column_config.TextColumn(
+                    "作成日時",
+                    help="モデルの作成日時",
+                ),
+            },
+            disabled=["名前", "エポック", "データセット", "サンプル数", "サイズ", "ファイル数", "作成日時"],
+            key="model_selection_table"
+        )
+        
+        # テーブルの選択状態をセッション状態に反映
+        if edited_df is not None:
+            selected_models_from_table = edited_df[edited_df["選択"] == True]["名前"].tolist()
+            if set(selected_models_from_table) != set(st.session_state.selected_models):
+                st.session_state.selected_models = selected_models_from_table
+                st.rerun()
+        
+        # 一括操作ボタン
+        with col_bulk_actions:
+            st.write(f"**選択中のモデル: {len(st.session_state.selected_models)}件**")
+            
+            col_download, col_delete = st.columns(2)
+            
+            with col_download:
+                # 一括ダウンロードボタン
+                if st.button("📥 一括ダウンロード", 
+                            disabled=len(st.session_state.selected_models) == 0,
+                            key="bulk_download_models",
+                            use_container_width=True):
+                    if st.session_state.selected_models:
+                        with st.spinner("ZIPファイルを作成中..."):
+                            success, result = download_models_bulk(st.session_state.selected_models)
+                            if success and isinstance(result, requests.Response):
+                                # ZIPファイルの内容を取得
+                                zip_content = result.content
+                                # ZIPファイルをダウンロード
+                                from datetime import datetime
+                                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                                filename = f"models_{timestamp}.zip"
+                                
+                                # セッション状態に保存
+                                st.session_state["bulk_download_zip"] = {
+                                    "content": zip_content,
+                                    "filename": filename,
+                                    "model_count": len(st.session_state.selected_models)
+                                }
+                                st.success(f"{len(st.session_state.selected_models)}個のモデルを含むZIPファイルを作成しました。")
+                                st.rerun()
+                            else:
+                                st.error(result)
+                
+                # ダウンロード可能なZIPファイルがある場合はダウンロードボタンを表示
+                if "bulk_download_zip" in st.session_state:
+                    zip_data = st.session_state["bulk_download_zip"]
+                    st.download_button(
+                        label=f"📥 ZIPダウンロード ({zip_data['filename']})",
+                        data=zip_data["content"],
+                        file_name=zip_data["filename"],
+                        mime="application/zip",
+                        key="download_bulk_zip",
+                        use_container_width=True
+                    )
+            
+            with col_delete:
+                # 一括削除ボタン
+                if st.button("🗑️ 一括削除", 
+                            disabled=len(st.session_state.selected_models) == 0,
+                            key="bulk_delete_models",
+                            use_container_width=True,
+                            type="primary"):
+                    if st.session_state.selected_models:
+                        # 確認ダイアログ
+                        if st.session_state.get(f"confirm_bulk_delete", False):
+                            with st.spinner("モデルを削除中..."):
+                                success, message = delete_models_bulk(st.session_state.selected_models)
+                                if success:
+                                    st.success(message)
+                                    st.balloons()
+                                    st.session_state.selected_models = []
+                                    st.session_state[f"confirm_bulk_delete"] = False
+                                    time.sleep(1)
+                                    st.rerun()
+                                else:
+                                    st.error(message)
+                        else:
+                            st.session_state[f"confirm_bulk_delete"] = True
+                            st.warning(f"⚠️ {len(st.session_state.selected_models)}個のモデルを削除しようとしています。削除を確認するには、もう一度削除ボタンをクリックしてください。")
+                            st.rerun()
+        
+        st.markdown("---")
         
         # モデルの詳細表示
         if models:
@@ -1230,12 +1429,27 @@ elif current_page == "model_management":
                         if metadata.get("training_status"):
                             st.write(f"- 状態: {metadata['training_status']}")
                     
+                    # データセット統計情報の表示
+                    if metadata.get("dataset_statistics"):
+                        st.markdown("---")
+                        st.write("**データセット統計情報:**")
+                        stats = metadata["dataset_statistics"]
+                        col_stats1, col_stats2 = st.columns(2)
+                        with col_stats1:
+                            st.write(f"- 学習サンプル数: {stats.get('train_samples', '不明'):,}")
+                            st.write(f"- 検証サンプル数: {stats.get('validation_samples', '不明'):,}")
+                        with col_stats2:
+                            st.write(f"- 合計サンプル数: {stats.get('total_samples', '不明'):,}")
+                            train_ratio = stats.get('train_ratio', 0)
+                            val_ratio = stats.get('validation_ratio', 0)
+                            st.write(f"- 学習/検証比率: {train_ratio:.1%} / {val_ratio:.1%}")
+                    
                     # データセット設定の表示
                     if metadata.get("dataset_config"):
                         st.markdown("---")
-                        st.write("**データセット設定:**")
-                        dataset_config = metadata["dataset_config"]
-                        st.json(dataset_config)
+                        with st.expander("**データセット設定を表示**"):
+                            dataset_config = metadata["dataset_config"]
+                            st.json(dataset_config)
                     
                     # モデル設定の表示（折りたたみ可能）
                     if metadata.get("model_config"):

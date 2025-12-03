@@ -1,4 +1,4 @@
-from fastapi import APIRouter, BackgroundTasks, UploadFile, File, HTTPException
+from fastapi import APIRouter, BackgroundTasks, UploadFile, File, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from typing import Dict, List
 import logging
@@ -15,6 +15,7 @@ import shutil
 import traceback
 import zipfile
 import io
+from datetime import datetime
 
 from . import trainer, config_loader
 from .models.interface import BaseASRModel
@@ -589,6 +590,108 @@ def delete_model(model_name: str):
                     extra={"extra_fields": {"component": "api", "action": "delete_model_error", 
                                           "model_name": model_name, "error": str(e), "traceback": traceback.format_exc()}})
         raise HTTPException(status_code=500, detail=f"Failed to delete model: {str(e)}")
+
+@router.delete("/models", summary="学習済みモデル一括削除")
+def delete_models_bulk(model_names: List[str]):
+    """指定された複数の学習済みモデルを一括削除する（リクエストボディで受け取る）"""
+    try:
+        checkpoints_dir = Path("/app/checkpoints")
+        deleted_models = []
+        failed_models = []
+        
+        for model_name in model_names:
+            try:
+                # セキュリティチェック: パストラバーサル攻撃を防ぐ
+                if ".." in model_name or "/" in model_name or "\\" in model_name:
+                    failed_models.append({"model_name": model_name, "error": "Invalid model name"})
+                    continue
+                
+                model_path = checkpoints_dir / model_name
+                if not model_path.exists():
+                    failed_models.append({"model_name": model_name, "error": "Model not found"})
+                    continue
+                
+                if not model_path.is_dir():
+                    failed_models.append({"model_name": model_name, "error": "Not a valid model directory"})
+                    continue
+                
+                # モデルディレクトリを削除
+                shutil.rmtree(model_path)
+                deleted_models.append(model_name)
+                
+                logger.info(f"Model deleted successfully", 
+                           extra={"extra_fields": {"component": "api", "action": "delete_model_bulk", 
+                                                 "model_name": model_name}})
+            except Exception as e:
+                failed_models.append({"model_name": model_name, "error": str(e)})
+                logger.error(f"Error deleting model in bulk", 
+                            extra={"extra_fields": {"component": "api", "action": "delete_model_bulk_error", 
+                                                  "model_name": model_name, "error": str(e)}})
+        
+        return {
+            "deleted": deleted_models,
+            "failed": failed_models,
+            "message": f"Deleted {len(deleted_models)} model(s), {len(failed_models)} failed"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in bulk delete", 
+                    extra={"extra_fields": {"component": "api", "action": "delete_models_bulk_error", 
+                                          "error": str(e), "traceback": traceback.format_exc()}})
+        raise HTTPException(status_code=500, detail=f"Failed to delete models: {str(e)}")
+
+@router.get("/models/bulk-download", summary="学習済みモデル一括ダウンロード")
+def download_models_bulk(model_names: List[str] = Query(...)):
+    """指定された複数の学習済みモデルをZIPファイルとして一括ダウンロードする"""
+    try:
+        checkpoints_dir = Path("/app/checkpoints")
+        
+        # 一時的なZIPファイルを作成
+        zip_buffer = io.BytesIO()
+        
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+            for model_name in model_names:
+                try:
+                    # セキュリティチェック: パストラバーサル攻撃を防ぐ
+                    if ".." in model_name or "/" in model_name or "\\" in model_name:
+                        continue
+                    
+                    model_path = checkpoints_dir / model_name
+                    if not model_path.exists() or not model_path.is_dir():
+                        continue
+                    
+                    # モデルディレクトリ内のすべてのファイルをZIPに追加
+                    for file_path in model_path.rglob("*"):
+                        if file_path.is_file():
+                            # ZIP内のパスは model_name/ファイル名 の形式
+                            arcname = model_name / file_path.relative_to(model_path)
+                            zip_file.write(file_path, arcname)
+                    
+                    logger.info(f"Model added to zip", 
+                               extra={"extra_fields": {"component": "api", "action": "download_model_bulk", 
+                                                     "model_name": model_name}})
+                except Exception as e:
+                    logger.error(f"Error adding model to zip", 
+                                extra={"extra_fields": {"component": "api", "action": "download_model_bulk_error", 
+                                                      "model_name": model_name, "error": str(e)}})
+        
+        zip_buffer.seek(0)
+        
+        # ZIPファイル名を生成（タイムスタンプ付き）
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        zip_filename = f"models_{timestamp}.zip"
+        
+        return StreamingResponse(
+            io.BytesIO(zip_buffer.read()),
+            media_type="application/zip",
+            headers={"Content-Disposition": f"attachment; filename={zip_filename}"}
+        )
+        
+    except Exception as e:
+        logger.error(f"Error in bulk download", 
+                    extra={"extra_fields": {"component": "api", "action": "download_models_bulk_error", 
+                                          "error": str(e), "traceback": traceback.format_exc()}})
+        raise HTTPException(status_code=500, detail=f"Failed to download models: {str(e)}")
 
 @router.get("/test", summary="テスト用エンドポイント")
 def test_endpoint():

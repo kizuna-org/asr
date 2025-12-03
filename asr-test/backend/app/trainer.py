@@ -251,6 +251,21 @@ def start_training(params: Dict):
 
         train_dataset = DatasetClass(train_ds_conf, split='train')
         valid_dataset = DatasetClass(valid_ds_conf, split='validation')
+        
+        # データセット統計情報を取得
+        train_samples = len(train_dataset)
+        valid_samples = len(valid_dataset)
+        total_samples = train_samples + valid_samples
+        
+        # メタデータにデータセット統計情報を追加
+        training_metadata["dataset_statistics"] = {
+            "train_samples": train_samples,
+            "validation_samples": valid_samples,
+            "total_samples": total_samples,
+            "train_ratio": train_samples / total_samples if total_samples > 0 else 0.0,
+            "validation_ratio": valid_samples / total_samples if total_samples > 0 else 0.0
+        }
+        
         train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=training_config['batch_size'], shuffle=True, collate_fn=collate_fn)
         valid_loader = torch.utils.data.DataLoader(valid_dataset, batch_size=training_config['batch_size'], shuffle=False, collate_fn=collate_fn)
 
