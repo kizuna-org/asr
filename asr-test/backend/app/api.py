@@ -199,17 +199,43 @@ def stop_training():
     return {"message": "Stop signal sent to training process."}
 
 @router.post("/inference", summary="音声ファイルによる推論")
-async def inference(file: UploadFile = File(...), model_name: str = "conformer"):
-    """アップロードされた音声ファイルで推論を実行する"""
+async def inference(file: UploadFile = File(...), model_name: str = "conformer", checkpoint_path: str = None):
+    """アップロードされた音声ファイルで推論を実行する
+    
+    Args:
+        file: 音声ファイル
+        model_name: モデル名（例: "conformer"）
+        checkpoint_path: 特定のチェックポイントパス（オプション、指定しない場合は最新のチェックポイントを使用）
+    """
     # 音声入力開始時刻（APIリクエスト受信時点）
     input_start_time = time.time()
     
     logger.info(f"Starting inference request", 
-                extra={"extra_fields": {"component": "api", "action": "inference_start", "model_name": model_name, "filename": file.filename}})
+                extra={"extra_fields": {"component": "api", "action": "inference_start", "model_name": model_name, "filename": file.filename, "checkpoint_path": checkpoint_path}})
     
     try:
         # モデルを取得
-        model = get_model_for_inference(model_name)
+        if checkpoint_path:
+            # 特定のチェックポイントを指定した場合
+            model_config = config_loader.get_model_config(model_name)
+            if not model_config:
+                raise HTTPException(status_code=404, detail=f"Model '{model_name}' not found in config.")
+            
+            import importlib
+            ModelClass = getattr(importlib.import_module(f".models.{model_name}", "app"), f"{model_name.capitalize()}ASRModel")
+            model = ModelClass(model_config)
+            
+            # 指定されたチェックポイントをロード
+            if os.path.exists(checkpoint_path):
+                logger.info(f"Loading checkpoint: {checkpoint_path}")
+                model.load_checkpoint(checkpoint_path)
+            else:
+                raise HTTPException(status_code=404, detail=f"Checkpoint not found: {checkpoint_path}")
+            
+            model.eval()
+        else:
+            # デフォルトの動作（最新のチェックポイントを使用）
+            model = get_model_for_inference(model_name)
 
         # 音声ファイルを一時ファイルに保存してから読み込み（バックエンド間の互換性向上）
         with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{file.filename}") as tmp:

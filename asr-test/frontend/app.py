@@ -9,6 +9,7 @@ import os
 import logging
 import sys
 from datetime import datetime
+from pathlib import Path
 import warnings
 
 # 機能ポリシー警告を抑制
@@ -123,7 +124,7 @@ def init_session_state():
             st.session_state[key] = value
 
 # --- 推論API呼び出し ---
-def run_inference(file_bytes: bytes, filename: str, model_name: str) -> Dict[str, Any]:
+def run_inference(file_bytes: bytes, filename: str, model_name: str, checkpoint_path: str = None) -> Dict[str, Any]:
     """音声ファイルをアップロードして推論を実行し、結果と3種類の時間(ms)を返す"""
     try:
         import time
@@ -132,7 +133,9 @@ def run_inference(file_bytes: bytes, filename: str, model_name: str) -> Dict[str
         files = {
             "file": (filename, file_bytes, "application/octet-stream"),
         }
-        params = {"model_name": model_name} if model_name else None
+        params = {"model_name": model_name} if model_name else {}
+        if checkpoint_path:
+            params["checkpoint_path"] = checkpoint_path
         start_time = time.perf_counter()
         response = requests.post(
             f"{BACKEND_URL}/inference",
@@ -1527,6 +1530,88 @@ elif current_page == "model_management":
                             st.session_state[f"confirm_delete_model_{selected_model}"] = True
                             st.warning("⚠️ 削除を確認するには、もう一度削除ボタンをクリックしてください")
                             st.rerun()
+                
+                # 推論テストセクション
+                st.markdown("---")
+                st.subheader("🧪 推論テスト")
+                st.markdown("選択したモデルで音声ファイルをアップロードして推論を試すことができます。")
+                
+                # 音声ファイルアップロード
+                uploaded_file = st.file_uploader(
+                    "音声ファイルを選択 (WAV/FLAC/MP3/M4A/OGG)",
+                    type=["wav", "flac", "mp3", "m4a", "ogg"],
+                    key=f"inference_file_uploader_{selected_model}",
+                    help="推論対象の音声ファイルをアップロードしてください"
+                )
+                
+                if uploaded_file is not None:
+                    st.audio(uploaded_file, format="audio/wav")
+                    st.success(f"ファイルがアップロードされました: {uploaded_file.name}")
+                    
+                    # 推論実行ボタン
+                    if st.button(
+                        "🚀 推論を実行",
+                        key=f"inference_execute_{selected_model}",
+                        type="primary",
+                        use_container_width=True
+                    ):
+                        with st.spinner("推論を実行中..."):
+                            # モデル名を抽出（例: "conformer-ljspeech-epoch-10" -> "conformer"）
+                            model_name_for_inference = selected_model.split("-")[0] if "-" in selected_model else selected_model
+                            
+                            # 選択されたモデルのパスを取得してチェックポイントとして指定
+                            # モデル情報のpathはチェックポイントディレクトリのパス
+                            checkpoint_path = selected_model_info.get("path")
+                            
+                            result = run_inference(uploaded_file.getvalue(), uploaded_file.name, model_name_for_inference, checkpoint_path=checkpoint_path)
+                            transcription = result.get("transcription", "")
+                            first_token_ms = result.get("first_token_time_ms")
+                            inference_ms = result.get("inference_time_ms")
+                            total_ms = result.get("total_time_ms")
+
+                            # 推論結果の表示
+                            st.success("推論完了")
+
+                            # 使用したモデル情報を表示
+                            st.info(f"使用モデル: **{selected_model}**")
+
+                            # パフォーマンス情報を表示
+                            st.subheader("⏱️ パフォーマンス情報")
+                            col_time1, col_time2, col_time3 = st.columns(3)
+                            with col_time1:
+                                if first_token_ms is not None:
+                                    st.metric(label="最初の出力まで", value=f"{first_token_ms:.0f} ms")
+                            with col_time2:
+                                if inference_ms is not None:
+                                    st.metric(label="推論時間", value=f"{inference_ms:.0f} ms")
+                            with col_time3:
+                                if total_ms is not None:
+                                    st.metric(label="総時間", value=f"{total_ms:.0f} ms")
+
+                            # 文字起こし結果
+                            st.subheader("📝 文字起こし結果")
+                            if transcription:
+                                st.text_area(
+                                    "文字起こし結果",
+                                    value=transcription,
+                                    height=120,
+                                    key=f"inference_result_text_{selected_model}",
+                                    help="音声から認識されたテキストが表示されます"
+                                )
+                                
+                                # 結果のコピーボタン
+                                if st.button("📋 結果をコピー", key=f"copy_result_button_{selected_model}"):
+                                    st.write("結果をクリップボードにコピーしました（手動でコピーしてください）")
+                            else:
+                                st.warning("⚠️ 推論結果が空です")
+                                st.text_area(
+                                    "文字起こし結果",
+                                    value="（音声から認識されたテキストがありません）",
+                                    height=120,
+                                    key=f"inference_result_text_empty_{selected_model}",
+                                    help="音声から認識されたテキストがありません。音声の品質やモデルの学習状況を確認してください。"
+                                )
+                                st.info("💡 **推奨事項**: 音声の品質を確認するか、別のモデルで試してみてください。")
     else:
         st.info("モデルが見つかりませんでした")
         st.write("学習を完了すると、モデルが自動的に作成されます。")
