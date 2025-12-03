@@ -456,6 +456,7 @@ def download_dataset(params: Dict):
                 # スクリプトの出力をすべて返す（クライアント側でスタックトレースを確認可能にする）
                 stdout_text = result.stdout or ""
                 stderr_text = result.stderr or ""
+                logger.error(f"JSUT download failed: stdout={stdout_text}, stderr={stderr_text}")
                 raise HTTPException(
                     status_code=500,
                     detail=(
@@ -465,15 +466,40 @@ def download_dataset(params: Dict):
                     ),
                 )
 
-            # 成功時の検査
-            if not os.path.exists(final_dir):
-                raise HTTPException(status_code=500, detail=f"Download finished but target dir not found: {final_dir}")
+            # 成功時の検査（より柔軟に）
+            # jsut_ver1.1 または jsut-label-master などの可能性を考慮
+            found_dir = None
+            if os.path.exists(final_dir):
+                found_dir = final_dir
+            else:
+                # 代替ディレクトリ名を探す
+                if os.path.exists(jsut_root):
+                    for item in Path(jsut_root).iterdir():
+                        if item.is_dir() and 'jsut' in item.name.lower():
+                            found_dir = str(item)
+                            break
 
-            wav_count = len(list(Path(final_dir).glob("**/wav/*.wav")))
+            if not found_dir:
+                # スクリプトの出力を確認してエラーメッセージを返す
+                stdout_text = result.stdout or ""
+                stderr_text = result.stderr or ""
+                error_msg = (
+                    f"Download finished but target directory not found: {final_dir}\n"
+                    f"STDOUT:\n{stdout_text}\n"
+                    f"STDERR:\n{stderr_text}\n"
+                    f"Note: JSUT dataset may need to be downloaded manually. "
+                    f"Please check the download script output above for instructions."
+                )
+                logger.error(error_msg)
+                raise HTTPException(status_code=500, detail=error_msg)
+
+            wav_count = len(list(Path(found_dir).glob("**/wav/*.wav")))
             return {
                 "message": f"Dataset '{dataset_name}' downloaded successfully",
-                "path": final_dir,
+                "path": found_dir,
                 "num_wavs": wav_count,
+                "stdout": result.stdout,
+                "stderr": result.stderr
             }
         else:
             raise HTTPException(status_code=400, detail=f"Dataset '{dataset_name}' is not supported for download")

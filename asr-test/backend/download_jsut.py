@@ -38,15 +38,38 @@ def _download_with_retries(url: str, dest_file: str, attempts: int = 3, timeout:
             total_size = int(response.headers.get('content-length', 0))
             downloaded_size = 0
 
+            # tqdmが利用可能な場合は使用、そうでなければ簡易版のプログレスバー
+            try:
+                from tqdm import tqdm
+                use_tqdm = True
+            except ImportError:
+                use_tqdm = False
+
             with open(dest_file, 'wb') as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-                        downloaded_size += len(chunk)
-                        if total_size > 0:
-                            progress = (downloaded_size / total_size) * 100
-                            print(f"\rDownload progress: {progress:.1f}% ({downloaded_size}/{total_size} bytes)", end='', flush=True)
-            print()
+                if use_tqdm and total_size > 0:
+                    # tqdmを使用したプログレスバー
+                    with tqdm(
+                        desc=os.path.basename(dest_file),
+                        total=total_size,
+                        unit='B',
+                        unit_scale=True,
+                        unit_divisor=1024,
+                    ) as bar:
+                        for chunk in response.iter_content(chunk_size=8192):
+                            if chunk:
+                                f.write(chunk)
+                                bar.update(len(chunk))
+                else:
+                    # 簡易版のプログレスバー
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                            downloaded_size += len(chunk)
+                            if total_size > 0:
+                                progress = (downloaded_size / total_size) * 100
+                                print(f"\rDownload progress: {progress:.1f}% ({downloaded_size}/{total_size} bytes)", end='', flush=True)
+                    if total_size > 0:
+                        print()
             return
         except requests.exceptions.RequestException as e:
             last_err = e
@@ -99,11 +122,12 @@ def download_jsut_dataset():
     # JSUT download URLs (multiple mirrors)
     env_url = os.environ.get("JSUT_URL")
     mirror_urls = ([env_url] if env_url else []) + [
-        # Primary download URL (GitHub releases or direct download)
+        # Official JSUT corpus download URL (ver 1.1)
+        "http://ss-takashi.sakura.ne.jp/corpus/jsut_ver1.1.zip",
+        # Alternative mirrors (if primary fails)
+        "https://ss-takashi.sakura.ne.jp/corpus/jsut_ver1.1.zip",
+        # GitHub repository (labels only, not recommended for full dataset)
         "https://github.com/sarulab-speech/jsut-label/archive/refs/heads/master.zip",
-        # Alternative: direct download from research site
-        # Note: JSUT is typically distributed via GitHub or research sites
-        # If direct download URL is not available, users may need to download manually
     ]
     zip_file_path = os.path.join(data_dir, "jsut.zip")
 

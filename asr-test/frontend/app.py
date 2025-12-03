@@ -446,7 +446,9 @@ def download_dataset(dataset_name: str):
 
         # プロキシ設定を適用
         request_proxies = proxies if should_use_proxy(BACKEND_URL) else None
-        response = requests.post(f"{BACKEND_URL}/dataset/download", json={"dataset_name": dataset_name}, timeout=300, proxies=request_proxies)
+        # JSUTの場合はタイムアウトを長めに設定（手動ダウンロードが必要な場合のメッセージ表示のため）
+        timeout = 600 if dataset_name == "jsut" else 300
+        response = requests.post(f"{BACKEND_URL}/dataset/download", json={"dataset_name": dataset_name}, timeout=timeout, proxies=request_proxies)
 
         if response.status_code == 200:
             result = response.json()
@@ -464,7 +466,13 @@ def download_dataset(dataset_name: str):
             try:
                 error_detail = response.json()
                 if "detail" in error_detail:
-                    st.session_state.logs.append(f"❌ ダウンロードエラー詳細:\n{error_detail['detail']}")
+                    error_msg = error_detail['detail']
+                    st.session_state.logs.append(f"❌ ダウンロードエラー詳細:\n{error_msg}")
+                    # JSUTの場合は特別なメッセージを追加
+                    if dataset_name == "jsut" and "manual download" in error_msg.lower():
+                        st.session_state.logs.append("💡 JSUTデータセットは手動ダウンロードが必要です。")
+                        st.session_state.logs.append("   以下のURLからjsut_ver1.1.zipをダウンロードしてください:")
+                        st.session_state.logs.append("   https://sites.google.com/site/shinnosuketakamichi/research-topics/jsut_corpus")
                 else:
                     st.session_state.logs.append(f"❌ ダウンロードエラー: {response.text}")
             except:
