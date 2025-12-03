@@ -90,6 +90,7 @@ if [ -n "${GIT_ROOT}" ] && [ -f "${GIT_ROOT}/.gitignore" ]; then
       --exclude='__pycache__/' \
       --exclude='models/' \
       --exclude='data/' \
+      --exclude='checkpoints/' \
       asr-test/ ${SSH_HOST}:/home/students/r03i/r03i18/asr-test/asr/asr-test
     cd "${CURRENT_DIR}"
 else
@@ -99,6 +100,7 @@ else
       --exclude='__pycache__/' \
       --exclude='models/' \
       --exclude='data/' \
+      --exclude='checkpoints/' \
       ./ ${SSH_HOST}:/home/students/r03i/r03i18/asr-test/asr/asr-test
 fi
 
