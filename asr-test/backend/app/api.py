@@ -1,5 +1,6 @@
 from fastapi import APIRouter, BackgroundTasks, UploadFile, File, HTTPException
-from typing import Dict
+from fastapi.responses import FileResponse, StreamingResponse
+from typing import Dict, List
 import logging
 import os
 import tarfile
@@ -12,6 +13,8 @@ import time
 import tempfile
 import shutil
 import traceback
+import zipfile
+import io
 
 from . import trainer, config_loader
 from .models.interface import BaseASRModel
@@ -468,13 +471,45 @@ def get_models():
                     # モデル名からエポック情報を抽出
                     model_name = model_path.name
                     epoch_info = None
+                    dataset_info = None
+                    # パターン: {model_name}-{dataset_name}-epoch-{epoch}.pt
                     if "-epoch-" in model_name:
                         try:
-                            epoch_part = model_name.split("-epoch-")[1]
-                            if epoch_part.endswith(".pt"):
-                                epoch_info = epoch_part[:-3]  # .ptを除去
-                        except:
-                            pass
+                            parts = model_name.split("-")
+                            if len(parts) >= 4:
+                                # エポック部分を抽出（parts[3]が"10.pt"の形式）
+                                epoch_part = parts[3].replace(".pt", "")
+                                epoch_info = epoch_part
+                                # データセット名を抽出（parts[1]）
+                                dataset_info = parts[1]
+                        except (ValueError, IndexError):
+                            # パースに失敗した場合はフォールバック
+                            try:
+                                epoch_part = model_name.split("-epoch-")[1]
+                                if epoch_part.endswith(".pt"):
+                                    epoch_info = epoch_part[:-3]  # .ptを除去
+                                elif epoch_part:
+                                    epoch_info = epoch_part
+                            except:
+                                pass
+                    
+                    # 学習メタデータを読み込む
+                    metadata_file = model_path / "training_metadata.json"
+                    training_metadata = None
+                    if metadata_file.exists():
+                        try:
+                            import json
+                            with open(metadata_file, 'r', encoding='utf-8') as f:
+                                training_metadata = json.load(f)
+                        except Exception as e:
+                            logger.warning(f"Failed to load training metadata from {metadata_file}: {e}")
+                    
+                    # メタデータから情報を取得（フォールバックとしてファイル名から抽出した情報を使用）
+                    if training_metadata:
+                        dataset_info = training_metadata.get("dataset_name", dataset_info)
+                        epoch_info = training_metadata.get("current_epoch", epoch_info)
+                        if isinstance(epoch_info, int):
+                            epoch_info = str(epoch_info)
                     
                     # ファイルサイズを計算
                     total_size = sum(f.stat().st_size for f in model_files if f.is_file())
@@ -483,15 +518,30 @@ def get_models():
                     # 作成日時を取得
                     created_time = model_path.stat().st_ctime
                     
-                    models.append({
+                    model_data = {
                         "name": model_name,
                         "path": str(model_path),
                         "epoch": epoch_info,
+                        "dataset_name": dataset_info,
                         "size_mb": round(size_mb, 2),
                         "file_count": len(model_files),
                         "created_at": created_time,
                         "files": [f.name for f in model_files if f.is_file()]
-                    })
+                    }
+                    
+                    # メタデータがある場合は追加情報を設定
+                    if training_metadata:
+                        model_data["training_metadata"] = training_metadata
+                        # 学習開始・終了時刻
+                        if "training_start_time" in training_metadata:
+                            model_data["training_start_time"] = training_metadata["training_start_time"]
+                        if "training_end_time" in training_metadata:
+                            model_data["training_end_time"] = training_metadata["training_end_time"]
+                        # 学習パラメータ
+                        if "training_params" in training_metadata:
+                            model_data["training_params"] = training_metadata["training_params"]
+                    
+                    models.append(model_data)
         
         # 作成日時でソート（新しい順）
         models.sort(key=lambda x: x["created_at"], reverse=True)

@@ -6,7 +6,9 @@ import re
 import glob
 import logging
 import math
+import json
 from typing import Dict
+from datetime import datetime
 
 from .websocket import manager as websocket_manager
 from .state import training_status
@@ -75,7 +77,7 @@ def get_latest_checkpoint(model_name: str, dataset_name: str, checkpoints_dir: s
     # エポック番号でソートして最新を返す
     return max(all_checkpoints, key=lambda p: int(re.search(r"epoch-(\d+)", p).group(1)))
 
-def save_checkpoint(model, optimizer, epoch, model_name, dataset_name, scheduler=None, checkpoints_dir="./checkpoints"):
+def save_checkpoint(model, optimizer, epoch, model_name, dataset_name, scheduler=None, checkpoints_dir="./checkpoints", training_metadata=None):
     if not os.path.exists(checkpoints_dir):
         os.makedirs(checkpoints_dir)
     
@@ -93,6 +95,12 @@ def save_checkpoint(model, optimizer, epoch, model_name, dataset_name, scheduler
             'base_lr': scheduler.base_lr
         }
         torch.save(scheduler_data, os.path.join(checkpoint_dir, "scheduler.pt"))
+    
+    # 学習メタデータを保存
+    if training_metadata is not None:
+        metadata_file = os.path.join(checkpoint_dir, "training_metadata.json")
+        with open(metadata_file, 'w', encoding='utf-8') as f:
+            json.dump(training_metadata, f, ensure_ascii=False, indent=2)
     
     # 最新チェックポイントへのシンボリックリンクを作成
     latest_dir = os.path.join(checkpoints_dir, f"{model_name}-{dataset_name}-latest")
@@ -191,6 +199,26 @@ def start_training(params: Dict):
         model_config = config_loader.get_model_config(model_name)
         dataset_config = config_loader.get_dataset_config(dataset_name)
         training_config = config_loader.get_training_config()
+        
+        # 学習メタデータを作成
+        training_start_time = datetime.now().isoformat()
+        training_metadata = {
+            "model_name": model_name,
+            "dataset_name": dataset_name,
+            "training_start_time": training_start_time,
+            "training_params": {
+                "epochs": epochs,
+                "batch_size": batch_size,
+                "learning_rate": training_config.get('learning_rate'),
+                "optimizer": training_config.get('optimizer'),
+                "scheduler": training_config.get('scheduler'),
+                "warmup_steps": training_config.get('warmup_steps'),
+                "device": device
+            },
+            "model_config": model_config,
+            "dataset_config": dataset_config,
+            "training_config": training_config
+        }
         
         # フロントエンドから送信されたパラメータで設定を上書き
         training_config['num_epochs'] = epochs
@@ -365,13 +393,24 @@ def start_training(params: Dict):
             websocket_manager.broadcast_sync({"type": "log", "payload": {"level": "INFO", "message": val_message}})
 
             if (epoch + 1) % training_config.get("checkpoint_interval", 1) == 0:
-                save_checkpoint(model, optimizer, epoch + 1, model_name, dataset_name, scheduler)
+                # メタデータを更新
+                training_metadata["current_epoch"] = epoch + 1
+                training_metadata["last_checkpoint_time"] = datetime.now().isoformat()
+                save_checkpoint(model, optimizer, epoch + 1, model_name, dataset_name, scheduler, training_metadata=training_metadata)
 
         if training_was_stopped:
-            save_checkpoint(model, optimizer, epoch, model_name, dataset_name, scheduler) # 停止時も保存
+            # メタデータを更新
+            training_metadata["current_epoch"] = epoch
+            training_metadata["training_end_time"] = datetime.now().isoformat()
+            training_metadata["training_status"] = "stopped"
+            save_checkpoint(model, optimizer, epoch, model_name, dataset_name, scheduler, training_metadata=training_metadata) # 停止時も保存
             logger.info("学習がユーザーによって停止されました。")
             websocket_manager.broadcast_sync({"type": "status", "payload": {"status": "stopped", "message": "学習がユーザーによって停止されました。"}})
         else:
+            # メタデータを更新
+            training_metadata["current_epoch"] = num_epochs
+            training_metadata["training_end_time"] = datetime.now().isoformat()
+            training_metadata["training_status"] = "completed"
             logger.info("学習が正常に完了しました。")
             websocket_manager.broadcast_sync({"type": "status", "payload": {"status": "completed", "message": "学習が正常に完了しました。"}})
 

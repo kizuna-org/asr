@@ -1167,6 +1167,7 @@ elif current_page == "model_management":
             model_data.append({
                 "名前": model["name"],
                 "エポック": model["epoch"] or "不明",
+                "データセット": model.get("dataset_name") or "不明",
                 "サイズ": f"{model['size_mb']:.1f} MB",
                 "ファイル数": model["file_count"],
                 "作成日時": format_timestamp(model["created_at"])
@@ -1193,6 +1194,7 @@ elif current_page == "model_management":
                     st.write("**基本情報:**")
                     st.write(f"- 名前: {selected_model_info['name']}")
                     st.write(f"- エポック: {selected_model_info['epoch'] or '不明'}")
+                    st.write(f"- データセット: {selected_model_info.get('dataset_name') or '不明'}")
                     st.write(f"- サイズ: {selected_model_info['size_mb']:.1f} MB")
                 
                 with col_detail2:
@@ -1200,8 +1202,49 @@ elif current_page == "model_management":
                     st.write(f"- ファイル数: {selected_model_info['file_count']}")
                     st.write(f"- 作成日時: {format_timestamp(selected_model_info['created_at'])}")
                 
+                # 学習メタデータの表示
+                if selected_model_info.get("training_metadata"):
+                    st.markdown("---")
+                    st.subheader("📊 学習詳細情報")
+                    metadata = selected_model_info["training_metadata"]
+                    
+                    col_meta1, col_meta2 = st.columns(2)
+                    
+                    with col_meta1:
+                        st.write("**学習パラメータ:**")
+                        if metadata.get("training_params"):
+                            params = metadata["training_params"]
+                            st.write(f"- エポック数: {params.get('epochs', '不明')}")
+                            st.write(f"- バッチサイズ: {params.get('batch_size', '不明')}")
+                            st.write(f"- 学習率: {params.get('learning_rate', '不明')}")
+                            st.write(f"- オプティマイザ: {params.get('optimizer', '不明')}")
+                            st.write(f"- スケジューラ: {params.get('scheduler', 'なし')}")
+                            st.write(f"- デバイス: {params.get('device', '不明')}")
+                    
+                    with col_meta2:
+                        st.write("**学習時間:**")
+                        if selected_model_info.get("training_start_time"):
+                            st.write(f"- 開始時刻: {selected_model_info['training_start_time']}")
+                        if selected_model_info.get("training_end_time"):
+                            st.write(f"- 終了時刻: {selected_model_info['training_end_time']}")
+                        if metadata.get("training_status"):
+                            st.write(f"- 状態: {metadata['training_status']}")
+                    
+                    # データセット設定の表示
+                    if metadata.get("dataset_config"):
+                        st.markdown("---")
+                        st.write("**データセット設定:**")
+                        dataset_config = metadata["dataset_config"]
+                        st.json(dataset_config)
+                    
+                    # モデル設定の表示（折りたたみ可能）
+                    if metadata.get("model_config"):
+                        with st.expander("**モデル設定を表示**"):
+                            st.json(metadata["model_config"])
+                
                 # ファイル一覧
                 if selected_model_info.get("files"):
+                    st.markdown("---")
                     st.write("**ファイル一覧:**")
                     for file in selected_model_info["files"]:
                         st.write(f"- {file}")
