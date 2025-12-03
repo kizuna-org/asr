@@ -17,11 +17,10 @@ class JSUTDataset(BaseASRDataset):
         ├── basic5000/
         │   ├── wav/
         │   │   └── *.wav
-        │   └── lab/
-        │       └── *.lab
+        │   └── transcript_utf8.txt  (ファイルIDとテキストの対応)
         ├── onomatopee300/
         │   ├── wav/
-        │   └── lab/
+        │   └── transcript_utf8.txt
         └── ...
     """
 
@@ -83,67 +82,70 @@ class JSUTDataset(BaseASRDataset):
                 continue
 
             wav_dir = os.path.join(subdir_path, "wav")
-            lab_dir = os.path.join(subdir_path, "lab")
+            transcript_path = os.path.join(subdir_path, "transcript_utf8.txt")
 
-            # wav/labディレクトリが存在しない場合、別の構造を試す
+            # wavディレクトリの確認
             if not os.path.isdir(wav_dir):
-                # 直接wavファイルがsubdirにある可能性
-                wav_files_direct = list(Path(subdir_path).glob("*.wav"))
-                if wav_files_direct:
-                    print(f"Debug: Found {len(wav_files_direct)} wav files directly in {subdir_path}")
-                    # 直接wavファイルがある場合、labファイルも同じ場所にある可能性
-                    lab_dir = subdir_path
-                    wav_dir = subdir_path
-                else:
-                    print(f"Warning: wav directory not found: {wav_dir}, skipping...")
-                    print(f"  Contents of {subdir_path}: {list(Path(subdir_path).iterdir())}")
-                    continue
+                print(f"Warning: wav directory not found: {wav_dir}, skipping...")
+                print(f"  Contents of {subdir_path}: {list(Path(subdir_path).iterdir())}")
+                continue
 
-            if not os.path.isdir(lab_dir):
-                # labディレクトリがなくても、同じディレクトリにlabファイルがある可能性
-                lab_files_direct = list(Path(subdir_path).glob("*.lab"))
-                if lab_files_direct:
-                    print(f"Debug: Found {len(lab_files_direct)} lab files in {subdir_path}")
-                    lab_dir = subdir_path
-                else:
-                    print(f"Warning: lab directory not found: {lab_dir}, skipping...")
-                    continue
+            # transcript_utf8.txtの確認
+            if not os.path.exists(transcript_path):
+                print(f"Warning: transcript_utf8.txt not found: {transcript_path}, skipping...")
+                continue
+
+            # transcript_utf8.txtからテキストを読み込む
+            # 形式: 各行に "ファイルID: テキスト" または "ファイルID\tテキスト" など
+            transcript_dict = {}
+            try:
+                with open(transcript_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line:
+                            continue
+                        # コロンまたはタブで分割を試す
+                        if ':' in line:
+                            parts = line.split(':', 1)
+                        elif '\t' in line:
+                            parts = line.split('\t', 1)
+                        else:
+                            # スペースで分割（最初の部分がファイルID、残りがテキスト）
+                            parts = line.split(None, 1)
+                        
+                        if len(parts) >= 2:
+                            file_id = parts[0].strip()
+                            text = parts[1].strip()
+                            transcript_dict[file_id] = text
+                        else:
+                            # 形式が異なる場合、行全体をテキストとして扱う
+                            print(f"Warning: Unexpected transcript format: {line}")
+            except Exception as e:
+                print(f"Warning: Failed to read transcript file {transcript_path}: {e}")
+                continue
 
             # wavファイルを取得
             wav_files = sorted(Path(wav_dir).glob("*.wav"))
             print(f"Debug: Found {len(wav_files)} wav files in {wav_dir}")
+            print(f"Debug: Found {len(transcript_dict)} entries in transcript_utf8.txt")
             
             if len(wav_files) == 0:
                 print(f"Warning: No wav files found in {wav_dir}")
                 continue
 
+            # wavファイルとtranscriptを対応付ける
             for wav_path in wav_files:
-                # 対応するlabファイルを探す
-                lab_path = Path(lab_dir) / f"{wav_path.stem}.lab"
-                if not lab_path.exists():
-                    # 拡張子が異なる場合もあるので、別のパターンも試す
-                    lab_path = Path(lab_dir) / f"{wav_path.name.replace('.wav', '.lab')}"
-                    if not lab_path.exists():
-                        # ファイル名が完全に一致しない場合、最初のlabファイルを使用（最後の手段）
-                        all_labs = list(Path(lab_dir).glob("*.lab"))
-                        if len(all_labs) == len(wav_files):
-                            # 数が一致する場合、順序で対応付ける
-                            idx = wav_files.index(wav_path)
-                            if idx < len(all_labs):
-                                lab_path = all_labs[idx]
-                            else:
-                                continue
-                        else:
-                            continue
-
-                # labファイルからテキストを読み込む
-                try:
-                    with open(lab_path, "r", encoding="utf-8") as f:
-                        text = f.read().strip()
+                # ファイル名（拡張子なし）をキーとして使用
+                file_id = wav_path.stem
+                
+                # transcriptからテキストを取得
+                if file_id in transcript_dict:
+                    text = transcript_dict[file_id]
                     if text:
                         entries.append((str(wav_path), text))
-                except Exception as e:
-                    print(f"Warning: Failed to read lab file {lab_path}: {e}")
+                else:
+                    # ファイルIDが見つからない場合、警告を出すがスキップ
+                    print(f"Warning: No transcript found for {file_id} in {transcript_path}")
                     continue
 
         if len(entries) == 0:
