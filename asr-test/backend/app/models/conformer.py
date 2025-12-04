@@ -4,6 +4,7 @@ from transformers import Wav2Vec2Processor, Wav2Vec2ForCTC
 from typing import Dict, Any, List
 import logging
 import traceback
+import os
 
 from .interface import BaseASRModel
 
@@ -104,18 +105,77 @@ class ConformerASRModel(BaseASRModel):
             logits = self.model(input_values).logits
             predicted_ids = torch.argmax(logits, dim=-1)
             
-            logger.debug("Model forward pass completed", 
+            logger.info("Model forward pass completed", 
                         extra={"extra_fields": {"component": "model", "action": "forward_pass", 
                                               "logits_shape": logits.shape, "predicted_ids_shape": predicted_ids.shape}})
             
+            # デバッグ: predicted_idsの内容を確認
+            predicted_ids_list = predicted_ids.squeeze().tolist() if predicted_ids.dim() > 1 else predicted_ids.tolist()
+            logger.info(f"Predicted IDs before filtering: {predicted_ids_list}", 
+                        extra={"extra_fields": {"component": "model", "action": "predicted_ids_before_filter", 
+                                              "predicted_ids": predicted_ids_list, 
+                                              "pad_token_id": self.processor.tokenizer.pad_token_id,
+                                              "vocab_size": len(self.processor.tokenizer)}})
+            
             # 空のトークンを除去
-            predicted_ids = predicted_ids[predicted_ids != self.processor.tokenizer.pad_token_id]
-            if len(predicted_ids) == 0:
-                logger.debug("No valid tokens found", 
-                            extra={"extra_fields": {"component": "model", "action": "no_valid_tokens"}})
+            pad_token_id = self.processor.tokenizer.pad_token_id
+            if pad_token_id is None:
+                pad_token_id = -100  # デフォルト値
+            
+            # predicted_idsを1次元に変換
+            if predicted_ids.dim() > 1:
+                predicted_ids = predicted_ids.squeeze()
+            
+            # CTCのblank tokenを取得（通常は0）
+            ctc_blank_token_id = 0
+            if hasattr(self.processor.tokenizer, 'pad_token_id') and self.processor.tokenizer.pad_token_id is not None:
+                # pad_token_idが0の場合は、vocabの最初のトークンがblank tokenの可能性がある
+                pass
+            
+            # pad_token_id、-100、blank token (0)を除去
+            mask = (predicted_ids != pad_token_id) & (predicted_ids != -100) & (predicted_ids != ctc_blank_token_id)
+            filtered_ids = predicted_ids[mask]
+            
+            logger.info(f"Predicted IDs after filtering: {filtered_ids.tolist()}", 
+                        extra={"extra_fields": {"component": "model", "action": "predicted_ids_after_filter", 
+                                              "predicted_ids": filtered_ids.tolist(), 
+                                              "count": len(filtered_ids),
+                                              "original_count": len(predicted_ids),
+                                              "pad_token_id": pad_token_id,
+                                              "blank_token_id": ctc_blank_token_id}})
+            
+            if len(filtered_ids) == 0:
+                logger.warning("No valid tokens found after filtering", 
+                            extra={"extra_fields": {"component": "model", "action": "no_valid_tokens", 
+                                                  "original_predicted_ids": predicted_ids_list,
+                                                  "logits_max": logits.max().item(),
+                                                  "logits_min": logits.min().item(),
+                                                  "unique_tokens": torch.unique(predicted_ids).tolist()}})
+                return ""
+            
+            # CTCの重複除去（連続する同じトークンを除去）
+            decoded_ids = []
+            prev_id = None
+            for token_id in filtered_ids:
+                token_id_item = token_id.item() if isinstance(token_id, torch.Tensor) else token_id
+                if token_id_item != prev_id:
+                    decoded_ids.append(token_id_item)
+                prev_id = token_id_item
+            
+            logger.info(f"Predicted IDs after CTC decoding: {decoded_ids}", 
+                        extra={"extra_fields": {"component": "model", "action": "ctc_decoded", 
+                                              "decoded_ids": decoded_ids}})
+            
+            if len(decoded_ids) == 0:
+                logger.warning("No tokens after CTC decoding", 
+                            extra={"extra_fields": {"component": "model", "action": "no_tokens_after_ctc"}})
                 return ""
                 
-            transcription = self.processor.batch_decode(predicted_ids.unsqueeze(0))[0]
+            transcription = self.processor.batch_decode(torch.tensor([decoded_ids]))[0]
+            
+            logger.info(f"Decoded transcription: {transcription}", 
+                        extra={"extra_fields": {"component": "model", "action": "decoded_transcription", 
+                                              "transcription": transcription}})
             
             logger.info("Inference completed successfully", 
                        extra={"extra_fields": {"component": "model", "action": "inference_complete", 
@@ -135,9 +195,37 @@ class ConformerASRModel(BaseASRModel):
 
     def load_checkpoint(self, path: str, optimizer: torch.optim.Optimizer = None):
         """Hugging Faceモデルの読み込み形式に合わせる"""
-        self.model = Wav2Vec2ForCTC.from_pretrained(path)
-        self.processor = Wav2Vec2Processor.from_pretrained(path)
+        logger.info(f"Loading checkpoint from path: {path}", 
+                   extra={"extra_fields": {"component": "model", "action": "load_checkpoint", "path": path}})
+        
+        # パスが存在するか確認
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Checkpoint path does not exist: {path}")
+        
+        # ディレクトリ内のファイルを確認
+        if os.path.isdir(path):
+            files = os.listdir(path)
+            logger.debug(f"Checkpoint directory contents: {files}", 
+                        extra={"extra_fields": {"component": "model", "action": "checkpoint_dir_contents", 
+                                              "path": path, "files": files}})
+        
         try:
-            return super().load_checkpoint(f"{path}/optimizer.pt", optimizer)
-        except FileNotFoundError:
-            return 0
+            self.model = Wav2Vec2ForCTC.from_pretrained(path)
+            logger.info(f"Model loaded successfully from {path}", 
+                       extra={"extra_fields": {"component": "model", "action": "model_loaded", "path": path}})
+            
+            self.processor = Wav2Vec2Processor.from_pretrained(path)
+            logger.info(f"Processor loaded successfully from {path}", 
+                       extra={"extra_fields": {"component": "model", "action": "processor_loaded", "path": path}})
+            
+            try:
+                return super().load_checkpoint(f"{path}/optimizer.pt", optimizer)
+            except FileNotFoundError:
+                logger.debug(f"Optimizer checkpoint not found, skipping", 
+                            extra={"extra_fields": {"component": "model", "action": "optimizer_not_found", "path": path}})
+                return 0
+        except Exception as e:
+            logger.error(f"Error loading checkpoint from {path}: {e}", 
+                        extra={"extra_fields": {"component": "model", "action": "load_checkpoint_error", 
+                                              "path": path, "error": str(e), "traceback": traceback.format_exc()}})
+            raise

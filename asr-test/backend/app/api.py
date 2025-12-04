@@ -27,14 +27,22 @@ logger = logging.getLogger("asr-api")
 # ログ出力の改善
 logger.info("API router initialized", extra={"extra_fields": {"component": "api", "action": "init"}})
 
-def get_model_for_inference(model_name: str) -> BaseASRModel:
-    """推論用のモデルをロードまたはキャッシュから取得する"""
-    logger.info(f"Getting model for inference: {model_name}", 
-                extra={"extra_fields": {"component": "api", "action": "get_model", "model_name": model_name}})
+def get_model_for_inference(model_name: str, dataset_name: str = None) -> BaseASRModel:
+    """推論用のモデルをロードまたはキャッシュから取得する
     
-    if model_name not in _model_cache:
+    Args:
+        model_name: モデル名（例: "conformer"）
+        dataset_name: データセット名（例: "ljspeech", "jsut"）。Noneの場合は利用可能なデータセットを試す
+    """
+    # キャッシュキーは(model_name, dataset_name)のタプル
+    cache_key = (model_name, dataset_name)
+    
+    logger.info(f"Getting model for inference: {model_name}, dataset: {dataset_name}", 
+                extra={"extra_fields": {"component": "api", "action": "get_model", "model_name": model_name, "dataset_name": dataset_name}})
+    
+    if cache_key not in _model_cache:
         logger.info(f"Model {model_name} not in cache, loading from config", 
-                   extra={"extra_fields": {"component": "api", "action": "load_model", "model_name": model_name}})
+                   extra={"extra_fields": {"component": "api", "action": "load_model", "model_name": model_name, "dataset_name": dataset_name}})
         
         model_config = config_loader.get_model_config(model_name)
         if not model_config:
@@ -53,35 +61,56 @@ def get_model_for_inference(model_name: str) -> BaseASRModel:
         
         # 最新のチェックポイントをロードするロジック
         from .trainer import get_latest_checkpoint
-        latest_checkpoint_path = get_latest_checkpoint(model_name, "ljspeech")
+        
+        # データセット名が指定されている場合はそのデータセットのチェックポイントを探す
+        # 指定されていない場合は利用可能なデータセットを試す
+        latest_checkpoint_path = None
+        found_dataset = None
+        
+        if dataset_name:
+            # 指定されたデータセットのチェックポイントを探す
+            latest_checkpoint_path = get_latest_checkpoint(model_name, dataset_name)
+            if latest_checkpoint_path:
+                found_dataset = dataset_name
+        else:
+            # 利用可能なデータセットを試す（ljspeech, jsutの順）
+            config = config_loader.load_config()
+            available_datasets = config.get("available_datasets", ["ljspeech", "jsut"])
+            for ds_name in available_datasets:
+                checkpoint_path = get_latest_checkpoint(model_name, ds_name)
+                if checkpoint_path:
+                    latest_checkpoint_path = checkpoint_path
+                    found_dataset = ds_name
+                    break
+        
         if latest_checkpoint_path:
             logger.info(f"Loading checkpoint: {latest_checkpoint_path}", 
                        extra={"extra_fields": {"component": "api", "action": "load_checkpoint", 
-                                             "model_name": model_name, "checkpoint_path": latest_checkpoint_path}})
+                                             "model_name": model_name, "dataset_name": found_dataset, "checkpoint_path": latest_checkpoint_path}})
             try:
                 model.load_checkpoint(latest_checkpoint_path)
                 logger.info(f"Checkpoint loaded successfully", 
                            extra={"extra_fields": {"component": "api", "action": "checkpoint_loaded", 
-                                                 "model_name": model_name}})
+                                                 "model_name": model_name, "dataset_name": found_dataset}})
             except Exception as e:
                 logger.warning(f"Failed to load checkpoint: {e}", 
                               extra={"extra_fields": {"component": "api", "action": "checkpoint_load_failed", 
-                                                    "model_name": model_name, "error": str(e)}})
+                                                    "model_name": model_name, "dataset_name": found_dataset, "error": str(e)}})
         else:
-            logger.info(f"No checkpoint found for model: {model_name}", 
+            logger.info(f"No checkpoint found for model: {model_name}, dataset: {dataset_name}", 
                        extra={"extra_fields": {"component": "api", "action": "no_checkpoint", 
-                                             "model_name": model_name}})
+                                             "model_name": model_name, "dataset_name": dataset_name}})
         
         model.eval() # 推論モード
-        _model_cache[model_name] = model
+        _model_cache[cache_key] = model
         
         logger.info(f"Model {model_name} loaded and cached successfully", 
-                   extra={"extra_fields": {"component": "api", "action": "model_cached", "model_name": model_name}})
+                   extra={"extra_fields": {"component": "api", "action": "model_cached", "model_name": model_name, "dataset_name": found_dataset}})
     else:
-        logger.debug(f"Using cached model: {model_name}", 
-                    extra={"extra_fields": {"component": "api", "action": "use_cached_model", "model_name": model_name}})
+        logger.debug(f"Using cached model: {model_name}, dataset: {dataset_name}", 
+                    extra={"extra_fields": {"component": "api", "action": "use_cached_model", "model_name": model_name, "dataset_name": dataset_name}})
     
-    return _model_cache[model_name]
+    return _model_cache[cache_key]
 
 @router.post("/train/start", summary="学習開始")
 def start_training(params: Dict, background_tasks: BackgroundTasks):
@@ -199,19 +228,20 @@ def stop_training():
     return {"message": "Stop signal sent to training process."}
 
 @router.post("/inference", summary="音声ファイルによる推論")
-async def inference(file: UploadFile = File(...), model_name: str = "conformer", checkpoint_path: str = None):
+async def inference(file: UploadFile = File(...), model_name: str = "conformer", checkpoint_path: str = None, dataset_name: str = None):
     """アップロードされた音声ファイルで推論を実行する
     
     Args:
         file: 音声ファイル
         model_name: モデル名（例: "conformer"）
         checkpoint_path: 特定のチェックポイントパス（オプション、指定しない場合は最新のチェックポイントを使用）
+        dataset_name: データセット名（例: "ljspeech", "jsut"）。オプション、指定しない場合は利用可能なデータセットを試す
     """
     # 音声入力開始時刻（APIリクエスト受信時点）
     input_start_time = time.time()
     
     logger.info(f"Starting inference request", 
-                extra={"extra_fields": {"component": "api", "action": "inference_start", "model_name": model_name, "filename": file.filename, "checkpoint_path": checkpoint_path}})
+                extra={"extra_fields": {"component": "api", "action": "inference_start", "model_name": model_name, "dataset_name": dataset_name, "filename": file.filename, "checkpoint_path": checkpoint_path}})
     
     try:
         # モデルを取得
@@ -226,16 +256,30 @@ async def inference(file: UploadFile = File(...), model_name: str = "conformer",
             model = ModelClass(model_config)
             
             # 指定されたチェックポイントをロード
+            # シンボリックリンクの解決
+            resolved_path = os.path.realpath(checkpoint_path) if os.path.exists(checkpoint_path) else checkpoint_path
             if os.path.exists(checkpoint_path):
-                logger.info(f"Loading checkpoint: {checkpoint_path}")
-                model.load_checkpoint(checkpoint_path)
+                logger.info(f"Loading checkpoint: {checkpoint_path} (resolved: {resolved_path})", 
+                           extra={"extra_fields": {"component": "api", "action": "load_checkpoint_start", 
+                                                 "checkpoint_path": checkpoint_path, "resolved_path": resolved_path}})
+                try:
+                    model.load_checkpoint(resolved_path)
+                    logger.info(f"Checkpoint loaded successfully", 
+                               extra={"extra_fields": {"component": "api", "action": "checkpoint_loaded", 
+                                                     "checkpoint_path": resolved_path}})
+                except Exception as e:
+                    logger.error(f"Failed to load checkpoint: {e}", 
+                                extra={"extra_fields": {"component": "api", "action": "checkpoint_load_error", 
+                                                      "checkpoint_path": resolved_path, "error": str(e), 
+                                                      "traceback": traceback.format_exc()}})
+                    raise HTTPException(status_code=500, detail=f"Failed to load checkpoint: {str(e)}")
             else:
                 raise HTTPException(status_code=404, detail=f"Checkpoint not found: {checkpoint_path}")
             
             model.eval()
         else:
             # デフォルトの動作（最新のチェックポイントを使用）
-            model = get_model_for_inference(model_name)
+            model = get_model_for_inference(model_name, dataset_name)
 
         # 音声ファイルを一時ファイルに保存してから読み込み（バックエンド間の互換性向上）
         with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{file.filename}") as tmp:

@@ -124,7 +124,7 @@ def init_session_state():
             st.session_state[key] = value
 
 # --- 推論API呼び出し ---
-def run_inference(file_bytes: bytes, filename: str, model_name: str, checkpoint_path: str = None) -> Dict[str, Any]:
+def run_inference(file_bytes: bytes, filename: str, model_name: str, checkpoint_path: str = None, dataset_name: str = None) -> Dict[str, Any]:
     """音声ファイルをアップロードして推論を実行し、結果と3種類の時間(ms)を返す"""
     try:
         import time
@@ -136,6 +136,8 @@ def run_inference(file_bytes: bytes, filename: str, model_name: str, checkpoint_
         params = {"model_name": model_name} if model_name else {}
         if checkpoint_path:
             params["checkpoint_path"] = checkpoint_path
+        if dataset_name:
+            params["dataset_name"] = dataset_name
         start_time = time.perf_counter()
         response = requests.post(
             f"{BACKEND_URL}/inference",
@@ -1563,7 +1565,15 @@ elif current_page == "model_management":
                             # モデル情報のpathはチェックポイントディレクトリのパス
                             checkpoint_path = selected_model_info.get("path")
                             
-                            result = run_inference(uploaded_file.getvalue(), uploaded_file.name, model_name_for_inference, checkpoint_path=checkpoint_path)
+                            # チェックポイント名からデータセット名を抽出（例: "conformer-ljspeech-epoch-10" -> "ljspeech"）
+                            dataset_name_for_inference = None
+                            if "-" in selected_model:
+                                parts = selected_model.split("-")
+                                if len(parts) >= 2:
+                                    # データセット名は通常2番目の部分（例: "conformer-ljspeech-epoch-10"）
+                                    dataset_name_for_inference = parts[1]
+                            
+                            result = run_inference(uploaded_file.getvalue(), uploaded_file.name, model_name_for_inference, checkpoint_path=checkpoint_path, dataset_name=dataset_name_for_inference)
                             transcription = result.get("transcription", "")
                             first_token_ms = result.get("first_token_time_ms")
                             inference_ms = result.get("inference_time_ms")
