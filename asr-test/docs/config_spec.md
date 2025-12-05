@@ -1,0 +1,152 @@
+# 設定ファイル仕様書 (config.yaml)
+
+このドキュメントは、バックエンドアプリケーションの設定ファイル `backend/config.yaml` の構造と各パラメータについて詳述します。実体はコンテナ内の作業ディレクトリ直下（相対パス `config.yaml`、実行時は `/app/config.yaml`）で読み込まれます。
+
+## 概要
+
+この設定ファイルは、ASR学習POCアプリケーションの動作を制御するための主要な設定を定義します。モデル、データセット、学習パラメータなどの設定が含まれています。
+
+## 1. ルートレベル
+
+```yaml
+# 使用可能なモデルとデータセットのリスト
+available_models:
+  - conformer
+  - realtime
+  # - rnn-t  # コメントアウトされたモデル
+
+available_datasets:
+  - ljspeech
+
+# モデルごとの詳細設定
+models:
+  # ... (セクション 2 を参照)
+
+# データセットごとの設定
+datasets:
+  # ... (セクション 3 を参照)
+
+# 学習のグローバル設定
+training:
+  # ... (セクション 4 を参照)
+```
+
+-   `available_models` (list[string], required): API経由で学習を開始できるモデル名のリスト。このリストにないモデルは `POST /api/train/start` で指定できません。現在利用可能: `conformer`, `realtime`
+-   `available_datasets` (list[string], required): API経由で利用できるデータセット名のリスト。
+
+## 2. `models` セクション
+
+各モデルのハイパーパラメータやアーキテクチャに関する設定を記述します。キーはモデル名（`available_models` と一致）です。
+
+```yaml
+models:
+  conformer:
+    # --- アーキテクチャ設定 ---
+    input_dim: 80         # 入力特徴量の次元数 (例: メルスペクトログラムの次元)
+    encoder_dim: 256      # エンコーダの隠れ層の次元数
+    num_encoder_layers: 4 # エンコーダブロックの数
+    num_heads: 4          # Multi-Head Attention のヘッド数
+    kernel_size: 31       # Convolutionモジュールのカーネルサイズ
+    dropout: 0.1          # ドロップアウト率
+    # --- 実装用のHFモデル指定（学習PoCではCTCモデルを流用） ---
+    huggingface_model_name: "facebook/wav2vec2-base-960h"
+
+    # --- トークナイザ設定 ---
+    tokenizer:
+      type: "SentencePiece" # "Character", "Word" など
+      vocab_size: 5000
+      # model_path: "/path/to/tokenizer.model" # SentencePieceモデルのパス（任意）
+
+  # --- リアルタイムモデル設定 ---
+  realtime:
+    # --- アーキテクチャ設定 ---
+    encoder:
+      input_dim: 80 # 入力特徴量の次元数 (メルスペクトログラムの次元)
+      hidden_dim: 256 # エンコーダの隠れ層の次元数
+      num_layers: 3 # エンコーダの層数
+      rnn_type: "GRU" # RNNの種類
+      dropout: 0.1 # ドロップアウト率
+
+    decoder:
+      input_dim: 256 # デコーダの入力次元
+      vocab_size: 1000 # 語彙サイズ
+      blank_token: "_" # 空白トークン
+
+    # --- 処理設定 ---
+    processing:
+      chunk_size_ms: 100 # チャンクサイズ（ミリ秒）
+      sample_rate: 16000 # サンプリングレート
+      feature_type: "mel_spectrogram" # 特徴量の種類
+      n_mels: 80 # メルフィルタバンクの数
+      n_fft: 1024 # FFTのウィンドウサイズ
+      hop_length: 160 # ホップ長
+
+    # --- 最適化設定 ---
+    optimization:
+      precision: "fp16" # 精度（fp16/fp32）
+      batch_size: 1 # バッチサイズ（ストリーミング処理）
+      max_memory_mb: 512 # 最大メモリ使用量（MB）
+```
+
+-   各パラメータは、対応するモデルクラス (`app/models/{model_name}.py`) の `__init__` メソッドで解釈されます。
+-   モデルごとに必要なパラメータは異なります。
+
+## 3. `datasets` セクション
+
+各データセットのパスや前処理に関する設定を記述します。キーはデータセット名（`available_datasets` と一致）です。
+
+```yaml
+datasets:
+  ljspeech:
+    # --- データパス ---
+    path: "/app/data/ljspeech" # Dockerコンテナ内のデータセットルートパス（composeで ./data を /app/data にマウント）
+
+    # --- 音声前処理設定 ---
+    sample_rate: 22050    # リサンプリングするサンプルレート
+    n_fft: 1024           # STFTのウィンドウサイズ
+    win_length: 1024      # STFTのウィンドウ長
+    hop_length: 256       # STFTのホップ長
+    n_mels: 80            # 生成するメルフィルタバンクの数
+    f_min: 0              # メルスペクトログラムの最小周波数
+    f_max: 8000           # メルスペクトログラムの最大周波数
+
+    # --- テキスト前処理 ---
+    text_cleaners: ['english_cleaners'] # 適用するテキストクリーナーのリスト
+```
+
+-   `path`: データセットのファイルが格納されているディレクトリへのパス。
+-   音声前処理設定は、`torchaudio` や `librosa` を使ってメルスペクトログラムを計算する際に使用されます。
+-   `text_cleaners`: テキストを正規化するためのクリーナー関数の名前。
+
+## 4. `training` セクション
+
+学習プロセス全体に適用されるグローバルな設定を記述します。
+
+```yaml
+training:
+  # --- オプティマイザ設定 ---
+  optimizer: "AdamW"      # 使用するオプティマイザ名 (torch.optim内のクラス名)
+  learning_rate: 0.001    # 学習率
+  weight_decay: 0.01      # AdamWのweight decay
+  betas: [0.9, 0.98]      # Adam/AdamWのbetaパラメータ
+  eps: 1.0e-9             # Adam/AdamWのepsilon
+
+  # --- スケジューラ設定 ---
+  scheduler: "WarmupLR"   # 学習率スケジューラの名前 (オプション)
+  warmup_steps: 100       # WarmupLRのウォームアップステップ数
+
+  # --- 学習ループ設定 ---
+  batch_size: 32          # バッチサイズ（APIからのリクエストで上書き可）
+  num_epochs: 100         # 総エポック数（APIからのリクエストで上書き可）
+  grad_clip_thresh: 1.0   # 勾配クリッピングの閾値
+  log_interval: 10        # ログを記録するステップ間隔 (steps)
+  checkpoint_interval: 1  # チェックポイントを保存する間隔 (epochs)
+
+  # --- 学習再開設定 ---
+  auto_resume: true       # 学習開始時に自動的に最新のチェックポイントから再開するかどうか
+  checkpoint_retention: 5 # 保持するチェックポイントの数（古いものは自動削除）
+```
+
+-   `optimizer`: `torch.optim` で利用可能なオプティマイザの名前を指定します。
+-   `scheduler`: カスタム実装またはライブラリの学習率スケジューラを指定します。
+-   `checkpoint_interval`: 何エポックごとにチェックポイントを保存するかを指定します。
