@@ -1,0 +1,32 @@
+services:
+  asr-api:
+    image: asr-app # run.sh の `docker build . -t asr-app` でビルドされることを想定
+    command: uvicorn app.main:app --host 0.0.0.0 --port 58081
+    network_mode: "host"
+    volumes:
+      - ./data:/app/data
+      - ./checkpoints:/app/checkpoints
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+
+  frontend:
+    image: asr-frontend # run.sh の `docker build -f frontend/Dockerfile . -t asr-frontend` でビルドされることを想定
+    command: streamlit run app.py --server.port 58080 --server.address 0.0.0.0
+    network_mode: "host"
+    environment:
+      - BACKEND_HOST=localhost
+      - BACKEND_PORT=58081
+      - NO_PROXY=localhost,127.0.0.1
+    depends_on:
+      - asr-api
+
+volumes:
+  data:
+    driver: local
+  checkpoints:
+    driver: local
