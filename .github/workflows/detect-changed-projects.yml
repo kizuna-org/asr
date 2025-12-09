@@ -20,7 +20,7 @@ jobs:
     outputs:
       updated-projects: ${{ steps.extract-projects.outputs.projects }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - name: Generate YAML file for paths-filter
         id: generate-yaml
         uses: mikefarah/yq@7ccaf8e700ce99eb3f0f6cef7f5930a0b3c827cd # v4.49.2
