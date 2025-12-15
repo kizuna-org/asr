@@ -1,0 +1,14 @@
+---
+description:
+globs:
+alwaysApply: true
+---
+
+`./asr-test`はこのホストとは別のSSH先のGPUサーバーで実行されています。
+**ローカル環境ではpythonコマンドをぜったいにたたかないでください。**
+
+ローカルで動かす際には`run-local.sh`を使用してください。pythonなどの実行環境に依存するコマンドは全てコンテナ内で実行してください。
+なお、auto-approveが効かないため、`bash`を使用しないでください。シバンがあるため相対パスで実行して大丈夫です。
+docker-compose コマンドはdocker composeの方を使用してください。これもauto-approveのためです。
+
+**`./asr-test/docs/`にはドキュメントがあります。このドキュメントは必ず読んで参考にしてください。**

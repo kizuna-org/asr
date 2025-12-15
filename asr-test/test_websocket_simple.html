@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>WebSocket Test</title>
+</head>
+<body>
+    <h1>WebSocket Test</h1>
+    <button onclick="testConnection()">Test WebSocket Connection</button>
+    <div id="status">Not connected</div>
+    <div id="messages"></div>
+
+    <script>
+        function testConnection() {
+            console.log("Testing WebSocket connection...");
+            document.getElementById('status').textContent = "Connecting...";
+            
+            const ws = new WebSocket('ws://localhost:58081/ws');
+            
+            ws.onopen = function(event) {
+                console.log("WebSocket connected!");
+                document.getElementById('status').textContent = "Connected!";
+                
+                // Send start message
+                const startMessage = {
+                    type: "start",
+                    model_name: "conformer",
+                    sample_rate: 16000,
+                    format: "i16"
+                };
+                ws.send(JSON.stringify(startMessage));
+                console.log("Start message sent:", startMessage);
+            };
+            
+            ws.onmessage = function(event) {
+                console.log("Message received:", event.data);
+                const messagesDiv = document.getElementById('messages');
+                messagesDiv.innerHTML += "<p>Received: " + event.data + "</p>";
+            };
+            
+            ws.onerror = function(error) {
+                console.error("WebSocket error:", error);
+                document.getElementById('status').textContent = "Error: " + error;
+            };
+            
+            ws.onclose = function(event) {
+                console.log("WebSocket closed:", event.code, event.reason);
+                document.getElementById('status').textContent = "Closed: " + event.code;
+            };
+        }
+    </script>
+</body>
+</html>
+
+
