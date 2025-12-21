@@ -219,7 +219,7 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
-      - uses: checkmarx/kics-github-action@e01759d524f8abd5bd650d3d5bd4b96d46ebbc1d # v2.1.17
+      - uses: checkmarx/kics-github-action@63fca4ca72e56edbb5a599ee756e6af1fdb1e785 # v2.1.18
         with:
           path: .
 
