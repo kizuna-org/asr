@@ -3,3 +3,6 @@
 - name: example
   path: example
   ci-type: python
+- name: manage-dataset
+  path: manage-dataset
+  ci-type: python
