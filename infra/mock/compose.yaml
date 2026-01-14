@@ -1,0 +1,56 @@
+services:
+  dind-host:
+    build:
+      context: ./dind-host
+      dockerfile: Dockerfile
+    ports:
+      - 50022:22
+    privileged: true
+    networks:
+      - mock-network
+    dns:
+      - 172.28.0.40
+
+  frps:
+    image: snowdreamtech/frps:latest@sha256:fb8688b1da7fc2f3cfb70bccab427967c4783dba3018c09f3b2b2dcf6ef5571a
+    volumes:
+      - ./frps/frps/frps.toml:/etc/frp/frps.toml
+      - ./etc/letsencrypt:/etc/letsencrypt:ro
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - 8000:8000
+    networks:
+      mock-network:
+        ipv4_address: 172.28.0.20
+    dns:
+      - 172.28.0.40
+
+  squid:
+    image: ubuntu/squid
+    volumes:
+      - ./squid/squid.conf:/etc/squid/squid.conf
+    networks:
+      mock-network:
+        ipv4_address: 172.28.0.30
+    dns:
+      - 172.28.0.40
+
+  dnsmasq:
+    image: dockurr/dnsmasq
+    container_name: dnsmasq
+    volumes:
+      - ./dnsmasq/dnsmasq.conf:/etc/dnsmasq.conf:ro
+    cap_add:
+      - NET_ADMIN
+    networks:
+      mock-network:
+        ipv4_address: 172.28.0.40
+
+networks:
+  mock-network:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.28.0.0/24

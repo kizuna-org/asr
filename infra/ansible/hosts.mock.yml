@@ -1,18 +1,17 @@
 all:
   vars:
-    ansible_user: r03i18
+    ansible_user: ansible_user
     ansible_python_interpreter: /usr/bin/python3
   children:
     cloud_proxy:
       vars:
-        ansible_user: ansible_user
         ansible_ssh_common_args: -F ./ssh_config
       hosts:
         snct-proxy-srv.shiron.dev:
     edu_gpu:
       vars:
         ansible_ssh_common_args: -F ./ssh_config
-      children:
-        edu_gpu:
-          hosts:
-            edu-gpu:
+      hosts:
+        localhost:
+          ansible_port: 50022
+          ansible_ssh_private_key_file: ../mock/dind-host/dind-host

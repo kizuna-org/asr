@@ -1,0 +1,14 @@
+- name: Copy files
+  copy:
+    src: "{{ playbook_dir }}/../fclient/"
+    dest: "{{ frpclient_dir }}/"
+    mode: "0777"
+  notify: Restart compose
+# - name: Ensure jenkins_home directory exists
+#   file:
+#     path: "{{ frpclient_dir }}/jenkins_home"
+#     state: directory
+#     owner: 3318
+#     group: 513
+#     mode: "0777"
+#   notify: Restart compose
