@@ -1,0 +1,34 @@
+[server]
+# サーバー設定
+port = 8501
+headless = true
+enableCORS = false
+enableXsrfProtection = false
+# 機能ポリシーを設定
+enableWebsocketCompression = false
+
+[browser]
+# ブラウザ設定
+gatherUsageStats = false
+
+[logger]
+# ログ設定
+level = "info"
+
+[client]
+# クライアント設定
+showErrorDetails = false
+# 機能ポリシー関連の警告を抑制
+caching = true
+
+[theme]
+# テーマ設定
+primaryColor = "#FF6B6B"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F0F2F6"
+textColor = "#262730"
+
+[runner]
+# ランナー設定
+magicEnabled = false
+installTracer = false
