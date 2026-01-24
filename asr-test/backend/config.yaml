@@ -1,0 +1,104 @@
+# backend/config.yaml
+
+# 使用可能なモデルとデータセットのリスト
+available_models:
+  - conformer
+  # - rnn-t
+
+available_datasets:
+  - ljspeech
+  - jsut
+
+# モデルごとの詳細設定
+models:
+  conformer:
+    # --- アーキテクチャ設定 ---
+    input_dim: 80 # 入力特徴量の次元数 (例: メルスペクトログラムの次元)
+    encoder_dim: 256 # エンコーダの隠れ層の次元数
+    num_encoder_layers: 4 # エンコーダブロックの数
+    num_heads: 4 # Multi-Head Attention のヘッド数
+    kernel_size: 31 # Convolutionモジュールのカーネルサイズ
+    dropout: 0.1 # ドロップアウト率
+    # --- 実装用のHFモデル指定（学習のPoCではCTCモデルを流用） ---
+    huggingface_model_name: "facebook/wav2vec2-base-960h"
+
+    # --- トークナイザ設定 ---
+    tokenizer:
+      type: "SentencePiece" # "Character", "Word" など
+      vocab_size: 5000
+      # model_path: "/path/to/tokenizer.model" # SentencePieceモデルのパス
+
+# データセットごとの設定
+datasets:
+  ljspeech:
+    # --- データパス ---
+    path: "/app/data/ljspeech" # Dockerコンテナ内のデータセットルートパス
+
+    # --- 音声前処理設定 ---
+    sample_rate: 22050 # リサンプリングするサンプルレート
+    n_fft: 1024 # STFTのウィンドウサイズ
+    win_length: 1024 # STFTのウィンドウ長
+    hop_length: 256 # STFTのホップ長
+    n_mels: 80 # 生成するメルフィルタバンクの数
+    f_min: 0 # メルスペクトログラムの最小周波数
+    f_max: 8000 # メルスペクトログラムの最大周波数
+
+    # --- テキスト前処理 ---
+    text_cleaners: ["english_cleaners"] # 適用するテキストクリーナーのリスト
+
+  jsut:
+    # --- データパス ---
+    path: "/app/data/jsut" # Dockerコンテナ内のデータセットルートパス
+
+    # --- JSUTサブディレクトリ設定 ---
+    subdirs: ["basic5000"] # 使用するJSUTのサブディレクトリ（basic5000, onomatopee300など）
+
+    # --- 音声前処理設定 ---
+    sample_rate: 16000 # リサンプリングするサンプルレート
+    n_fft: 1024 # STFTのウィンドウサイズ
+    win_length: 1024 # STFTのウィンドウ長
+    hop_length: 256 # STFTのホップ長
+    n_mels: 80 # 生成するメルフィルタバンクの数
+    f_min: 0 # メルスペクトログラムの最小周波数
+    f_max: 8000 # メルスペクトログラムの最大周波数
+
+    # --- テキスト前処理 ---
+    # JSUTは日本語なので、テキストクリーナーは必要に応じて設定
+    # text_cleaners: [] # 日本語用のテキストクリーナー（必要に応じて設定）
+
+    # --- データ分割設定 ---
+    validation_size: 0.05 # 検証セットの割合
+    random_seed: 42 # データ分割のランダムシード
+
+# 学習のグローバル設定
+training:
+  # --- オプティマイザ設定 ---
+  optimizer: "AdamW" # 使用するオプティマイザ名 (torch.optim内のクラス名)
+  learning_rate: 0.001 # 学習率
+  weight_decay: 0.01 # AdamWのweight decay
+  betas: [0.9, 0.98] # Adam/AdamWのbetaパラメータ
+  eps: 1.0e-9 # Adam/AdamWのepsilon
+
+  # --- スケジューラ設定 ---
+  scheduler: "WarmupLR" # 学習率スケジューラの名前 (オプション)
+  warmup_steps: 100 # WarmupLRのウォームアップステップ数
+
+  # --- 学習ループ設定 ---
+  batch_size: 32 # バッチサイズ
+  num_epochs: 100 # 総エポック数
+  grad_clip_thresh: 1.0 # 勾配クリッピングの閾値
+  log_interval: 10 # ログを記録するステップ間隔 (steps)
+  checkpoint_interval: 1 # チェックポイントを保存する間隔 (epochs)
+
+  # --- 学習再開設定 ---
+  auto_resume: true # 学習開始時に自動的に最新のチェックポイントから再開するかどうか
+  checkpoint_retention: 5 # 保持するチェックポイントの数（古いものは自動削除）
+
+# リアルタイム音声認識設定
+realtime:
+  chunk_size_seconds: 1.0 # 音声チャンクのサイズ（秒）
+  buffer_size_seconds: 3.0 # 音声バッファのサイズ（秒）
+  sample_rate: 16000 # サンプルレート
+  min_chunk_length: 0.5 # 最小チャンク長（秒）
+  max_silence_duration: 2.0 # 最大無音時間（秒）
+  silence_threshold: 0.01 # 無音検出の閾値
