@@ -1,0 +1,9 @@
+Match host *.shiron.dev exec "cloudflared access ssh-gen --hostname %h"
+ProxyCommand cloudflared access ssh --hostname %h
+IdentityFile ~/.cloudflared/%h-cf_key
+CertificateFile ~/.cloudflared/%h-cf_key-cert.pub
+
+Host edu-gpu
+HostName gpuwork01.edu.info.suzuka-ct.ac.jp
+IdentityAgent "~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"
+ProxyJump edu-srv.shiron.dev

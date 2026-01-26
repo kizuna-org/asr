@@ -1,15 +1,14 @@
 # kics-scan disable=1c1325ff-831d-43a1-973e-839ae57dfcc0,698ed579-b239-4f8f-a388-baa4bcb13ef8,698ed579-b239-4f8f-a388-baa4bcb13ef8,bc2908f3-f73c-40a9-8793-c1b7d5544f79
-# frp-server/compose.yaml - frpサーバー + Cloudflare Tunnel設定
-
 services:
   frps:
     image: snowdreamtech/frps:latest@sha256:fb8688b1da7fc2f3cfb70bccab427967c4783dba3018c09f3b2b2dcf6ef5571a
     container_name: frps
     volumes:
-      - ./frps.toml:/etc/frp/frps.toml
+      - ./frps/frps.toml:/etc/frp/frps.toml
       - /etc/letsencrypt:/etc/letsencrypt:ro
     ports:
       - 0.0.0.0:443:7000
+      - 0.0.0.0:6000:6000
     restart: unless-stopped
     networks:
       - frp-network
@@ -29,6 +28,8 @@ services:
       - frps
     security_opt:
       - no-new-privileges:true
+    env_file:
+      - .env
 
 networks:
   frp-network:
